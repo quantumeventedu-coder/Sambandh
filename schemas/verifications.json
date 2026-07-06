@@ -1,0 +1,35 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Verification",
+  "type": "object",
+  "required": ["userId", "type", "status", "submittedAt"],
+  "properties": {
+    "_id": { "type": "string" },
+    "userId": { "type": "string" },
+    "type": { "type": "string", "enum": ["id", "selfie", "profession", "education", "income", "medical_license", "bar_license", "ca_license"] },
+    "claim": {
+      "type": "object",
+      "description": "What the user is claiming. Shape varies by type."
+    },
+    "documents": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["type"],
+        "properties": {
+          "type": { "type": "string", "enum": ["offer_letter", "company_id", "linkedin_link", "salary_slip", "degree_cert", "id_document", "selfie", "license_number"] },
+          "url": { "type": "string", "description": "R2 path for documents" },
+          "value": { "type": "string", "description": "For text-based proofs like LinkedIn URL or license number" },
+          "uploadedAt": { "type": "string", "format": "date-time" }
+        }
+      }
+    },
+    "status": { "type": "string", "enum": ["pending", "in_review", "approved", "rejected", "expired"] },
+    "submittedAt": { "type": "string", "format": "date-time" },
+    "reviewedAt": { "type": "string", "format": "date-time" },
+    "reviewedBy": { "type": "string", "description": "Moderator userId or 'system' for automated" },
+    "reviewMethod": { "type": "string", "enum": ["manual", "digilocker", "api_lookup", "automated"] },
+    "rejectionReason": { "type": "string" },
+    "expiresAt": { "type": "string", "format": "date-time" }
+  }
+}

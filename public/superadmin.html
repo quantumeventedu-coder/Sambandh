@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Sambandh — Super Admin</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='38' cy='50' r='26' fill='none' stroke='%23F3C14B' stroke-width='9'/><circle cx='62' cy='50' r='26' fill='none' stroke='%23D4537E' stroke-width='9'/></svg>"/>
+<style>
+  :root { --bg:#14060d; --panel:#1f0d16; --line:#3a2230; --ink:#f0e6ea; --mut:#9d8391;
+          --pink:#D4537E; --gold:#F3C14B; --green:#3fbf72; --red:#e05c5c; }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family:-apple-system,"Segoe UI",Roboto,sans-serif; background:var(--bg); color:var(--ink); font-size:14px; line-height:1.5; }
+  .wrap { max-width:1180px; margin:0 auto; padding:18px 20px 60px; }
+  h1 { font-family:Georgia,serif; font-size:22px; } h1 .sup { color:var(--gold); }
+  .sub { color:var(--mut); font-size:12px; margin-bottom:16px; }
+  .bar { display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:18px; }
+  input, textarea, select { background:var(--panel); border:1px solid var(--line); color:var(--ink);
+    border-radius:8px; padding:9px 12px; font-size:13.5px; outline:none; }
+  input:focus, textarea:focus { border-color:var(--pink); }
+  button { background:var(--pink); border:0; color:#fff; font-weight:700; border-radius:8px;
+    padding:9px 16px; cursor:pointer; font-size:13.5px; }
+  button.ghost { background:transparent; border:1px solid var(--line); color:var(--mut); }
+  button.gold { background:var(--gold); color:#3a2400; }
+  button.red { background:var(--red); }
+  .tabs { display:flex; gap:6px; margin:14px 0 18px; }
+  .tabs button { background:transparent; border:1px solid var(--line); color:var(--mut); }
+  .tabs button.on { background:var(--pink); border-color:var(--pink); color:#fff; }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:16px; margin-bottom:14px; }
+  .stats { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:10px; }
+  .stat { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:14px; }
+  .stat b { display:block; font-size:26px; font-family:Georgia,serif; color:var(--gold); }
+  .stat span { font-size:11.5px; color:var(--mut); letter-spacing:.4px; }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  th, td { text-align:left; padding:8px 10px; border-bottom:1px solid var(--line); vertical-align:top; }
+  th { color:var(--mut); font-size:11px; text-transform:uppercase; letter-spacing:1px; }
+  tr.click { cursor:pointer; } tr.click:hover td { background:rgba(212,83,126,.07); }
+  .pill { display:inline-block; padding:2px 9px; border-radius:99px; font-size:11px; font-weight:700; }
+  .pill.g { background:rgba(63,191,114,.15); color:var(--green); }
+  .pill.y { background:rgba(243,193,75,.15); color:var(--gold); }
+  .pill.r { background:rgba(224,92,92,.15); color:var(--red); }
+  .pill.p { background:rgba(212,83,126,.18); color:var(--pink); }
+  .msg { max-width:74%; padding:8px 12px; border-radius:12px; margin-bottom:8px; background:#2a1520; border:1px solid var(--line); }
+  .msg.b { margin-left:auto; background:#33101f; border-color:#4b2033; }
+  .msg .who { font-size:10.5px; color:var(--gold); font-weight:700; margin-bottom:2px; }
+  .msg .when { font-size:10px; color:var(--mut); margin-top:3px; }
+  .notice { border-left:3px solid var(--gold); background:rgba(243,193,75,.07); padding:10px 14px; border-radius:8px;
+            font-size:12.5px; color:#e8d9b0; margin-bottom:14px; }
+  .grid2 { display:grid; grid-template-columns:1fr 1fr; gap:14px; } @media(max-width:860px){ .grid2{grid-template-columns:1fr} }
+  a.back { color:var(--pink); cursor:pointer; font-size:12.5px; text-decoration:none; display:inline-block; margin-bottom:10px; }
+  pre { white-space:pre-wrap; font-size:12px; color:var(--mut); }
+  #toast { position:fixed; bottom:22px; left:50%; transform:translateX(-50%); background:var(--gold); color:#3a2400;
+           padding:10px 20px; border-radius:99px; font-weight:700; display:none; z-index:99; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>sambandh <span class="sup">/ super admin</span></h1>
+  <div class="sub">Owner-only console. Every content access is permanently audit-logged — including yours.</div>
+
+  <div class="bar">
+    <input id="key" type="password" placeholder="Super admin key" style="flex:1;max-width:340px"/>
+    <button onclick="connect()">Connect</button>
+    <span id="conn" class="pill r">disconnected</span>
+  </div>
+
+  <div id="panel" style="display:none">
+    <div class="tabs">
+      <button id="tb-overview" class="on" onclick="show('overview')">Overview</button>
+      <button id="tb-users" onclick="show('users')">Users &amp; Chats</button>
+      <button id="tb-audit" onclick="show('audit')">Audit trail</button>
+    </div>
+    <div id="view"></div>
+  </div>
+</div>
+<div id="toast"></div>
+
+<script>
+let KEY = null;
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+function toast(m){ const t=$('#toast'); t.textContent=m; t.style.display='block'; setTimeout(()=>t.style.display='none', 3200); }
+
+async function api(path) {
+  const r = await fetch('/api/superadmin' + path, { headers: { 'X-Super-Key': KEY } });
+  const j = await r.json().catch(()=>({}));
+  if (!r.ok) throw new Error(j.error || ('HTTP ' + r.status));
+  return j;
+}
+async function apiPost(path, body) {
+  const r = await fetch('/api/superadmin' + path, { method:'POST',
+    headers: { 'X-Super-Key': KEY, 'Content-Type':'application/json' }, body: JSON.stringify(body) });
+  const j = await r.json().catch(()=>({}));
+  if (!r.ok) throw new Error(j.error || ('HTTP ' + r.status));
+  return j;
+}
+
+async function connect() {
+  KEY = $('#key').value.trim();
+  try {
+    await api('/stats');
+    $('#conn').textContent = 'connected · full access'; $('#conn').className = 'pill g';
+    $('#panel').style.display = 'block';
+    show('overview');
+  } catch (e) {
+    $('#conn').textContent = 'rejected'; $('#conn').className = 'pill r';
+    toast(e.message);
+  }
+}
+
+function show(tab) {
+  ['overview','users','audit'].forEach(t => $('#tb-'+t).classList.toggle('on', t===tab));
+  if (tab==='overview') renderOverview();
+  if (tab==='users') renderUsers();
+  if (tab==='audit') renderAudit();
+}
+
+async function renderOverview() {
+  const s = await api('/stats');
+  $('#view').innerHTML = `
+    <div class="stats">
+      <div class="stat"><b>${s.users.total}</b><span>USERS</span></div>
+      <div class="stat"><b>${s.users.verified}</b><span>ID VERIFIED</span></div>
+      <div class="stat"><b>${s.users.paid}</b><span>JOIN FEE PAID</span></div>
+      <div class="stat"><b>${s.users.pro} / ${s.users.max}</b><span>PRO / MAX</span></div>
+      <div class="stat"><b>${s.users.suspended} / ${s.users.banned}</b><span>SUSPENDED / BANNED</span></div>
+      <div class="stat"><b>${s.chats.total}</b><span>CHATS</span></div>
+      <div class="stat"><b>${s.chats.messages24h}</b><span>MESSAGES · 24H</span></div>
+      <div class="stat"><b>${s.moderation.reportsPending}</b><span>REPORTS PENDING</span></div>
+      <div class="stat"><b>${s.moderation.reportsEscalated}</b><span>AUTO-ESCALATED</span></div>
+      <div class="stat"><b>CHF ${s.revenue.totalCHF}</b><span>REVENUE (${s.revenue.capturedPayments} PAYMENTS)</span></div>
+    </div>
+    <div class="notice" style="margin-top:14px">Chat content access lives under <b>Users &amp; Chats</b> and always
+      requires a written reason. Admins/moderators cannot see message content at all — only you can, and it's logged.</div>`;
+}
+
+async function renderUsers() {
+  $('#view').innerHTML = `
+    <div class="bar">
+      <input id="q" placeholder="Search phone / name / user id…" style="flex:1;max-width:420px"
+             onkeydown="if(event.key==='Enter')searchUsers()"/>
+      <button onclick="searchUsers()">Search</button>
+      <button class="ghost" onclick="searchUsers('')">Latest 25</button>
+    </div>
+    <div id="results"></div><div id="detail"></div>`;
+  searchUsers('');
+}
+
+async function searchUsers(force) {
+  const q = force !== undefined ? force : $('#q').value.trim();
+  const { users } = await api('/users?q=' + encodeURIComponent(q));
+  $('#detail').innerHTML = '';
+  $('#results').innerHTML = `<div class="card"><table>
+    <tr><th>User</th><th>Phone</th><th>Tier</th><th>Karma</th><th>Status</th><th>Last active</th></tr>
+    ${users.map(u => `<tr class="click" onclick="openUser('${u.id}')">
+      <td><b>${esc(u.name)}</b> · ${esc(u.gender||'—')}, ${u.age||'—'} · ${esc(u.city||'—')}</td>
+      <td>${esc(u.phone)}</td>
+      <td><span class="pill ${u.tier==='max'?'y':u.tier==='pro'?'p':'g'}">${u.tier}</span></td>
+      <td>${u.karma}</td>
+      <td>${u.banned?'<span class="pill r">banned</span>':u.suspended?'<span class="pill y">suspended</span>':u.deletedAt?'<span class="pill r">deleting</span>':'<span class="pill g">active</span>'}
+          ${u.idVerified?'':' <span class="pill y">unverified</span>'}</td>
+      <td>${u.lastActiveAt ? new Date(u.lastActiveAt).toLocaleString() : '—'}</td>
+    </tr>`).join('')}
+  </table></div>`;
+}
+
+async function openUser(id) {
+  const d = await api('/users/' + id);
+  const { chats } = await api('/users/' + id + '/chats');
+  const u = d.user;
+  $('#results').innerHTML = '';
+  $('#detail').innerHTML = `
+    <a class="back" onclick="renderUsers()">← back to search</a>
+    <div class="grid2">
+      <div class="card">
+        <h3 style="font-family:Georgia,serif">${esc(u.profile?.displayName || u.profile?.firstName || '—')}
+          <span class="pill p">${esc(u.membership?.tier||'free')}</span></h3>
+        <pre>${esc(u.phone)} · ${esc(u.profile?.gender||'—')}, ${u.profile?.age||'—'} · ${esc(u.profile?.city||'—')}
+Joined ${new Date(u.createdAt).toLocaleDateString()} · Karma ${d.karma?.score ?? 100} · ${d.chatCount} chats
+ID ${u.verification?.idVerified?'✓':'✗'} · Selfie ${u.verification?.selfieVerified?'✓':'✗'} · Fee ${u.membership?.joinFeePaid?'CHF '+(u.membership?.joinFeeAmountCHF??'?')+' paid':'unpaid'}</pre>
+        <div class="bar" style="margin:8px 0 0">
+          <button class="ghost" onclick="act('${u._id}','warn')">Warn</button>
+          <button class="ghost" onclick="act('${u._id}','suspend_24h')">Suspend 24h</button>
+          <button class="ghost" onclick="act('${u._id}','suspend_7d')">Suspend 7d</button>
+          <button class="red" onclick="act('${u._id}','ban')">Ban</button>
+          ${u.status?.suspended?`<button class="gold" onclick="act('${u._id}','unsuspend')">Unsuspend</button>`:''}
+          ${u.status?.banned?`<button class="gold" onclick="act('${u._id}','unban')">Unban</button>`:''}
+        </div>
+      </div>
+      <div class="card">
+        <h3>Reports against: ${d.reportsAgainst.length} · filed: ${d.reportsBy.length} · payments: ${d.payments.length}</h3>
+        <pre>${d.reportsAgainst.slice(0,6).map(r => `[${r.status}] ${r.category} — ${esc((r.description||'').slice(0,80))}`).join('\n') || 'No reports against this user.'}</pre>
+        <pre>${d.payments.slice(0,6).map(p => `${p.status} · ${p.purpose} · CHF ${p.amountCHF}`).join('\n') || 'No payments.'}</pre>
+      </div>
+    </div>
+    <div class="card">
+      <h3 style="margin-bottom:8px">Chats (${chats.length})</h3>
+      <div class="notice">Opening a chat requires a written reason and is permanently recorded in the audit trail.</div>
+      <table><tr><th>With</th><th>Msgs</th><th>Last activity</th><th>Mode</th><th></th></tr>
+        ${chats.map(c => `<tr>
+          <td>${esc(c.with)}</td><td>${c.messageCount}</td>
+          <td>${c.lastMessageAt ? new Date(c.lastMessageAt).toLocaleString() : '—'}</td>
+          <td>${c.anonymous?'<span class="pill y">anonymous</span>':''} ${c.status==='archived'?'<span class="pill r">archived</span>':''}</td>
+          <td><button class="ghost" onclick="openChat('${c.chatId}')">Inspect…</button></td>
+        </tr>`).join('') || '<tr><td colspan="5">No chats.</td></tr>'}
+      </table>
+    </div>`;
+}
+
+async function act(id, action) {
+  const reason = prompt(`Reason for "${action}" (recorded in the audit log):`);
+  if (!reason) return;
+  try { await apiPost('/users/' + id + '/action', { action, reason }); toast('Done: ' + action); openUser(id); }
+  catch (e) { toast(e.message); }
+}
+
+async function openChat(chatId) {
+  const reason = prompt('Written reason for viewing this conversation (min 10 chars — this is permanently audit-logged):');
+  if (!reason) return;
+  try {
+    const d = await api('/chats/' + chatId + '/messages?reason=' + encodeURIComponent(reason));
+    const a = d.chat.participants[0]?.userId;
+    $('#detail').innerHTML = `
+      <a class="back" onclick="renderUsers()">← back</a>
+      <div class="card">
+        <h3 style="margin-bottom:4px">${d.chat.participants.map(p=>esc(p.name)).join(' ⇄ ')}</h3>
+        <div class="sub">${d.messages.length} messages · ${d.chat.anonymous?'anonymous chat · ':''}intent: ${esc(d.chat.intent||'—')}</div>
+        <div class="notice">Access recorded. Reason on file: “${esc(reason)}”</div>
+        ${d.messages.map(m => `<div class="msg ${String(m.fromId)===String(a)?'':'b'}">
+          <div class="who">${esc(m.from)}</div>${esc(m.text)}
+          <div class="when">${new Date(m.createdAt).toLocaleString()}${m.readAt?' · read':''}</div></div>`).join('')}
+      </div>`;
+  } catch (e) { toast(e.message); }
+}
+
+async function renderAudit() {
+  const { entries } = await api('/audit?limit=200');
+  $('#view').innerHTML = `<div class="card"><table>
+    <tr><th>When</th><th>Actor</th><th>Action</th><th>Target</th><th>Detail</th></tr>
+    ${entries.map(e => `<tr>
+      <td style="white-space:nowrap">${new Date(e.createdAt).toLocaleString()}</td>
+      <td>${esc(e.actor)}</td>
+      <td><span class="pill ${e.action==='sa_chat_inspected'?'y':'p'}">${esc(e.action)}</span></td>
+      <td>${esc(e.targetType||'')} ${esc(String(e.targetId||'').slice(-8))}</td>
+      <td><pre style="margin:0">${esc(JSON.stringify(e.detail||{}, null, 0).slice(0, 220))}</pre></td>
+    </tr>`).join('') || '<tr><td colspan="5">No entries yet.</td></tr>'}
+  </table></div>`;
+}
+
+// Dev convenience: in dev mode, pre-fill the dev key so the owner can test instantly.
+fetch('/health').then(r=>r.json()).then(h => {
+  if (h.devMode) { $('#key').value = 'sambandh-super-dev-key'; connect(); }
+}).catch(()=>{});
+</script>
+</body>
+</html>

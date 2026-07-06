@@ -1,0 +1,173 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "User",
+  "description": "User document in MongoDB users collection",
+  "type": "object",
+  "required": ["phone", "phoneVerified", "createdAt", "profile", "verification", "membership", "status"],
+  "properties": {
+    "_id": { "type": "string", "description": "MongoDB ObjectId" },
+    "phone": { "type": "string", "pattern": "^\\+[1-9][0-9]{7,14}$", "description": "E.164 format, e.g. +919876543210" },
+    "phoneVerified": { "type": "boolean" },
+    "email": { "type": "string", "format": "email" },
+    "emailVerified": { "type": "boolean" },
+    "createdAt": { "type": "string", "format": "date-time" },
+    "lastActiveAt": { "type": "string", "format": "date-time" },
+    "profile": {
+      "type": "object",
+      "required": ["firstName", "gender", "dob", "city", "country"],
+      "properties": {
+        "firstName": { "type": "string", "maxLength": 50 },
+        "displayName": { "type": "string", "maxLength": 50 },
+        "gender": { "type": "string", "enum": ["male", "female", "non_binary", "other"] },
+        "dob": { "type": "string", "format": "date" },
+        "age": { "type": "integer", "minimum": 18, "maximum": 99 },
+        "city": { "type": "string" },
+        "state": { "type": "string" },
+        "country": { "type": "string", "minLength": 2, "maxLength": 2 },
+        "languages": { "type": "array", "items": { "type": "string" } },
+        "bio": { "type": "string", "maxLength": 500 },
+        "photos": {
+          "type": "array",
+          "maxItems": 6,
+          "items": {
+            "type": "object",
+            "required": ["url"],
+            "properties": {
+              "url": { "type": "string" },
+              "isPrimary": { "type": "boolean" },
+              "uploadedAt": { "type": "string", "format": "date-time" }
+            }
+          }
+        }
+      }
+    },
+    "intent": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "type": "string", "enum": ["marriage", "dating", "casual", "friendship"] }
+    },
+    "claims": {
+      "type": "object",
+      "properties": {
+        "profession": {
+          "type": "object",
+          "properties": {
+            "title": { "type": "string" },
+            "company": { "type": "string" },
+            "verified": { "type": "boolean" },
+            "verificationId": { "type": "string" }
+          }
+        },
+        "education": {
+          "type": "object",
+          "properties": {
+            "degree": { "type": "string" },
+            "institution": { "type": "string" },
+            "year": { "type": "integer" },
+            "verified": { "type": "boolean" },
+            "verificationId": { "type": "string" }
+          }
+        },
+        "income": {
+          "type": "object",
+          "properties": {
+            "annualINR": { "type": "integer" },
+            "verified": { "type": "boolean" }
+          }
+        },
+        "religion": {
+          "type": "object",
+          "properties": {
+            "value": { "type": "string" },
+            "verified": { "type": "boolean" }
+          }
+        },
+        "height": {
+          "type": "object",
+          "properties": {
+            "cm": { "type": "integer", "minimum": 100, "maximum": 250 }
+          }
+        }
+      }
+    },
+    "astrology": {
+      "type": "object",
+      "properties": {
+        "birthDate": { "type": "string", "format": "date" },
+        "birthTime": { "type": "string", "pattern": "^[0-2][0-9]:[0-5][0-9]$" },
+        "birthPlace": {
+          "type": "object",
+          "properties": {
+            "city": { "type": "string" },
+            "state": { "type": "string" },
+            "lat": { "type": "number" },
+            "lng": { "type": "number" }
+          }
+        },
+        "sunSign": { "type": "string" },
+        "moonSign": { "type": "string" },
+        "rashi": { "type": "string" },
+        "nakshatra": { "type": "string" },
+        "mangalDosha": { "type": "boolean" },
+        "computedAt": { "type": "string", "format": "date-time" }
+      }
+    },
+    "verification": {
+      "type": "object",
+      "required": ["level"],
+      "properties": {
+        "level": { "type": "string", "enum": ["phone_only", "id_verified", "profession_verified", "fully_verified"] },
+        "idVerified": { "type": "boolean" },
+        "idType": { "type": "string", "enum": ["aadhaar", "pan", "driving_license", "passport"] },
+        "idVerifiedAt": { "type": "string", "format": "date-time" },
+        "selfieVerified": { "type": "boolean" },
+        "professionVerified": { "type": "boolean" },
+        "educationVerified": { "type": "boolean" },
+        "incomeVerified": { "type": "boolean" },
+        "trustScore": { "type": "integer", "minimum": 0, "maximum": 100 }
+      }
+    },
+    "membership": {
+      "type": "object",
+      "required": ["joinFeePaid"],
+      "properties": {
+        "joinFeePaid": { "type": "boolean" },
+        "joinFeeAmountCHF": { "type": "number" },
+        "joinFeeAmountUSD": { "type": "number", "description": "legacy, unused" },
+        "joinFeeAmountINR": { "type": "number", "description": "legacy, unused" },
+        "joinFeePaymentId": { "type": "string" },
+        "paidAt": { "type": "string", "format": "date-time" },
+        "tier": { "type": "string", "enum": ["free", "pro", "max"] }
+      }
+    },
+    "preferences": {
+      "type": "object",
+      "properties": {
+        "interestedInGenders": { "type": "array", "items": { "type": "string" } },
+        "ageRange": {
+          "type": "object",
+          "properties": {
+            "min": { "type": "integer" },
+            "max": { "type": "integer" }
+          }
+        },
+        "maxDistanceKm": { "type": "integer" },
+        "intentFilter": { "type": "array", "items": { "type": "string" } },
+        "anonymousModeEnabled": { "type": "boolean" },
+        "showProfessionToOthers": { "type": "boolean" },
+        "showAstrologyToOthers": { "type": "boolean" },
+        "allowNSFWChats": { "type": "boolean" }
+      }
+    },
+    "status": {
+      "type": "object",
+      "required": ["active"],
+      "properties": {
+        "active": { "type": "boolean" },
+        "suspended": { "type": "boolean" },
+        "banned": { "type": "boolean" },
+        "deletedAt": { "type": ["string", "null"], "format": "date-time" }
+      }
+    }
+  }
+}

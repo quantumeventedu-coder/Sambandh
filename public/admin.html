@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Sambandh — Moderator Panel</title>
+<style>
+:root{--sindoor:#993556;--deep:#4B1528;--rose-soft:#FBEAF0;--haldi:#FAC775;--haldi-soft:#FAEEDA;
+--forest:#085041;--forest-soft:#E1F5EE;--sand:#F1EFE8;--sand-mid:#D3D1C7;--ink:#2C2C2A;
+--ink-mid:#5F5E5A;--danger:#A32D2D;}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:var(--sand);color:var(--ink);font-size:14px}
+header{background:var(--deep);color:var(--rose-soft);padding:14px 24px;display:flex;justify-content:space-between;align-items:center}
+header .wm{font-family:Georgia,serif;font-size:22px;font-weight:700}
+header .wm small{font-family:inherit;font-size:11px;opacity:0.6;display:block;letter-spacing:0.08em;text-transform:uppercase}
+main{max-width:960px;margin:0 auto;padding:24px}
+h2{font-size:17px;color:var(--deep);margin:22px 0 10px;padding-bottom:6px;border-bottom:1.5px solid var(--rose-soft)}
+.card{background:white;border:1px solid var(--sand-mid);border-radius:12px;padding:16px;margin-bottom:12px}
+.row{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+button{border:none;border-radius:8px;padding:8px 16px;font-size:13px;font-weight:600;cursor:pointer}
+.approve{background:var(--forest);color:white}
+.reject{background:white;color:var(--danger);border:1px solid var(--danger)}
+.warn{background:var(--haldi);color:var(--deep)}
+.ban{background:var(--danger);color:white}
+.tag{display:inline-block;background:var(--rose-soft);color:var(--sindoor);border-radius:14px;padding:2px 10px;font-size:11px;font-weight:600;margin-right:6px}
+.tag.f{background:var(--forest-soft);color:var(--forest)}
+.tag.h{background:var(--haldi-soft);color:#854F0B}
+input,select,textarea{padding:10px;border:1px solid var(--sand-mid);border-radius:8px;font-size:14px;font-family:inherit}
+.muted{color:var(--ink-mid);font-size:12.5px}
+.empty{text-align:center;color:var(--ink-mid);padding:30px}
+#login{max-width:420px;margin:80px auto;text-align:center}
+.stat-row{display:flex;gap:12px;margin-bottom:8px}
+.stat{flex:1;background:white;border:1px solid var(--sand-mid);border-radius:12px;padding:14px;text-align:center}
+.stat b{font-size:26px;font-family:Georgia,serif;color:var(--deep);display:block}
+.stat span{font-size:11px;color:var(--ink-mid);text-transform:uppercase;letter-spacing:0.05em}
+nav.tabs{display:flex;gap:8px;margin-top:16px}
+nav.tabs button{background:white;border:1px solid var(--sand-mid);color:var(--ink)}
+nav.tabs button.active{background:var(--sindoor);color:white;border-color:var(--sindoor)}
+</style>
+</head>
+<body>
+<header>
+  <div class="wm">sambandh <small>Moderator panel</small></div>
+  <div id="who" class="muted" style="color:rgba(255,255,255,0.6)"></div>
+</header>
+
+<div id="login">
+  <div class="card">
+    <h2 style="margin-top:0;border:none">Moderator sign-in</h2>
+    <p class="muted" style="margin-bottom:12px">Enter the admin key (ADMIN_API_KEY in the server .env)</p>
+    <input id="key" type="password" placeholder="Admin key" style="width:100%;margin-bottom:10px"/>
+    <button class="approve" style="width:100%" onclick="login()">Enter panel</button>
+  </div>
+</div>
+
+<script>
+// Dev convenience: pre-fill the dev admin key so the panel is testable instantly.
+fetch('/health').then(r=>r.json()).then(h => {
+  if (h.devMode) { document.getElementById('key').value = 'sambandh-admin-dev-key'; login(); }
+}).catch(()=>{});
+</script>
+
+<main id="panel" style="display:none">
+  <div class="stat-row">
+    <div class="stat"><b id="st-ver">–</b><span>auto-verify decisions</span></div>
+    <div class="stat"><b id="st-rep">–</b><span>open reports</span></div>
+    <div class="stat"><b id="st-dis">–</b><span>open disputes</span></div>
+  </div>
+  <nav class="tabs">
+    <button id="tab-ver" class="active" onclick="show('ver')">Verification queue</button>
+    <button id="tab-rep" onclick="show('rep')">Reports queue</button>
+    <button id="tab-dis" onclick="show('dis')">Karma disputes</button>
+    <button id="tab-act" onclick="show('act')">Activity & audit</button>
+  </nav>
+  <section id="sec-ver"><h2>Automated verification decisions (oversight — override only for appeals)</h2><div id="ver-list"></div></section>
+  <section id="sec-rep" style="display:none"><h2>User reports (24h SLA — IT Rules 2021)</h2><div id="rep-list"></div></section>
+  <section id="sec-dis" style="display:none"><h2>Karma Book disputes (7-day SLA)</h2><div id="dis-list"></div></section>
+  <section id="sec-act" style="display:none">
+    <h2>Platform events — last 7 days</h2><div id="events-list"></div>
+    <h2>Audit log — moderator actions</h2><div id="audit-list"></div>
+  </section>
+</main>
+
+<script>
+'use strict';
+let KEY = sessionStorage.getItem('sb_admin_key') || '';
+
+function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
+
+async function api(path, opts={}) {
+  const res = await fetch('/api'+path, {...opts,
+    headers: {'Content-Type':'application/json','x-admin-key':KEY},
+    body: opts.body ? JSON.stringify(opts.body) : undefined});
+  const data = await res.json().catch(()=>({}));
+  if (!res.ok) throw new Error(data.error || 'Request failed');
+  return data;
+}
+
+async function login() {
+  KEY = document.getElementById('key').value.trim();
+  try {
+    await api('/verification/admin/queue');
+    sessionStorage.setItem('sb_admin_key', KEY);
+    document.getElementById('login').style.display='none';
+    document.getElementById('panel').style.display='block';
+    document.getElementById('who').textContent='moderator · key accepted';
+    refresh();
+  } catch(e) { alert('Key rejected: '+e.message); }
+}
+
+function show(which) {
+  for (const t of ['ver','rep','dis','act']) {
+    document.getElementById('sec-'+t).style.display = t===which?'block':'none';
+    document.getElementById('tab-'+t).classList.toggle('active', t===which);
+  }
+}
+
+async function refresh() {
+  try {
+    const v = await api('/verification/admin/queue');
+    document.getElementById('st-ver').textContent = v.verifications.length;
+    document.getElementById('ver-list').innerHTML = v.verifications.length ? v.verifications.map(x=>`
+      <div class="card">
+        <div class="row" style="justify-content:space-between">
+          <div>
+            <span class="tag">${esc(x.type)}</span>
+            <b>${esc(x.userId?.profile?.firstName || 'Unknown')}</b>
+            <span class="muted">· ${esc(x.userId?.profile?.city||'')} · ${esc(x.userId?.phone||'')}</span>
+            <div class="muted" style="margin-top:4px">${esc(JSON.stringify(x.claim||{}))}</div>
+            <div class="muted">Docs: ${(x.documents||[]).map(d=>d.url?`<a href="${esc(d.url)}" target="_blank">${esc(d.type)}</a>`:esc(d.type+': '+(d.value||''))).join(' · ')||'none'}</div>
+            <div class="muted">Submitted ${new Date(x.submittedAt).toLocaleString()}</div>
+          </div>
+          <div class="row">
+            <button class="approve" onclick="decide('${x._id}','approve')">Approve ✓</button>
+            <button class="reject" onclick="decide('${x._id}','reject')">Reject</button>
+          </div>
+        </div>
+      </div>`).join('') : '<div class="empty">Queue is empty</div>';
+
+    const r = await api('/report/admin/queue');
+    document.getElementById('st-rep').textContent = r.reports.length;
+    document.getElementById('rep-list').innerHTML = r.reports.length ? r.reports.map(x=>`
+      <div class="card">
+        <span class="tag h">${esc(x.category)}</span>
+        ${x.autoEscalated ? '<span class="tag" style="background:#FCEBEB;color:var(--danger)">AUTO-ESCALATED · 5+ reporters</span>' : ''}
+        ${x.source === 'system' ? '<span class="tag" style="background:#EEF2FB;color:#3B5BA5">KARMA AI · auto-filed</span>' : ''}
+        <b>Against: ${esc(x.reportedUserId?.profile?.firstName||'Unknown')}</b>
+        <span class="muted">· by ${x.source === 'system' ? 'Karma AI (system)' : esc(x.reporterId?.profile?.firstName||'Unknown')} · ${new Date(x.createdAt).toLocaleString()}</span>
+        <p style="margin:8px 0">${esc(x.description||'')}</p>
+        <div class="row">
+          <button class="warn" onclick="act('${x._id}','warning')">Warn</button>
+          <button class="warn" onclick="act('${x._id}','suspend_24h')">Suspend 24h</button>
+          <button class="warn" onclick="act('${x._id}','suspend_7d')">Suspend 7d</button>
+          <button class="ban" onclick="act('${x._id}','ban_permanent')">Ban</button>
+          <button onclick="act('${x._id}','no_action')" style="background:white;border:1px solid var(--sand-mid)">No action</button>
+        </div>
+      </div>`).join('') : '<div class="empty">No open reports</div>';
+
+    const d = await api('/karma/admin/disputes');
+    document.getElementById('st-dis').textContent = d.disputes.length;
+    document.getElementById('dis-list').innerHTML = d.disputes.length ? d.disputes.map(x=>`
+      <div class="card">
+        <span class="tag">${esc(x.flagCategory)}</span>
+        <b>${esc(x.userId?.profile?.firstName||'Unknown')}</b>
+        <span class="muted">· current karma ${x.currentScore} · filed ${new Date(x.createdAt).toLocaleString()}</span>
+        <p style="margin:8px 0"><i>"${esc(x.reason||'')}"</i></p>
+        <div class="row">
+          <button class="approve" onclick="resolveDispute('${x._id}','cleared')">Clear flag (+10)</button>
+          <button class="warn" onclick="resolveDispute('${x._id}','partial')">Partial clear (+5)</button>
+          <button class="reject" onclick="resolveDispute('${x._id}','upheld')">Uphold flag</button>
+        </div>
+      </div>`).join('') : '<div class="empty">No open disputes</div>';
+
+    const a = await api('/analytics/admin/summary');
+    document.getElementById('events-list').innerHTML = a.events.length
+      ? `<div class="card">${a.events.map(e=>`<div class="row" style="justify-content:space-between;padding:4px 0"><span>${esc(e.name)}</span><b>${e.count}</b></div>`).join('')}</div>`
+      : '<div class="empty">No events yet</div>';
+    document.getElementById('audit-list').innerHTML = a.audit.length
+      ? a.audit.map(x=>`<div class="card" style="padding:10px 14px"><b>${esc(x.action)}</b>
+          <span class="muted">· by ${esc(x.actor)} · ${new Date(x.createdAt).toLocaleString()}</span>
+          <div class="muted">${esc(JSON.stringify(x.detail||{}))}</div></div>`).join('')
+      : '<div class="empty">No moderator actions logged yet</div>';
+  } catch(e) { alert(e.message); }
+}
+
+async function resolveDispute(id, resolution) {
+  try { await api(`/karma/admin/disputes/${id}/resolve`, {method:'POST', body:{resolution}}); refresh(); }
+  catch(e) { alert(e.message); }
+}
+
+async function decide(id, what) {
+  try {
+    if (what==='approve') await api(`/verification/admin/${id}/approve`, {method:'POST'});
+    else {
+      const reason = prompt('Rejection reason (sent to the user):');
+      if (!reason) return;
+      await api(`/verification/admin/${id}/reject`, {method:'POST', body:{reason}});
+    }
+    refresh();
+  } catch(e) { alert(e.message); }
+}
+
+async function act(id, action) {
+  if ((action==='ban_permanent') && !confirm('Permanently ban this user?')) return;
+  try { await api(`/report/admin/${id}/action`, {method:'POST', body:{action}}); refresh(); }
+  catch(e) { alert(e.message); }
+}
+
+if (KEY) { document.getElementById('key').value = KEY; login(); }
+</script>
+</body>
+</html>

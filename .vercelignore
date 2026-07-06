@@ -1,0 +1,8 @@
+uploads
+tests
+docs
+api-examples
+schemas
+*.cmd
+jest.config.js
+eslint.config.js

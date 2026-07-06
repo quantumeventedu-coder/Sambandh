@@ -1,0 +1,46 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Message",
+  "type": "object",
+  "required": ["chatId", "from", "to", "text", "type", "createdAt"],
+  "properties": {
+    "_id": { "type": "string" },
+    "chatId": { "type": "string" },
+    "from": { "type": "string" },
+    "to": { "type": "string" },
+    "text": { "type": "string", "maxLength": 5000 },
+    "type": { "type": "string", "enum": ["text", "image", "voice", "system"] },
+    "createdAt": { "type": "string", "format": "date-time" },
+    "readAt": { "type": ["string", "null"], "format": "date-time" },
+    "attachments": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "url": { "type": "string" },
+          "type": { "type": "string", "enum": ["image", "voice"] },
+          "size": { "type": "integer" }
+        }
+      }
+    },
+    "moderation": {
+      "type": "object",
+      "properties": {
+        "flagged": { "type": "boolean" },
+        "flagReason": { "type": ["string", "null"] },
+        "containsNSFW": { "type": "boolean" },
+        "containsPII": { "type": "boolean" },
+        "moderatedAt": { "type": ["string", "null"], "format": "date-time" }
+      }
+    },
+    "behaviorSignals": {
+      "type": "object",
+      "properties": {
+        "sentiment": { "type": "string", "enum": ["positive", "neutral", "negative"] },
+        "respectScore": { "type": "number", "minimum": 0, "maximum": 10 },
+        "analyzedAt": { "type": "string", "format": "date-time" }
+      }
+    },
+    "deleted": { "type": "boolean" }
+  }
+}

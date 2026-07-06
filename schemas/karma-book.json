@@ -1,0 +1,91 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "KarmaBook",
+  "description": "Per-user behavioral truth ledger. Aggregates lies, contradictions, manipulation flags, and fraud signals.",
+  "type": "object",
+  "required": ["userId", "score", "lastUpdatedAt"],
+  "properties": {
+    "_id": { "type": "string" },
+    "userId": { "type": "string" },
+    "score": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 100,
+      "description": "Starts at 100, only goes down. Recovers slowly with consistent honest behavior."
+    },
+    "grade": { "type": "string", "enum": ["A+", "A", "A-", "B+", "B", "C", "D", "F"] },
+    "lies": {
+      "type": "array",
+      "description": "Claims that contradict verifiable platform reality",
+      "items": {
+        "type": "object",
+        "properties": {
+          "claimId": { "type": "string" },
+          "severity": { "type": "string", "enum": ["low", "medium", "high"] },
+          "reason": { "type": "string" },
+          "factCheckable": { "type": "boolean" },
+          "evidenceCount": { "type": "integer" },
+          "recordedAt": { "type": "string", "format": "date-time" }
+        }
+      }
+    },
+    "contradictions": {
+      "type": "array",
+      "description": "Statements that contradict the user's own previous statements",
+      "items": {
+        "type": "object",
+        "properties": {
+          "claimId": { "type": "string" },
+          "conflictsWith": { "type": "string" },
+          "type": { "type": "string" },
+          "severity": { "type": "string", "enum": ["low", "medium", "high"] },
+          "reason": { "type": "string" },
+          "recordedAt": { "type": "string", "format": "date-time" }
+        }
+      }
+    },
+    "manipulationFlags": {
+      "type": "array",
+      "description": "Patterns like love-bombing, off-platform redirects, gaslighting",
+      "items": {
+        "type": "object",
+        "properties": {
+          "pattern": { "type": "string" },
+          "confidence": { "type": "string", "enum": ["low", "medium", "high"] },
+          "evidence": { "type": "string" },
+          "recordedAt": { "type": "string", "format": "date-time" }
+        }
+      }
+    },
+    "fraudFlags": {
+      "type": "array",
+      "description": "Fraud-gang patterns: device clusters, scripted messages, money requests",
+      "items": {
+        "type": "object",
+        "properties": {
+          "type": { "type": "string", "enum": ["device_cluster", "scripted_messages", "money_request_pattern", "id_reuse", "payment_scam"] },
+          "severity": { "type": "string", "enum": ["low", "medium", "high", "critical"] },
+          "detail": { "type": "string" },
+          "recordedAt": { "type": "string", "format": "date-time" }
+        }
+      }
+    },
+    "activitySignals": {
+      "type": "object",
+      "description": "Computed transparency signals shown openly on profile",
+      "properties": {
+        "activeChats": { "type": "integer" },
+        "newChats7d": { "type": "integer" },
+        "exclusivityClaimedToCount": { "type": "integer" },
+        "loveStatementsCount": { "type": "integer" },
+        "loveRecipientsCount": { "type": "integer" },
+        "avgResponseMin": { "type": ["number", "null"] }
+      }
+    },
+    "timesNotified": {
+      "type": "integer",
+      "description": "How many times the user has been privately warned. First offense: warning only, no public flag."
+    },
+    "lastUpdatedAt": { "type": "string", "format": "date-time" }
+  }
+}

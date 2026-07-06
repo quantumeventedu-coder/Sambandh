@@ -1,0 +1,56 @@
+### Sambandh API examples — verification flow
+
+@host = http://localhost:3010
+@token = PASTE_TOKEN
+
+### Submit profession for verification
+### Documents must be base64-encoded
+POST {{host}}/api/verification/profession
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "title": "Mechanical Engineer",
+  "company": "Tata Motors",
+  "startDate": "2020-07-01",
+  "linkedinUrl": "https://linkedin.com/in/arjunkalita",
+  "documents": [
+    {
+      "type": "offer_letter",
+      "filename": "tata_offer.pdf",
+      "base64": "JVBERi0xLjQKJ..."
+    },
+    {
+      "type": "company_id",
+      "filename": "id_card.jpg",
+      "base64": "/9j/4AAQSkZJRg..."
+    }
+  ]
+}
+
+###
+
+### Get my verifications
+GET {{host}}/api/verification/me
+Authorization: Bearer {{token}}
+
+###
+
+### --- Admin only ---
+
+### Approve a verification
+POST {{host}}/api/verification/admin/PASTE_VERIFICATION_ID/approve
+Authorization: Bearer {{adminToken}}
+
+###
+
+### Reject a verification
+POST {{host}}/api/verification/admin/PASTE_VERIFICATION_ID/reject
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{
+  "reason": "Offer letter unclear, please re-upload a clearer scan."
+}
+
+###

@@ -1,0 +1,47 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Chat",
+  "type": "object",
+  "required": ["participants", "createdAt", "status"],
+  "properties": {
+    "_id": { "type": "string" },
+    "participants": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 2,
+      "items": { "type": "string" }
+    },
+    "createdAt": { "type": "string", "format": "date-time" },
+    "lastMessageAt": { "type": "string", "format": "date-time" },
+    "messageCount": { "type": "integer", "minimum": 0 },
+    "anonymity": {
+      "type": "object",
+      "properties": {
+        "isAnonymous": { "type": "boolean" },
+        "userA_revealed": { "type": "boolean" },
+        "userB_revealed": { "type": "boolean" },
+        "revealedAt": { "type": ["string", "null"], "format": "date-time" }
+      }
+    },
+    "intent": { "type": "string", "enum": ["marriage", "dating", "casual", "friendship"] },
+    "status": { "type": "string", "enum": ["active", "archived", "blocked"] },
+    "moderation": {
+      "type": "object",
+      "properties": {
+        "flaggedMessages": { "type": "integer" },
+        "lastFlagReviewedAt": { "type": ["string", "null"], "format": "date-time" },
+        "isNSFW": { "type": "boolean" }
+      }
+    },
+    "engagement": {
+      "type": "object",
+      "properties": {
+        "balanceScore": { "type": "number", "minimum": 0, "maximum": 1 },
+        "avgResponseTimeMinutes": { "type": "number" },
+        "deepConversationFlag": { "type": "boolean" },
+        "lastComputedAt": { "type": "string", "format": "date-time" }
+      }
+    },
+    "deletedBy": { "type": "array", "items": { "type": "string" } }
+  }
+}

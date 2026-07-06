@@ -1,0 +1,71 @@
+### Sambandh API examples — chat flow
+
+@host = http://localhost:3010
+@token = PASTE_TOKEN
+
+### Get my conversations
+GET {{host}}/api/chat
+Authorization: Bearer {{token}}
+
+###
+
+### Start a chat with another verified user
+POST {{host}}/api/chat/start
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "withUserId": "OTHER_USER_ID",
+  "anonymous": false,
+  "intent": "dating"
+}
+
+###
+
+### Get messages for a chat
+GET {{host}}/api/chat/PASTE_CHAT_ID/messages
+Authorization: Bearer {{token}}
+
+###
+
+### Send a message
+POST {{host}}/api/chat/PASTE_CHAT_ID/messages
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "text": "Hey! Saw you also did the Hampta Pass — how was it?"
+}
+
+###
+
+### Reveal identity in anonymous chat (mutual consent required)
+POST {{host}}/api/chat/PASTE_CHAT_ID/reveal
+Authorization: Bearer {{token}}
+
+###
+
+### --- Payment flow ---
+
+### Create order for join fee
+POST {{host}}/api/payment/create-order
+Authorization: Bearer {{token}}
+
+### Response will include:
+### { "orderId": "order_xxx", "amount": 100, "amountCHF": 1, "currency": "CHF", ... }
+### Use this in Razorpay Checkout on the frontend.
+
+###
+
+### Verify payment after Razorpay returns success
+POST {{host}}/api/payment/verify
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "razorpay_order_id": "order_xxx",
+  "razorpay_payment_id": "pay_xxx",
+  "razorpay_signature": "xxx"
+}
+
+###

@@ -1,0 +1,17 @@
+node_modules/
+uploads/
+.env
+.env.local
+.env.production
+*.log
+.DS_Store
+.vscode/
+.idea/
+dist/
+build/
+coverage/
+*.pem
+*.key
+firebase-service-account.json
+
+.vercel

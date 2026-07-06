@@ -1,0 +1,54 @@
+### Sambandh API examples — signup flow
+### Use the REST Client extension in VS Code to run these directly
+
+@host = http://localhost:3010
+@phone = +919876543210
+
+### 1. Request OTP (frontend handles via Firebase SDK actually)
+POST {{host}}/api/auth/request-otp
+Content-Type: application/json
+
+{
+  "phone": "{{phone}}"
+}
+
+###
+
+### 2. Verify OTP — exchange Firebase ID token for our JWT
+POST {{host}}/api/auth/verify-otp
+Content-Type: application/json
+
+{
+  "phone": "{{phone}}",
+  "firebaseIdToken": "PASTE_FIREBASE_ID_TOKEN_HERE"
+}
+
+### Response will include:
+### { "token": "...", "user": { "id": "...", "phone": "...", "hasProfile": false, ... } }
+### Save the token for subsequent requests.
+
+###
+
+@token = PASTE_TOKEN_FROM_PREVIOUS_RESPONSE
+
+### 3. Complete signup — fill basic profile
+POST {{host}}/api/auth/complete-signup
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "firstName": "Arjun",
+  "gender": "male",
+  "dob": "1997-08-15",
+  "city": "Dibrugarh",
+  "state": "Assam",
+  "languages": ["assamese", "hindi", "english"]
+}
+
+###
+
+### 4. Get current user
+GET {{host}}/api/auth/me
+Authorization: Bearer {{token}}
+
+###

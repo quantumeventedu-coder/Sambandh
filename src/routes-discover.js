@@ -1,0 +1,330 @@
+// routes-discover.js — ranked discover feed, likes/passes/matches, public profiles
+//
+// Ranking (spec §2.3.1):
+//   discoverScore =
+//     (trustScore/100)×0.30 + (karmaScore/100)×0.25 + intentMatch×0.20
+//   + distanceScore×0.15 + astroCompatPct/100×0.10   (0.5 neutral if no astro data)
+//
+// Distance uses city centroids (Haversine), 1.0 under 5km with linear decay to 0
+// at the viewer's maxDistanceKm. Same city = maximum score.
+
+const express = require('express');
+const User = require('./models/User');
+const KarmaBook = require('./models/KarmaBook');
+const Reputation = require('./models/Reputation');
+const Chat = require('./models/Chat');
+const Message = require('./models/Message');
+const Like = require('./models/Like');
+const Pass = require('./models/Pass');
+const Notification = require('./models/Notification');
+const { requireAuth } = require('./routes-auth');
+const { computeActivitySignals } = require('./karma-book');
+const { cityDistanceKm } = require('./data/cities');
+
+const router = express.Router();
+
+const GRADE_MIN = { 'A+': 95, 'A': 90, 'A-': 85, 'B+': 80, 'B': 70, 'C': 60 };
+
+function scoreToGrade(s) {
+  if (s >= 95) return 'A+';
+  if (s >= 90) return 'A';
+  if (s >= 85) return 'A-';
+  if (s >= 80) return 'B+';
+  if (s >= 70) return 'B';
+  if (s >= 60) return 'C';
+  if (s >= 40) return 'D';
+  return 'F';
+}
+
+function distanceScore(km, maxKm) {
+  if (km === null) return 0.3;         // unknown city — mild penalty, not exclusion
+  if (km <= 5) return 1.0;
+  if (km >= maxKm) return 0;
+  return 1 - (km - 5) / (maxKm - 5);
+}
+
+// GET /api/discover — ranked, filtered feed
+router.get('/', requireAuth, async (req, res, next) => {
+  try {
+    const me = await User.findById(req.userId);
+    if (!me) return res.status(404).json({ error: 'User not found' });
+
+    const page = Math.max(1, parseInt(req.query.page) || 1);
+    const pageSize = Math.min(30, parseInt(req.query.pageSize) || 20);
+    const maxKm = req.query.maxKm === 'anywhere' ? Infinity : (parseInt(req.query.maxKm) || me.preferences?.maxDistanceKm || 50);
+
+    // Hard exclusions done in the query where possible (spec §2.3.1)
+    const filter = {
+      _id: { $ne: me._id },
+      'status.active': true,
+      'status.banned': { $ne: true },
+      'profile.firstName': { $exists: true, $ne: null },
+      'membership.joinFeePaid': true,
+      'verification.idVerified': true,
+      blockedUsers: { $ne: me._id },            // they blocked me
+      incognitoBlockList: { $ne: me._id }       // incognito: hidden from me specifically
+    };
+    if ((me.blockedUsers || []).length) filter._id.$nin = me.blockedUsers;
+
+    if (me.preferences?.interestedInGenders?.length) {
+      filter['profile.gender'] = { $in: me.preferences.interestedInGenders };
+    }
+    if (req.query.intent && req.query.intent !== 'all') filter.intent = req.query.intent;
+
+    const minAge = parseInt(req.query.minAge) || 18;
+    const maxAge = parseInt(req.query.maxAge) || 60;
+    filter['profile.age'] = { $gte: minAge, $lte: maxAge };
+
+    if (req.query.language && req.query.language !== 'any') filter['profile.languages'] = req.query.language;
+    if (req.query.verification === 'id') filter['verification.idVerified'] = true;
+    if (req.query.verification === 'profession') filter['verification.professionVerified'] = true;
+    if (req.query.verification === 'fully_verified') filter['verification.level'] = 'fully_verified';
+    if (req.query.showAnonymous === 'false') filter['preferences.anonymousModeEnabled'] = { $ne: true };
+    if (req.query.onlineOnly === 'true') filter.lastActiveAt = { $gt: new Date(Date.now() - 24 * 3600 * 1000) };
+
+    // Passed profiles are hidden for 7 days (Pass docs TTL out automatically)
+    const passed = await Pass.find({ from: me._id }).select('to').lean();
+    const passedIds = passed.map(p => p.to.toString());
+
+    const candidates = await User.find(filter).limit(400);
+
+    const ids = candidates.map(c => c._id);
+    const [books, reps, myLikes, likedMe] = await Promise.all([
+      KarmaBook.find({ userId: { $in: ids } }),
+      Reputation.find({ userId: { $in: ids } }),
+      Like.find({ from: me._id }).select('to').lean(),
+      Like.find({ to: me._id, from: { $in: ids } }).select('from').lean()
+    ]);
+    const bookBy = Object.fromEntries(books.map(b => [b.userId.toString(), b]));
+    const repBy = Object.fromEntries(reps.map(r => [r.userId.toString(), r]));
+    const iLiked = new Set(myLikes.map(l => l.to.toString()));
+    const theyLiked = new Set(likedMe.map(l => l.from.toString()));
+
+    const myIntents = new Set(me.intent || []);
+    // Karma-grade filtering is a Sambandh Max perk (advanced filters)
+    if (req.query.karmaGrade && req.query.karmaGrade !== 'any' && !maxTierActive(me)) {
+      return res.status(403).json({ error: 'Filtering by karma grade is a Sambandh Max perk (CHF 15/month).', requiredTier: 'max' });
+    }
+    const wantGrade = req.query.karmaGrade && req.query.karmaGrade !== 'any' ? GRADE_MIN[req.query.karmaGrade] : null;
+
+    const ranked = [];
+    for (const u of candidates) {
+      const uid = u._id.toString();
+      if (passedIds.includes(uid)) continue;
+
+      // Suspended users are hidden while suspension is in force
+      if (u.status?.suspended && (!u.suspension?.endsAt || u.suspension.endsAt > new Date())) continue;
+
+      const karmaScore = bookBy[uid]?.score ?? 100;
+      if (karmaScore < 40) continue;           // F grade — hidden entirely
+      if (wantGrade !== null && karmaScore < wantGrade) continue;
+
+      const km = cityDistanceKm(me.profile?.city, u.profile?.city);
+      if (km !== null && isFinite(maxKm) && km > maxKm) continue;
+
+      const intentMatch = (u.intent || []).some(i => myIntents.has(i)) ? 1 : 0;
+      const dScore = distanceScore(km, isFinite(maxKm) ? maxKm : 5000);
+      const astro = 0.5; // neutral until pair-level compat is computed on demand
+
+      const score =
+        (u.verification?.trustScore || 0) / 100 * 0.30 +
+        karmaScore / 100 * 0.25 +
+        intentMatch * 0.20 +
+        dScore * 0.15 +
+        astro * 0.10;
+
+      const rep = repBy[uid];
+      const anonymous = !!u.preferences?.anonymousModeEnabled;
+      ranked.push({
+        userId: u._id,
+        firstName: anonymous ? 'Anonymous' : (u.profile.displayName || u.profile.firstName),
+        anonymous,
+        age: u.profile.age,
+        city: anonymous ? u.profile.state : u.profile.city,
+        distanceKm: km,
+        intent: u.intent || [],
+        verificationLevel: u.verification?.level,
+        profession: !anonymous && u.preferences?.showProfessionToOthers !== false ? u.claims?.profession?.title : null,
+        professionVerified: !!u.claims?.profession?.verified,
+        karma: { score: karmaScore, grade: scoreToGrade(karmaScore) },
+        tagsPositive: (rep?.tagsPositive || []).slice(0, 2).map(t => t.tag),
+        tagsNegative: (rep?.tagsNegative || []).slice(0, 1).map(t => t.tag),
+        bio: (u.profile.bio || '').slice(0, 180),
+        photo: anonymous ? null : (u.profile.photos?.find(p => p.isPrimary)?.url || u.profile.photos?.[0]?.url || null),
+        likedByMe: iLiked.has(uid),
+        likesMe: theyLiked.has(uid),
+        online: u.lastActiveAt > new Date(Date.now() - 24 * 3600 * 1000),
+        _score: +score.toFixed(4)
+      });
+    }
+
+    ranked.sort((a, b) => b._score - a._score);
+    const start = (page - 1) * pageSize;
+    res.json({ page, pageSize, total: ranked.length, profiles: ranked.slice(start, start + pageSize) });
+  } catch (err) { next(err); }
+});
+
+// POST /api/discover/:userId/like — like; mutual like creates a match + chat
+router.post('/:userId/like', requireAuth, async (req, res, next) => {
+  try {
+    const targetId = req.params.userId;
+    if (targetId === req.userId) return res.status(400).json({ error: 'Cannot like yourself' });
+    const target = await User.findById(targetId);
+    if (!target || !target.status?.active) return res.status(404).json({ error: 'User not found' });
+
+    await Like.findOneAndUpdate(
+      { from: req.userId, to: targetId },
+      { $setOnInsert: { createdAt: new Date() } },
+      { upsert: true });
+    await Pass.deleteOne({ from: req.userId, to: targetId }); // liking overrides a past pass
+
+    // Mutual like → match (spec §2.3.2)
+    const reciprocal = await Like.findOne({ from: targetId, to: req.userId });
+    if (!reciprocal) return res.json({ ok: true, matched: false });
+
+    let chat = await Chat.findOne({ participants: { $all: [req.userId, targetId], $size: 2 } });
+    let isNewMatch = false;
+    if (!chat) {
+      isNewMatch = true;
+      const me = await User.findById(req.userId);
+      chat = await Chat.create({
+        participants: [req.userId, targetId],
+        createdAt: new Date(), lastMessageAt: new Date(), messageCount: 1,
+        anonymity: { isAnonymous: false, userA_revealed: false, userB_revealed: false },
+        intent: (me.intent || [])[0] || 'dating',
+        status: 'active'
+      });
+      const nameA = me.profile?.displayName || me.profile?.firstName || 'You';
+      const nameB = target.profile?.displayName || target.profile?.firstName || 'they';
+      await Message.create({
+        chatId: chat._id, from: req.userId, to: targetId,
+        text: `You matched! ${nameA} and ${nameB} both liked each other.`,
+        type: 'system', createdAt: new Date()
+      });
+      for (const uid of [req.userId, targetId]) {
+        await Notification.create({
+          userId: uid, type: 'new_match', severity: 'info',
+          title: 'New match!',
+          body: 'You both liked each other. Say hello — good conversations build good Karma.'
+        });
+      }
+      const io = req.app.get('io');
+      if (io) {
+        io.to('user:' + targetId).emit('new_match', { chatId: chat._id });
+        io.to('user:' + req.userId).emit('new_match', { chatId: chat._id });
+      }
+      require('./services/analytics').track('match_created', req.userId, { withUserId: targetId });
+    }
+    res.json({ ok: true, matched: true, newMatch: isNewMatch, chatId: chat._id });
+  } catch (err) { next(err); }
+});
+
+// POST /api/discover/:userId/pass — hide from feed for 7 days
+router.post('/:userId/pass', requireAuth, async (req, res, next) => {
+  try {
+    if (req.params.userId === req.userId) return res.status(400).json({ error: 'Invalid' });
+    await Pass.findOneAndUpdate(
+      { from: req.userId, to: req.params.userId },
+      { createdAt: new Date(), expiresAt: new Date(Date.now() + 7 * 86400000) },
+      { upsert: true });
+    res.json({ ok: true });
+  } catch (err) { next(err); }
+});
+
+// Sambandh Max, currently active (the top tier's exclusive perks)
+function maxTierActive(user) {
+  return user.membership?.tier === 'max' &&
+    (!user.membership?.tierExpiresAt || user.membership.tierExpiresAt > new Date());
+}
+
+// GET /api/discover/likes — who liked me (count for everyone; the list is a Max perk)
+router.get('/likes', requireAuth, async (req, res, next) => {
+  try {
+    const me = await User.findById(req.userId);
+    const likes = await Like.find({ to: req.userId }).sort({ createdAt: -1 }).limit(50);
+    if (!maxTierActive(me)) {
+      return res.json({ count: likes.length, profiles: null, upgradeRequired: true, requiredTier: 'max' });
+    }
+    const users = await User.find({ _id: { $in: likes.map(l => l.from) } })
+      .select('profile.firstName profile.displayName profile.age profile.city profile.photos preferences.anonymousModeEnabled');
+    res.json({
+      count: likes.length,
+      profiles: users.map(u => ({
+        userId: u._id,
+        firstName: u.preferences?.anonymousModeEnabled ? 'Anonymous' : (u.profile.displayName || u.profile.firstName),
+        age: u.profile.age, city: u.profile.city,
+        photo: u.preferences?.anonymousModeEnabled ? null : (u.profile.photos?.[0]?.url || null)
+      }))
+    });
+  } catch (err) { next(err); }
+});
+
+// GET /api/discover/profile/:userId — full public profile view
+router.get('/profile/:userId', requireAuth, async (req, res, next) => {
+  try {
+    const me = await User.findById(req.userId);
+    const u = await User.findById(req.params.userId);
+    if (!u || !u.status?.active || u.status?.banned) return res.status(404).json({ error: 'Profile not found' });
+    if ((u.blockedUsers || []).some(b => b.toString() === req.userId) ||
+        (me.blockedUsers || []).some(b => b.toString() === req.params.userId)) {
+      return res.status(404).json({ error: 'Profile not found' });
+    }
+
+    const [book, rep, activity, existingChat, liked] = await Promise.all([
+      KarmaBook.findOne({ userId: u._id }),
+      Reputation.findOne({ userId: u._id }),
+      computeActivitySignals(u._id),
+      Chat.findOne({ participants: { $all: [req.userId, req.params.userId], $size: 2 } }),
+      Like.findOne({ from: req.userId, to: req.params.userId })
+    ]);
+
+    const karmaScore = book?.score ?? 100;
+    const anonymous = !!u.preferences?.anonymousModeEnabled;
+    const km = cityDistanceKm(me.profile?.city, u.profile?.city);
+
+    res.json({
+      userId: u._id,
+      firstName: anonymous ? 'Anonymous' : (u.profile.displayName || u.profile.firstName),
+      anonymous,
+      age: u.profile.age,
+      city: anonymous ? null : u.profile.city,
+      state: u.profile.state,
+      distanceKm: km,
+      languages: u.profile.languages,
+      bio: u.profile.bio,
+      photos: anonymous ? [] : (u.profile.photos || []),
+      intent: u.intent || [],
+      verification: {
+        level: u.verification?.level,
+        idVerified: !!u.verification?.idVerified,
+        professionVerified: !!u.verification?.professionVerified,
+        trustScore: u.verification?.trustScore || 0
+      },
+      profession: !anonymous && u.preferences?.showProfessionToOthers !== false ? {
+        title: u.claims?.profession?.title,
+        company: u.claims?.profession?.company,
+        verified: !!u.claims?.profession?.verified
+      } : null,
+      astrology: u.preferences?.showAstrologyToOthers !== false && u.astrology?.birthDate ? {
+        sunSign: u.astrology.sunSign || null,
+        rashi: u.astrology.rashi || null,
+        nakshatra: u.astrology.nakshatra || null,
+        mangalDosha: u.astrology.mangalDosha ?? null
+      } : null,
+      karma: { score: karmaScore, grade: scoreToGrade(karmaScore) },
+      tagsPositive: (rep?.tagsPositive || []).slice(0, 4).map(t => t.tag),
+      tagsNegative: (rep?.tagsNegative || []).slice(0, 2).map(t => t.tag),
+      traitScores: rep?.scores || null,
+      grades: rep?.grades || null,
+      activity: {
+        activeChats: activity.activeChats,
+        newChats7d: activity.newChats7d,
+        exclusivityClaimedToCount: activity.exclusivityClaimedToCount
+      },
+      existingChatId: existingChat?._id || null,
+      likedByMe: !!liked
+    });
+  } catch (err) { next(err); }
+});
+
+module.exports = router;

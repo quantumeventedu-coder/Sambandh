@@ -1,0 +1,70 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Reputation",
+  "type": "object",
+  "required": ["userId", "lastUpdatedAt"],
+  "properties": {
+    "_id": { "type": "string" },
+    "userId": { "type": "string" },
+    "lastUpdatedAt": { "type": "string", "format": "date-time" },
+    "basedOnChats": { "type": "integer", "minimum": 0 },
+    "basedOnMessages": { "type": "integer", "minimum": 0 },
+    "scores": {
+      "type": "object",
+      "properties": {
+        "respect": { "type": "number", "minimum": 0, "maximum": 10 },
+        "responsive": { "type": "number", "minimum": 0, "maximum": 10 },
+        "depth": { "type": "number", "minimum": 0, "maximum": 10 },
+        "humor": { "type": "number", "minimum": 0, "maximum": 10 },
+        "directness": { "type": "number", "minimum": 0, "maximum": 10 }
+      }
+    },
+    "grades": {
+      "type": "object",
+      "properties": {
+        "conversation": { "type": "string", "enum": ["A+", "A", "A-", "B+", "B", "B-", "C+", "C", "C-", "D", "F"] },
+        "boundaries": { "type": "string" },
+        "honesty": { "type": "string" },
+        "warmth": { "type": "string" }
+      }
+    },
+    "tagsPositive": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "tag": { "type": "string" },
+          "count": { "type": "integer" },
+          "lastSeenAt": { "type": "string", "format": "date-time" }
+        }
+      }
+    },
+    "tagsNegative": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "tag": { "type": "string" },
+          "count": { "type": "integer" },
+          "lastSeenAt": { "type": "string", "format": "date-time" }
+        }
+      }
+    },
+    "userRatings": {
+      "type": "object",
+      "properties": {
+        "totalRatingsGiven": { "type": "integer" },
+        "averageStars": { "type": "number", "minimum": 0, "maximum": 5 }
+      }
+    },
+    "redFlags": {
+      "type": "object",
+      "properties": {
+        "ghostingIncidents": { "type": "integer" },
+        "blockedByOthers": { "type": "integer" },
+        "reportsAgainst": { "type": "integer" }
+      }
+    },
+    "trustScore": { "type": "integer", "minimum": 0, "maximum": 100 }
+  }
+}

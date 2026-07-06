@@ -1,0 +1,44 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Compatibility",
+  "type": "object",
+  "required": ["userPair", "computedAt"],
+  "properties": {
+    "_id": { "type": "string" },
+    "userPair": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 2,
+      "items": { "type": "string" },
+      "description": "Sorted alphabetically: [smaller_userId, larger_userId]"
+    },
+    "computedAt": { "type": "string", "format": "date-time" },
+    "expiresAt": { "type": "string", "format": "date-time" },
+    "astrology": {
+      "type": "object",
+      "properties": {
+        "system": { "type": "string", "enum": ["vedic", "western", "hybrid"] },
+        "gunaScore": { "type": "integer", "minimum": 0, "maximum": 36 },
+        "gunaMax": { "type": "integer" },
+        "gunaPercent": { "type": "integer", "minimum": 0, "maximum": 100 },
+        "mangalCompatible": { "type": "boolean" },
+        "moonSignCompatible": { "type": "boolean" },
+        "verdict": { "type": "string" },
+        "computedVia": { "type": "string", "enum": ["prokerala_api", "astrosage_api", "internal", "cached"] },
+        "apiResponseId": { "type": "string" }
+      }
+    },
+    "engagement": {
+      "type": "object",
+      "properties": {
+        "messagesExchanged": { "type": "integer" },
+        "balanceScore": { "type": "integer", "minimum": 0, "maximum": 100 },
+        "responseTimeMatch": { "type": "number", "minimum": 0, "maximum": 1 },
+        "humorAlignment": { "type": "number", "minimum": 0, "maximum": 1 },
+        "depthAlignment": { "type": "number", "minimum": 0, "maximum": 1 },
+        "overallScore": { "type": "integer", "minimum": 0, "maximum": 100 }
+      }
+    },
+    "overall": { "type": "integer", "minimum": 0, "maximum": 100 }
+  }
+}
