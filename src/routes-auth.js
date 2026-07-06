@@ -23,7 +23,6 @@ const { track } = require('./services/analytics');
 const router = express.Router();
 
 const DEV_MODE = process.env.DEV_MODE === 'true' || !process.env.FIREBASE_PROJECT_ID;
-const OTP_VALIDITY_MS = 60 * 1000;          // spec: 60 seconds
 const OTP_MAX_PER_HOUR = DEV_MODE ? 100 : 3;
 const OTP_WRONG_LIMIT = 5;                   // then 30-minute lock
 const OTP_LOCK_MS = 30 * 60 * 1000;
@@ -35,13 +34,18 @@ const otpStore = new Map();
 const ipLimit = rateLimit({ windowMs: 60 * 60 * 1000, max: DEV_MODE ? 500 : 20 });
 
 // ---- Schemas ----
+// Auth identifier: EMAIL (OTP by email — primary) or phone. At least one.
 const INDIAN_PHONE = /^\+91[6-9][0-9]{9}$/;
-const requestOtpSchema = z.object({ phone: z.string().regex(INDIAN_PHONE) });
+const requestOtpSchema = z.object({
+  email: z.string().email().max(200).optional(),
+  phone: z.string().regex(INDIAN_PHONE).optional()
+}).refine(d => d.email || d.phone, { message: 'Provide an email or phone' });
 const verifyOtpSchema = z.object({
-  phone: z.string().regex(INDIAN_PHONE),
+  email: z.string().email().max(200).optional(),
+  phone: z.string().regex(INDIAN_PHONE).optional(),
   firebaseIdToken: z.string().optional(),
   otp: z.string().regex(/^\d{6}$/).optional()
-});
+}).refine(d => d.email || d.phone, { message: 'Provide an email or phone' });
 
 // Latin letters + Devanagari script (names in English or Hindi)
 const NAME_RE = /^[A-Za-z\p{Script=Devanagari}][A-Za-z\p{Script=Devanagari} ]{0,49}$/u;
@@ -107,38 +111,58 @@ const sha256 = s => crypto.createHash('sha256').update(s).digest('hex');
 
 // ---- Routes ----
 
-// 1. Request OTP (3/phone/hour; 30-min lock after 5 wrong attempts)
-router.post('/request-otp', ipLimit, (req, res) => {
-  const parsed = requestOtpSchema.safeParse(req.body);
-  if (!parsed.success) {
-    return res.status(400).json({ error: 'Please enter a valid 10-digit Indian mobile number' });
-  }
-  const phone = parsed.data.phone;
-  const now = Date.now();
-  const entry = otpStore.get(phone) || { requests: [], wrongAttempts: 0 };
+// 1. Request OTP — email (server-generated code, emailed) or phone.
+//    Rate: OTP_MAX_PER_HOUR per identifier; 30-min lock after 5 wrong attempts.
+router.post('/request-otp', ipLimit, async (req, res, next) => {
+  try {
+    const parsed = requestOtpSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ error: 'Enter a valid email or 10-digit Indian mobile number' });
+    }
+    const email = parsed.data.email ? parsed.data.email.toLowerCase() : null;
+    const phone = parsed.data.phone || null;
+    const id = email || phone;                 // otpStore key = the identifier
+    const now = Date.now();
+    const entry = otpStore.get(id) || { requests: [], wrongAttempts: 0 };
 
-  if (entry.lockedUntil && entry.lockedUntil > now) {
-    const mins = Math.ceil((entry.lockedUntil - now) / 60000);
-    return res.status(429).json({ error: `Too many attempts. Try again in ${mins} minutes.` });
-  }
-  entry.requests = entry.requests.filter(t => now - t < 3600 * 1000);
-  if (entry.requests.length >= OTP_MAX_PER_HOUR) {
-    return res.status(429).json({ error: 'Too many attempts. Try again in 60 minutes.' });
-  }
-  entry.requests.push(now);
+    if (entry.lockedUntil && entry.lockedUntil > now) {
+      const mins = Math.ceil((entry.lockedUntil - now) / 60000);
+      return res.status(429).json({ error: `Too many attempts. Try again in ${mins} minutes.` });
+    }
+    entry.requests = entry.requests.filter(t => now - t < 3600 * 1000);
+    if (entry.requests.length >= OTP_MAX_PER_HOUR) {
+      return res.status(429).json({ error: 'Too many attempts. Try again in 60 minutes.' });
+    }
+    entry.requests.push(now);
 
-  if (DEV_MODE) {
-    entry.code = String(Math.floor(100000 + Math.random() * 900000));
-    entry.expiresAt = now + (DEV_MODE ? 5 * 60 * 1000 : OTP_VALIDITY_MS); // dev: 5 min for convenience
-    entry.wrongAttempts = 0;
-    otpStore.set(phone, entry);
-    console.log(`[DEV OTP] ${phone} → ${entry.code}`);
-    return res.json({ ok: true, devMode: true, devOtp: entry.code, validSeconds: 300 });
-  }
+    // EMAIL path: always server-generate the code and email it (dev transport
+    // logs it + we return devOtp for convenience; prod emails only).
+    if (email) {
+      entry.code = String(Math.floor(100000 + Math.random() * 900000));
+      entry.channel = 'email';
+      entry.expiresAt = now + 5 * 60 * 1000;   // 5-minute email OTP
+      entry.wrongAttempts = 0;
+      otpStore.set(id, entry);
+      const { sendOtpEmail, emailConfigured } = require('./services/notify');
+      await sendOtpEmail(email, entry.code).catch(e => console.error('[EMAIL OTP] send failed:', e.message));
+      const devReveal = DEV_MODE || !emailConfigured();  // reveal in dev / when no SMTP yet
+      return res.json({ ok: true, channel: 'email', devMode: devReveal, validSeconds: 300,
+        ...(devReveal ? { devOtp: entry.code } : {}) });
+    }
 
-  otpStore.set(phone, entry);
-  // Production: the client triggers Firebase SDK to send the SMS
-  res.json({ ok: true, devMode: false, validSeconds: 60, message: 'Use Firebase SDK to send OTP from client' });
+    // PHONE path (dev code / Firebase in prod) — unchanged.
+    if (DEV_MODE) {
+      entry.code = String(Math.floor(100000 + Math.random() * 900000));
+      entry.channel = 'phone';
+      entry.expiresAt = now + 5 * 60 * 1000;
+      entry.wrongAttempts = 0;
+      otpStore.set(id, entry);
+      console.log(`[DEV OTP] ${phone} → ${entry.code}`);
+      return res.json({ ok: true, channel: 'phone', devMode: true, devOtp: entry.code, validSeconds: 300 });
+    }
+    otpStore.set(id, entry);
+    res.json({ ok: true, channel: 'phone', devMode: false, validSeconds: 60, message: 'Use Firebase SDK to send OTP from client' });
+  } catch (err) { next(err); }
 });
 
 // 2. Verify OTP — issues Sambandh JWT (cookie + body)
@@ -146,37 +170,40 @@ router.post('/verify-otp', async (req, res, next) => {
   try {
     const parsed = verifyOtpSchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: 'Invalid request' });
-    const { phone, firebaseIdToken, otp } = parsed.data;
+    const { firebaseIdToken, otp } = parsed.data;
+    const email = parsed.data.email ? parsed.data.email.toLowerCase() : null;
+    const phone = parsed.data.phone || null;
+    const id = email || phone;
     const now = Date.now();
 
-    if (DEV_MODE) {
-      const entry = otpStore.get(phone);
+    // EMAIL, or phone in dev mode → verify the server-generated code from otpStore.
+    if (email || DEV_MODE) {
+      const entry = otpStore.get(id);
       if (entry?.lockedUntil && entry.lockedUntil > now) {
         return res.status(429).json({ error: 'Locked after too many wrong attempts. Try again in 30 minutes.' });
       }
       if (!entry || !entry.code || entry.expiresAt < now || entry.code !== otp) {
         if (entry) {
           entry.wrongAttempts = (entry.wrongAttempts || 0) + 1;
-          if (entry.wrongAttempts >= OTP_WRONG_LIMIT) {
-            entry.lockedUntil = now + OTP_LOCK_MS;
-            entry.wrongAttempts = 0;
-          }
-          otpStore.set(phone, entry);
+          if (entry.wrongAttempts >= OTP_WRONG_LIMIT) { entry.lockedUntil = now + OTP_LOCK_MS; entry.wrongAttempts = 0; }
+          otpStore.set(id, entry);
         }
-        return res.status(401).json({ error: 'Wrong or expired OTP' });
+        return res.status(401).json({ error: 'Wrong or expired code' });
       }
-      otpStore.delete(phone);
+      otpStore.delete(id);
     } else {
+      // Production phone path via Firebase.
       if (!firebaseIdToken) return res.status(400).json({ error: 'firebaseIdToken required' });
       const firebaseAdmin = require('firebase-admin');
       const decoded = await firebaseAdmin.auth().verifyIdToken(firebaseIdToken);
       if (decoded.phone_number !== phone) return res.status(401).json({ error: 'Phone mismatch' });
     }
 
-    let user = await User.findOne({ phone });
+    let user = await User.findOne(email ? { email } : { phone });
     if (!user) {
       user = await User.create({
-        phone, phoneVerified: true, createdAt: new Date(),
+        ...(email ? { email, emailVerified: true } : { phone, phoneVerified: true }),
+        createdAt: new Date(),
         verification: { level: 'phone_only', trustScore: 10 },
         membership: { joinFeePaid: false, tier: 'free' },
         status: { active: true, suspended: false, banned: false }
@@ -219,7 +246,7 @@ router.post('/verify-otp', async (req, res, next) => {
     res.json({
       token,
       user: {
-        id: user._id, phone: user.phone, role: user.role || 'user',
+        id: user._id, phone: user.phone, email: user.email, role: user.role || 'user',
         hasProfile: !!user.profile?.firstName,
         verificationLevel: user.verification.level,
         idVerified: !!user.verification.idVerified,

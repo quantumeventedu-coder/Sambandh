@@ -1,9 +1,12 @@
 const mongoose = require('../db/odm');
 const UserSchema = new mongoose.Schema({
-  phone: { type: String, required: true, unique: true, index: true },
+  // Either email (OTP by email — the primary channel) or phone identifies an
+  // account. Both are unique-when-present; at least one is set at signup.
+  phone: { type: String, unique: true, sparse: true, index: true },
   phoneVerified: { type: Boolean, default: false },
-  email: { type: String, sparse: true },
+  email: { type: String, unique: true, sparse: true, index: true },
   emailVerified: { type: Boolean, default: false },
+  pushSubscriptions: [mongoose.Schema.Types.Mixed], // web-push endpoints (browser notifications)
   createdAt: { type: Date, default: Date.now },
   lastActiveAt: { type: Date, default: Date.now },
   profile: {

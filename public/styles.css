@@ -586,3 +586,6 @@ h1 { letter-spacing: -0.01em; }
 .guna-koota.full .gbar i { background: linear-gradient(90deg, #2ea75f, var(--forest)); }
 .guna-koota.zero .gv { color: var(--danger); }
 .guna-koota.zero .gbar i { background: var(--danger); }
+
+/* utility */
+.hidden { display: none !important; }

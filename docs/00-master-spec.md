@@ -82,10 +82,11 @@ Make online dating in India safe and honest by making **deception expensive and 
 
 Each feature below states purpose, flow, business logic, validation, errors, success, edge cases, permissions, data flow, UI behavior, backend processing, DB operations, notifications, logs, and analytics events. HTTP details are consolidated in [§8 API Reference](#8-api-reference).
 
-## F1 — Phone OTP Authentication
+## F1 — Email / Phone OTP Authentication
 
-- **Purpose:** Passwordless signup/login bound to a unique Indian mobile number.
-- **User flow:** Welcome screen → enter phone → receive 6-digit OTP (dev: shown on screen & console; prod: Firebase SMS) → enter OTP → JWT session issued → route to onboarding (new user) or Discover (returning user).
+- **Purpose:** Passwordless signup/login. **Email is the primary channel** (no SMS); phone is an optional alternative. An account is keyed by whichever identifier is used (both are unique-when-present; at least one is set).
+- **User flow (email):** Welcome → enter email → server generates a 6-digit code and **emails it** (`services/notify.js`; dev transport logs it + returns `devOtp`, prod sends via SMTP) → enter code → JWT session issued → after sign-in the client registers a service worker and subscribes to **web push** → route to onboarding or Discover. The "Use phone instead" toggle switches to the phone path (dev code / Firebase SMS in prod).
+- **Delivery layer (`services/notify.js`) — build-now, connect-later:** email via nodemailer (real when `SMTP_URL`/`SMTP_HOST` set, else a dev transport that captures to an inspectable outbox) and web push via `web-push` (real when `VAPID_*` set, else ephemeral keys generated at boot so it works locally). Covered by `tests/notify.test.js`; verified live on Supabase (email-only account creation + push subscription).
 - **Business logic:**
   - Phone must match `^\+91[6-9][0-9]{9}$` (Indian mobiles only).
   - OTP: 6 digits, valid 300 s, stored server-side in an in-memory map keyed by phone (`{ code, expiresAt, wrongAttempts, lockedUntil, requests[] }`).
@@ -245,9 +246,11 @@ final = base         × 0.24   // the original compatibility formula (below), as
 - **Moderator actions** (each resolves the report, records reviewer + time, writes an `AuditLog` entry): `warning` (notification), `suspend_24h` / `suspend_7d` (suspends + `suspension.endsAt` +24 h/+168 h + critical notification), `ban_permanent` (bans + deactivates), `no_action`.
 - **Admin auth:** `X-Admin-Key` header matching `ADMIN_API_KEY`, or a JWT whose user has the admin role.
 
-## F12 — Notifications (in-app)
+## F12 — Notifications (in-app + web push + email)
 
-Types in use: `match`, `karma_warning`, `account_under_review`, `verification_rejected`, `moderation_warning`, `account_suspended`, `escalation_alert`, `payment_refunded`. Fields: type, severity (`info|warning|critical`), title, body, read, createdAt. Feed endpoint returns newest-first; unread count drives the bell badge. (Push/SMS/email delivery: see §11.)
+Types in use: `new_match`, `karma_warning`, `account_under_review`, `verification_rejected`, `moderation_warning`, `account_suspended`, `escalation_alert`, `payment_refunded`. Fields: type, severity (`info|warning|critical`), title, body, read, createdAt. Feed endpoint returns newest-first; unread count drives the bell badge.
+
+**Delivery:** `deliverNotification(userId, {...})` (exported from `routes-notifications.js`) creates the in-app notification, **web-pushes** it to the user's registered browsers (`user.pushSubscriptions[]`, pruning dead endpoints), and **emails** the user for off-app-worthy events (matches, moderation, safety). Browser subscriptions are managed via `GET /api/notifications/vapid-key`, `POST /api/notifications/subscribe`, `POST /api/notifications/unsubscribe`, backed by the service worker at `/sw.js`. The match flow already uses `deliverNotification`; other call sites can adopt it incrementally.
 
 ## F13 — Settings, Privacy & Account (DPDP)
 

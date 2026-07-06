@@ -16,7 +16,6 @@ const Chat = require('./models/Chat');
 const Message = require('./models/Message');
 const Like = require('./models/Like');
 const Pass = require('./models/Pass');
-const Notification = require('./models/Notification');
 const { requireAuth } = require('./routes-auth');
 const { computeActivitySignals } = require('./karma-book');
 const { cityDistanceKm } = require('./data/cities');
@@ -211,9 +210,10 @@ router.post('/:userId/like', requireAuth, async (req, res, next) => {
         text: `You matched! ${nameA} and ${nameB} both liked each other.`,
         type: 'system', createdAt: new Date()
       });
+      const { deliverNotification } = require('./routes-notifications'); // in-app + web push + email
       for (const uid of [req.userId, targetId]) {
-        await Notification.create({
-          userId: uid, type: 'new_match', severity: 'info',
+        await deliverNotification(uid, {
+          type: 'new_match', severity: 'info',
           title: 'New match!',
           body: 'You both liked each other. Say hello — good conversations build good Karma.'
         });

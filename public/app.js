@@ -310,47 +310,92 @@ function renderLogin() {
     <div class="wordmark center" style="font-size:34px">sambandh</div>
     <p class="sub center" style="font-style:italic">connections, made meaningful.</p>
     <div class="card mt">
-      <div class="field">
-        <label>Mobile number</label>
-        <div class="row">
-          <input id="cc" value="+91" style="flex:0 0 64px;text-align:center" maxlength="4"/>
-          <input id="phone" type="tel" placeholder="98765 43210" maxlength="10" style="flex:1"/>
+      <div id="id-email" class="${S._loginPhone ? 'hidden' : ''}">
+        <div class="field">
+          <label>Email address</label>
+          <input id="email" type="email" inputmode="email" placeholder="you@example.com" autocomplete="email"/>
         </div>
+        <p class="hint">We'll email you a 6-digit code. <a href="#" onclick="S._loginPhone=true;renderLogin();return false" style="color:var(--sindoor)">Use phone instead</a></p>
       </div>
-      <button class="btn" id="otp-btn" onclick="sendOtp()">Send OTP</button>
+      <div id="id-phone" class="${S._loginPhone ? '' : 'hidden'}">
+        <div class="field">
+          <label>Mobile number</label>
+          <div class="row">
+            <input id="cc" value="+91" style="flex:0 0 64px;text-align:center" maxlength="4"/>
+            <input id="phone" type="tel" placeholder="98765 43210" maxlength="10" style="flex:1"/>
+          </div>
+        </div>
+        <p class="hint"><a href="#" onclick="S._loginPhone=false;renderLogin();return false" style="color:var(--sindoor)">Use email instead</a></p>
+      </div>
+      <button class="btn mt" id="otp-btn" onclick="sendOtp()">Send code</button>
       <div id="otp-area"></div>
     </div>
-    <p class="hint center">We never show your number to other users.</p>
+    <p class="hint center">We never show your email or number to other users.</p>
   </div>`;
 }
 
 async function sendOtp() {
-  const phone = ($('#cc').value + $('#phone').value.replace(/\D/g, ''));
-  if (!/^\+[1-9][0-9]{9,14}$/.test(phone)) return toast('Enter a valid 10-digit mobile number');
+  let body, ident;
+  if (S._loginPhone) {
+    const phone = ($('#cc').value + $('#phone').value.replace(/\D/g, ''));
+    if (!/^\+[1-9][0-9]{9,14}$/.test(phone)) return toast('Enter a valid 10-digit mobile number');
+    body = { phone }; ident = { phone };
+  } else {
+    const email = ($('#email').value || '').trim().toLowerCase();
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return toast('Enter a valid email address');
+    body = { email }; ident = { email };
+  }
   $('#otp-btn').disabled = true;
   try {
-    const r = await api('/auth/request-otp', { method: 'POST', body: { phone } });
+    const r = await api('/auth/request-otp', { method: 'POST', body });
     $('#otp-area').innerHTML = `
       <div class="field mt">
-        <label>Enter the 6-digit OTP</label>
+        <label>Enter the 6-digit code</label>
         <input id="otp" class="otp-boxes" maxlength="6" inputmode="numeric" placeholder="••••••"/>
-        ${r.devMode ? `<div class="hint">Dev mode — your OTP is <b>${esc(r.devOtp)}</b> (also in the server console)</div>` : ''}
+        ${r.channel === 'email' && !r.devMode ? `<div class="hint">We emailed a code to <b>${esc(body.email)}</b>. Check your inbox.</div>` : ''}
+        ${r.devMode ? `<div class="hint">Dev mode — your code is <b>${esc(r.devOtp)}</b> (also in the server console${r.channel === 'email' ? ' / dev email log' : ''})</div>` : ''}
       </div>
-      <button class="btn forest" onclick="verifyOtp('${esc(phone)}')">Verify & continue</button>`;
+      <button class="btn forest" onclick='verifyOtp(${JSON.stringify(ident)})'>Verify & continue</button>`;
     $('#otp').focus();
   } catch (e) { toast(e.message); }
   $('#otp-btn').disabled = false;
 }
 
-async function verifyOtp(phone) {
+async function verifyOtp(ident) {
   try {
-    const r = await api('/auth/verify-otp', { method: 'POST', body: { phone, otp: $('#otp').value.trim() } });
+    const r = await api('/auth/verify-otp', { method: 'POST', body: { ...ident, otp: $('#otp').value.trim() } });
     S.token = r.token;
     localStorage.setItem('sb_token', r.token);
     S.user = (await api('/auth/me')).user;
     connectSocket();
+    registerWebPush();  // ask for browser notifications after sign-in
     nav(onboardingStep() === 'done' ? '#/discover' : '#/onboarding');
   } catch (e) { toast(e.message); }
+}
+
+// Web push: register the service worker and subscribe (best-effort, non-blocking)
+async function registerWebPush() {
+  try {
+    if (!('serviceWorker' in navigator) || !('PushManager' in window)) return;
+    const reg = await navigator.serviceWorker.register('/sw.js');
+    if (Notification.permission === 'denied') return;
+    if (Notification.permission !== 'granted') {
+      const p = await Notification.requestPermission();
+      if (p !== 'granted') return;
+    }
+    const { key } = await api('/notifications/vapid-key');
+    const sub = await reg.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: urlBase64ToUint8Array(key)
+    });
+    await api('/notifications/subscribe', { method: 'POST', body: { subscription: sub } });
+  } catch { /* push is a nice-to-have; never block sign-in */ }
+}
+function urlBase64ToUint8Array(base64String) {
+  const padding = '='.repeat((4 - base64String.length % 4) % 4);
+  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+  const raw = atob(base64);
+  return Uint8Array.from([...raw].map(c => c.charCodeAt(0)));
 }
 
 // ---------------- Onboarding ----------------
