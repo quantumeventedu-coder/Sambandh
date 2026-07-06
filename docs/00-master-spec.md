@@ -595,7 +595,7 @@ POST /api/payment/verify
 | XSS | All user content rendered through `esc()` in the SPA and admin panel; helmet headers (CSP to be enabled at launch) |
 | CSRF | Token-based API auth (Bearer) is CSRF-resistant; the cookie path is same-site **[ASSUMPTION: set `SameSite=Lax` explicitly at launch]** |
 | SSRF | No user-supplied URL fetching server-side |
-| File uploads | Base64 in JSON (25 MB cap), stored under controlled keys `verification/<uid>/...` / `users/<uid>/photos/...`; EXIF stripped client-side; NSFW moderation via Sightengine when keys set **[FUTURE]** |
+| File uploads | Base64 in JSON (25 MB cap), stored under controlled keys `verification/<uid>/...` / `users/<uid>/photos/...`; EXIF stripped client-side. **NSFW moderation (own, no external service — `services/moderation.js`):** every profile photo is classified in the browser with NSFWJS (TensorFlow.js, models from CDN); explicit photos are refused at upload (client + server both enforce), suggestive ones are stored but auto-flagged into the moderation queue for a human. Covered by `tests/moderation.test.js`; verified live (explicit → 400, suggestive → stored + report, clean → allowed) |
 | Secrets | `.env` only (git-ignored); `.env.example` documents every variable; **launch checklist requires rotating `JWT_SECRET` and `ADMIN_API_KEY`** |
 | Sensitive data | Aadhaar numbers never stored (token reference only); doc numbers masked; verification originals deleted at 30 d; chat evidence revealed only via paid escalation with recipient anonymization |
 | Audit | `AuditLog` for moderation actions, refunds, admin activity; `[MODERATION]` logs for AI red flags |

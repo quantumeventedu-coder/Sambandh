@@ -76,7 +76,11 @@ const profileSchema = z.object({
   photos: z.array(z.object({
     base64: z.string(),
     filename: z.string(),
-    isPrimary: z.boolean().optional()
+    isPrimary: z.boolean().optional(),
+    // NSFWJS class scores computed in the browser (content moderation)
+    nsfw: z.object({
+      neutral: z.number(), drawing: z.number(), sexy: z.number(), hentai: z.number(), porn: z.number()
+    }).partial().optional()
   })).max(6).optional()
 });
 
@@ -383,24 +387,42 @@ router.patch('/profile', requireAuth, async (req, res, next) => {
 
     if (d.photos) {
       const { photoBytesHash } = require('./services/risk-engine');
+      const { classifyDecision } = require('./services/moderation');
       // The verified selfie always stays pinned as the first (primary) photo
       const selfiePhoto = (before.profile?.photos || []).find(p => p.fromSelfie);
       const stored = selfiePhoto
         ? [{ url: selfiePhoto.url, isPrimary: true, fromSelfie: true, uploadedAt: selfiePhoto.uploadedAt }]
         : [];
       const hashes = new Set(Array.isArray(before.photoHashes) ? before.photoHashes : []);
+      const flaggedForReview = [];
       for (let i = 0; i < d.photos.length && stored.length < 6; i++) {
         const p = d.photos[i];
         const buffer = Buffer.from(p.base64, 'base64');
         if (buffer.length > 10 * 1024 * 1024) return res.status(400).json({ error: 'Photo too large (max 10MB)' });
+        // NSFW gate — profile photos must be SFW (scores classified in the browser)
+        const mod = p.nsfw ? classifyDecision(p.nsfw) : null;
+        if (mod && mod.decision === 'block') {
+          return res.status(400).json({ error: 'That photo looks explicit — profile photos must be safe-for-work. Please choose another.' });
+        }
         const ext = (p.filename.split('.').pop() || 'jpg').toLowerCase().replace(/[^a-z0-9]/g, '');
         const key = `users/${req.userId}/photos/${Date.now()}_${i}.${ext}`;
         const url = await uploadToR2(key, buffer, ext === 'png' ? 'image/png' : 'image/jpeg');
-        stored.push({ url, isPrimary: stored.length === 0, uploadedAt: new Date() });
+        const photo = { url, isPrimary: stored.length === 0, uploadedAt: new Date() };
+        if (mod && mod.decision === 'review') { photo.moderation = { nsfwScore: mod.nsfwScore, decision: 'review' }; flaggedForReview.push(mod.nsfwScore); }
+        stored.push(photo);
         hashes.add(photoBytesHash(buffer)); // fingerprint for catfish / stolen-photo detection
       }
       updates['profile.photos'] = stored;
       updates.photoHashes = [...hashes];
+      // Borderline photos are kept but queued for a human moderator.
+      if (flaggedForReview.length) {
+        const Report = require('./models/Report');
+        await Report.create({
+          source: 'system', reportedUserId: req.userId, category: 'other', status: 'pending',
+          description: `Profile photo(s) flagged as possibly suggestive (NSFW score ${Math.max(...flaggedForReview)}) — needs a moderator look`,
+          createdAt: new Date()
+        }).catch(() => {});
+      }
     }
 
     const user = await User.findByIdAndUpdate(req.userId, updates, { new: true });

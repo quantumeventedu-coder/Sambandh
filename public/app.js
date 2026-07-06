@@ -583,13 +583,35 @@ const FACE_CDN = 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api@1.7.13/dist/
 const FACE_MODELS = 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api@1.7.13/model';
 let _faceStream = null;
 
+const _loadedScripts = new Set();
 function loadScript(src) {
   return new Promise((resolve, reject) => {
-    if (window.faceapi) return resolve();
+    if (_loadedScripts.has(src)) return resolve();
     const s = document.createElement('script');
-    s.src = src; s.onload = resolve; s.onerror = () => reject(new Error('Could not load face model'));
+    s.src = src;
+    s.onload = () => { _loadedScripts.add(src); resolve(); };
+    s.onerror = () => reject(new Error('Could not load ' + src));
     document.head.appendChild(s);
   });
+}
+
+// ---- NSFW classification (NSFWJS / TensorFlow.js, client-side, models from CDN) ----
+let _nsfwModel = null;
+async function classifyImageNSFW(base64) {
+  try {
+    if (!_nsfwModel) {
+      await loadScript('https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.20.0/dist/tf.min.js');
+      await loadScript('https://cdn.jsdelivr.net/npm/nsfwjs@2.4.2/dist/nsfwjs.min.js');
+      _nsfwModel = await nsfwjs.load(); // MobileNetV2 NSFW model
+    }
+    const img = new Image();
+    img.src = 'data:image/jpeg;base64,' + base64;
+    await img.decode();
+    const preds = await _nsfwModel.classify(img);
+    const s = {};
+    for (const p of preds) s[p.className.toLowerCase()] = p.probability;
+    return { neutral: s.neutral || 0, drawing: s.drawing || 0, sexy: s.sexy || 0, hentai: s.hentai || 0, porn: s.porn || 0 };
+  } catch { return null; } // best-effort — moderation is a bonus layer, never blocks the flow on a CDN hiccup
 }
 
 async function startFaceVerification() {
@@ -809,8 +831,12 @@ function obDrawGrid() {
 
 async function obAddPhotos(files) {
   for (const f of [...files].slice(0, 6 - S.onboardPhotos.length)) {
-    try { S.onboardPhotos.push({ base64: await fileToResizedBase64(f), filename: f.name }); }
-    catch { toast('Could not read ' + f.name); }
+    try {
+      const base64 = await fileToResizedBase64(f);
+      const nsfw = await classifyImageNSFW(base64);         // client-side ML content check
+      if (nsfw && (nsfw.porn + nsfw.hentai >= 0.6 || nsfw.porn >= 0.55)) { toast(f.name + ' looks explicit — profile photos must be safe-for-work.'); continue; }
+      S.onboardPhotos.push({ base64, filename: f.name, nsfw });
+    } catch { toast('Could not read ' + f.name); }
   }
   obDrawGrid();
 }
@@ -1732,7 +1758,10 @@ async function saveEditProfile() {
   if (files.length) {
     body.photos = [];
     for (const f of [...files].slice(0, 6)) {
-      body.photos.push({ base64: await fileToResizedBase64(f), filename: f.name, isPrimary: body.photos.length === 0 });
+      const base64 = await fileToResizedBase64(f);
+      const nsfw = await classifyImageNSFW(base64);
+      if (nsfw && (nsfw.porn + nsfw.hentai >= 0.6 || nsfw.porn >= 0.55)) { toast(f.name + ' looks explicit — skipped.'); continue; }
+      body.photos.push({ base64, filename: f.name, nsfw, isPrimary: body.photos.length === 0 });
     }
   }
   if ($('#ep-btime').value && S.user.astrology?.birthDate) {
