@@ -305,41 +305,109 @@ function renderFeatures() {
 }
 
 function renderLogin() {
-  screen.innerHTML = `
-  <div class="section-pad" style="padding-top:60px">
-    <div class="wordmark center" style="font-size:34px">sambandh</div>
-    <p class="sub center" style="font-style:italic">connections, made meaningful.</p>
-    <div class="card mt">
-      <div id="id-email" class="${S._loginPhone ? 'hidden' : ''}">
-        <div class="field">
-          <label>Email address</label>
-          <input id="email" type="email" inputmode="email" placeholder="you@example.com" autocomplete="email"/>
-        </div>
-        <p class="hint">We'll email you a 6-digit code. <a href="#" onclick="S._loginPhone=true;renderLogin();return false" style="color:var(--sindoor)">Use phone instead</a></p>
-      </div>
-      <div id="id-phone" class="${S._loginPhone ? '' : 'hidden'}">
-        <div class="field">
-          <label>Mobile number</label>
-          <div class="row">
-            <input id="cc" value="+91" style="flex:0 0 64px;text-align:center" maxlength="4"/>
-            <input id="phone" type="tel" placeholder="98765 43210" maxlength="10" style="flex:1"/>
-          </div>
-        </div>
-        <p class="hint"><a href="#" onclick="S._loginPhone=false;renderLogin();return false" style="color:var(--sindoor)">Use email instead</a></p>
-      </div>
+  const mode = S._loginMode || 'email';   // email | phone | password | register
+  const link = (m, label) => `<a href="#" onclick="S._loginMode='${m}';renderLogin();return false" style="color:var(--sindoor)">${label}</a>`;
+  let card;
+  if (mode === 'password') {
+    card = `
+      <div class="field"><label>Username or email</label><input id="li-id" autocomplete="username" placeholder="your_username"/></div>
+      <div class="field"><label>Password</label><input id="li-pw" type="password" autocomplete="current-password" placeholder="••••••••"/></div>
+      <button class="btn mt" onclick="passwordLogin()">Sign in</button>
+      <div id="otp-area"></div>
+      <p class="hint mt">New here? ${link('register', 'Create an account')} · ${link('email', 'Use email code instead')}</p>`;
+  } else if (mode === 'register') {
+    card = `
+      <div class="field"><label>Choose a username</label><input id="rg-user" autocomplete="username" placeholder="3–20 letters/numbers"/></div>
+      <div class="field"><label>Email <span class="hint">(optional)</span></label><input id="rg-email" type="email" autocomplete="email" placeholder="you@example.com"/></div>
+      <div class="field"><label>Password</label><input id="rg-pw" type="password" autocomplete="new-password" placeholder="at least 8 characters"/></div>
+      <button class="btn mt" onclick="passwordRegister()">Create account</button>
+      <p class="hint mt">Already have an account? ${link('password', 'Sign in')}</p>`;
+  } else if (mode === 'phone') {
+    card = `
+      <div class="field"><label>Mobile number</label>
+        <div class="row"><input id="cc" value="+91" style="flex:0 0 64px;text-align:center" maxlength="4"/><input id="phone" type="tel" placeholder="98765 43210" maxlength="10" style="flex:1"/></div></div>
       <button class="btn mt" id="otp-btn" onclick="sendOtp()">Send code</button>
       <div id="otp-area"></div>
-    </div>
+      <p class="hint mt">${link('email', 'Use email instead')} · ${link('password', 'Use a password')}</p>`;
+  } else {
+    card = `
+      <div class="field"><label>Email address</label><input id="email" type="email" inputmode="email" placeholder="you@example.com" autocomplete="email"/></div>
+      <button class="btn mt" id="otp-btn" onclick="sendOtp()">Email me a code</button>
+      <div id="otp-area"></div>
+      <p class="hint mt">${link('password', 'Use a password')} · ${link('phone', 'Use phone')}</p>`;
+  }
+  screen.innerHTML = `
+  <div class="section-pad" style="padding-top:56px">
+    <div class="wordmark center" style="font-size:34px">sambandh</div>
+    <p class="sub center" style="font-style:italic">connections, made meaningful.</p>
+    <div class="card mt">${card}</div>
     <div class="row" style="align-items:center;gap:10px;margin:14px 0"><div style="flex:1;height:1px;background:var(--sand-mid)"></div><span class="hint">or</span><div style="flex:1;height:1px;background:var(--sand-mid)"></div></div>
-    <button class="btn secondary ic-row" style="justify-content:center" onclick="passkeyLogin()">${ic('lock')} Sign in with a passkey</button>
-    <p class="hint center mt">Use your fingerprint, Face ID or security key — no code needed.</p>
+    <div id="google-btn" style="display:flex;justify-content:center;min-height:0"></div>
+    <button class="btn secondary ic-row" style="justify-content:center;margin-top:10px" onclick="passkeyLogin()">${ic('lock')} Sign in with a passkey</button>
+    <p class="hint center mt">Fingerprint, Face ID or security key — no code needed.</p>
     <p class="hint center">We never show your email or number to other users.</p>
   </div>`;
+  initGoogleButton();
+}
+
+async function passwordRegister() {
+  const username = ($('#rg-user').value || '').trim().toLowerCase();
+  const email = ($('#rg-email').value || '').trim().toLowerCase();
+  const password = $('#rg-pw').value || '';
+  if (!/^[a-z0-9_]{3,20}$/.test(username)) return toast('Username: 3–20 letters, numbers or underscores.');
+  if (password.length < 8) return toast('Password must be at least 8 characters.');
+  try {
+    const r = await api('/auth/register', { method: 'POST', body: { username, password, ...(email ? { email } : {}) } });
+    S.token = r.token; localStorage.setItem('sb_token', r.token);
+    S.user = (await api('/auth/me')).user;
+    connectSocket(); registerWebPush();
+    nav(onboardingStep() === 'done' ? '#/discover' : '#/onboarding');
+  } catch (e) { toast(e.message); }
+}
+
+async function passwordLogin(totp) {
+  const identifier = ($('#li-id') ? $('#li-id').value : S._pwId || '').trim();
+  const password = $('#li-pw') ? $('#li-pw').value : S._pwPass;
+  S._pwId = identifier; S._pwPass = password;
+  if (!identifier || !password) return toast('Enter your username/email and password.');
+  try {
+    const r = await api('/auth/login', { method: 'POST', body: { identifier, password, ...(totp ? { totp } : {}) } });
+    if (r.twoFactorRequired) {
+      $('#otp-area').innerHTML = `<div class="field mt"><label>Authenticator code (2FA)</label><input id="li-totp" class="otp-boxes" maxlength="6" inputmode="numeric" placeholder="••••••"/></div>
+        <button class="btn forest" onclick='passwordLogin(document.getElementById("li-totp").value.trim())'>Verify</button>`;
+      $('#li-totp')?.focus(); return;
+    }
+    S.token = r.token; localStorage.setItem('sb_token', r.token); S._pwPass = null;
+    S.user = (await api('/auth/me')).user;
+    connectSocket(); registerWebPush();
+    nav(onboardingStep() === 'done' ? '#/discover' : '#/onboarding');
+  } catch (e) { toast(e.message); }
+}
+
+// ---- Google Sign-In (loads Google Identity Services if a client id is configured) ----
+async function initGoogleButton() {
+  try {
+    const cfg = await api('/auth/config');
+    if (!cfg.googleClientId) { const el = $('#google-btn'); if (el) el.innerHTML = ''; return; }
+    await loadScript('https://accounts.google.com/gsi/client');
+    google.accounts.id.initialize({ client_id: cfg.googleClientId, callback: onGoogleCredential });
+    const el = $('#google-btn'); if (el) google.accounts.id.renderButton(el, { theme: 'outline', size: 'large', shape: 'pill', text: 'continue_with' });
+  } catch { /* Google is optional */ }
+}
+async function onGoogleCredential(resp) {
+  try {
+    const r = await api('/auth/google', { method: 'POST', body: { credential: resp.credential } });
+    if (r.twoFactorRequired) return toast('This account has 2FA — sign in with your password or email code.');
+    S.token = r.token; localStorage.setItem('sb_token', r.token);
+    S.user = (await api('/auth/me')).user;
+    connectSocket(); registerWebPush();
+    nav(onboardingStep() === 'done' ? '#/discover' : '#/onboarding');
+  } catch (e) { toast(e.message); }
 }
 
 async function sendOtp() {
   let body, ident;
-  if (S._loginPhone) {
+  if (S._loginMode === 'phone') {
     const phone = ($('#cc').value + $('#phone').value.replace(/\D/g, ''));
     if (!/^\+[1-9][0-9]{9,14}$/.test(phone)) return toast('Enter a valid 10-digit mobile number');
     body = { phone }; ident = { phone };

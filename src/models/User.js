@@ -6,6 +6,9 @@ const UserSchema = new mongoose.Schema({
   phoneVerified: { type: Boolean, default: false },
   email: { type: String, unique: true, sparse: true, index: true },
   emailVerified: { type: Boolean, default: false },
+  username: { type: String, unique: true, sparse: true, index: true }, // optional login handle
+  passwordHash: String,                                                 // bcrypt; set for password logins
+  googleId: { type: String, unique: true, sparse: true, index: true }, // Google account subject id
   pushSubscriptions: [mongoose.Schema.Types.Mixed], // web-push endpoints (browser notifications)
   createdAt: { type: Date, default: Date.now },
   lastActiveAt: { type: Date, default: Date.now },

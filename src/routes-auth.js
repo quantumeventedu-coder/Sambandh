@@ -101,6 +101,53 @@ function issueToken(res, user) {
   return token;
 }
 
+// Shared login finisher for password / Google logins: runs the account gates
+// (banned / deleted / suspended), enforces 2FA, and issues the token. Returns
+// true if it wrote a response (caller should stop), false if not applicable.
+async function completeLogin(req, res, user) {
+  if (user.status?.banned) { res.status(403).json({ error: 'This account is not eligible for Sambandh.' }); return true; }
+  if (user.status?.deletedAt) {
+    if (Date.now() - user.status.deletedAt < 30 * 86400000) {
+      await User.findByIdAndUpdate(user._id, { 'status.active': true, 'status.deletedAt': null });
+    } else { res.status(403).json({ error: 'This account was deleted.' }); return true; }
+  }
+  if (user.status?.suspended) {
+    if (user.suspension?.endsAt && user.suspension.endsAt < new Date()) {
+      await User.findByIdAndUpdate(user._id, { 'status.suspended': false, 'suspension.endsAt': null });
+    } else { res.status(403).json({ error: 'Your account is suspended. Check your notifications for details.' }); return true; }
+  }
+  // Second factor
+  if (user.security?.totp?.confirmedAt) {
+    const { verifyTotp, matchBackupCode } = require('./services/twofa');
+    const { totp, backupCode } = req.body;
+    if (!totp && !backupCode) { res.json({ twoFactorRequired: true }); return true; }
+    let ok = false;
+    if (totp && verifyTotp(user.security.totp.secret, totp)) ok = true;
+    else if (backupCode) {
+      const idx = matchBackupCode(backupCode, user.security.backupCodes || []);
+      if (idx >= 0) {
+        const codes = user.security.backupCodes.slice();
+        codes[idx] = { ...(codes[idx].toObject?.() || codes[idx]), usedAt: new Date() };
+        await User.findByIdAndUpdate(user._id, { 'security.backupCodes': codes });
+        ok = true;
+      }
+    }
+    if (!ok) { res.status(401).json({ error: 'Invalid 2FA code', twoFactorRequired: true }); return true; }
+  }
+  await User.findByIdAndUpdate(user._id, { lastActiveAt: new Date() });
+  const token = issueToken(res, user);
+  res.json({
+    token,
+    user: {
+      id: user._id, username: user.username, email: user.email, phone: user.phone, role: user.role || 'user',
+      hasProfile: !!user.profile?.firstName, verificationLevel: user.verification?.level,
+      idVerified: !!user.verification?.idVerified, joinFeePaid: user.membership?.joinFeePaid,
+      intent: user.intent || [], hasPhotos: (user.profile?.photos || []).length > 0
+    }
+  });
+  return true;
+}
+
 function readToken(req) {
   const auth = req.headers.authorization;
   if (auth?.startsWith('Bearer ')) return auth.slice(7);
@@ -454,6 +501,98 @@ router.post('/delete-account', requireAuth, async (req, res, next) => {
     });
     res.json({ ok: true, message: 'Account queued for deletion. All data will be erased within 30 days. Log in within 30 days to cancel.' });
   } catch (err) { next(err); }
+});
+
+// ---- Username + password auth ----
+const bcrypt = require('bcryptjs');
+const USERNAME_RE = /^[a-zA-Z0-9_]{3,20}$/;
+const registerSchema = z.object({
+  username: z.string().regex(USERNAME_RE),
+  email: z.string().email().max(200).optional(),
+  password: z.string().min(8).max(200)
+});
+const loginSchema = z.object({
+  identifier: z.string().min(3).max(200),   // username or email
+  password: z.string().min(1).max(200),
+  totp: z.string().regex(/^\d{6}$/).optional(),
+  backupCode: z.string().max(20).optional()
+});
+
+// POST /auth/register — create an account with a username + password
+router.post('/register', ipLimit, async (req, res, next) => {
+  try {
+    const parsed = registerSchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: 'Username must be 3–20 letters/numbers, password at least 8 characters.' });
+    const username = parsed.data.username.toLowerCase();
+    const email = parsed.data.email ? parsed.data.email.toLowerCase() : undefined;
+    if (await User.findOne({ username })) return res.status(409).json({ error: 'That username is taken.' });
+    if (email && await User.findOne({ email })) return res.status(409).json({ error: 'That email already has an account — sign in instead.' });
+    const passwordHash = await bcrypt.hash(parsed.data.password, 10);
+    const user = await User.create({
+      username, ...(email ? { email } : {}), passwordHash, createdAt: new Date(),
+      verification: { level: 'phone_only', trustScore: 10 },
+      membership: { joinFeePaid: false, tier: 'free' },
+      status: { active: true, suspended: false, banned: false }
+    });
+    track('register_password', user._id, {});
+    const token = issueToken(res, user);
+    res.json({ token, user: { id: user._id, username: user.username, email: user.email, hasProfile: false } });
+  } catch (err) {
+    if (err.code === 11000) return res.status(409).json({ error: 'That username or email is already taken.' });
+    next(err);
+  }
+});
+
+// POST /auth/login — password login (username or email), 2FA-aware
+router.post('/login', ipLimit, async (req, res, next) => {
+  try {
+    const parsed = loginSchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: 'Enter your username/email and password.' });
+    const id = parsed.data.identifier.toLowerCase();
+    const user = await User.findOne(id.includes('@') ? { email: id } : { username: id });
+    // Constant-ish response: always run a bcrypt compare to avoid user enumeration timing.
+    const ok = user && user.passwordHash ? await bcrypt.compare(parsed.data.password, user.passwordHash) : false;
+    if (!user || !ok) return res.status(401).json({ error: 'Wrong username/email or password.' });
+    await completeLogin(req, res, user);
+  } catch (err) { next(err); }
+});
+
+// ---- Google account login ----
+// GET /auth/config — public config for the login screen (Google client id if set)
+router.get('/config', (req, res) => {
+  res.json({ googleClientId: process.env.GOOGLE_CLIENT_ID || null });
+});
+
+// POST /auth/google — verify a Google ID token (One Tap / Sign-In), then log in
+router.post('/google', ipLimit, async (req, res, next) => {
+  try {
+    const credential = req.body.credential;
+    if (!credential) return res.status(400).json({ error: 'Missing Google credential' });
+    if (!process.env.GOOGLE_CLIENT_ID) return res.status(503).json({ error: 'Google sign-in is not configured yet.' });
+    const { OAuth2Client } = require('google-auth-library');
+    const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
+    const ticket = await client.verifyIdToken({ idToken: credential, audience: process.env.GOOGLE_CLIENT_ID });
+    const payload = ticket.getPayload();
+    if (!payload?.email_verified) return res.status(401).json({ error: 'Google email not verified' });
+    const email = payload.email.toLowerCase();
+    let user = await User.findOne({ googleId: payload.sub }) || await User.findOne({ email });
+    if (!user) {
+      user = await User.create({
+        email, emailVerified: true, googleId: payload.sub, createdAt: new Date(),
+        profile: { firstName: (payload.given_name || '').slice(0, 50) },
+        verification: { level: 'phone_only', trustScore: 10 },
+        membership: { joinFeePaid: false, tier: 'free' },
+        status: { active: true, suspended: false, banned: false }
+      });
+    } else if (!user.googleId) {
+      await User.findByIdAndUpdate(user._id, { googleId: payload.sub, emailVerified: true });
+    }
+    track('login_google', user._id, {});
+    await completeLogin(req, res, user);
+  } catch (err) {
+    if (/audience|Invalid token|Wrong number/i.test(err.message)) return res.status(401).json({ error: 'Invalid Google credential' });
+    next(err);
+  }
 });
 
 // ---- Two-factor authentication (authenticator app / TOTP) ----
