@@ -112,8 +112,12 @@ router.get('/users/:id', async (req, res, next) => {
       Chat.countDocuments({ participants: user._id })
     ]);
 
-    await audit('sa_user_viewed', 'user', user._id, { phone: user.phone });
-    res.json({ user, karma, reputation, payments, reportsAgainst, reportsBy, verifications, chatCount });
+    // Live Trust & Safety risk assessment for the dossier
+    const { assessUser } = require('./services/risk-engine');
+    const risk = await assessUser(user._id).catch(() => null);
+
+    await audit('sa_user_viewed', 'user', user._id, { phone: user.phone, riskTier: risk?.tier });
+    res.json({ user, karma, reputation, payments, reportsAgainst, reportsBy, verifications, chatCount, risk });
   } catch (err) { next(err); }
 });
 

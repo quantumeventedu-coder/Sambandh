@@ -1163,9 +1163,9 @@ async function renderKarma() {
         ${['respect','responsive','depth','humor','directness'].map(t => trait(t, rep.traitScores[t])).join('')}
       </div>` : ''}
       ${rep?.tagsPositive?.length ? `<div class="card"><b style="font-size:11px;color:var(--ink-soft);text-transform:uppercase;letter-spacing:.05em">Your tags</b><div class="mt" style="margin-top:8px">${rep.tagsPositive.map(t => `<span class="tag forest">${esc(t)}</span>`).join('')}</div></div>` : ''}
-      ${k.lies?.length ? section('Fact-check flags', k.lies.map(l => flagRow(l.reason, l.severity, l.recordedAt))) : ''}
-      ${k.contradictions?.length ? section('Contradictions', k.contradictions.map(c => flagRow(c.reason, c.severity, c.recordedAt, true))) : ''}
-      ${k.manipulationFlags?.length ? section('Pattern flags', k.manipulationFlags.map(m => flagRow(m.pattern + ': ' + (m.evidence || ''), m.confidence, m.recordedAt))) : ''}
+      ${k.lies?.length ? section('Fact-check flags', k.lies.map((l, i) => flagRow(l.reason, l.severity, l.recordedAt, 'lie', l.recordedAt || 'lie-' + i))) : ''}
+      ${k.contradictions?.length ? section('Contradictions', k.contradictions.map((c, i) => flagRow(c.reason, c.severity, c.recordedAt, 'contradiction', c.recordedAt || 'con-' + i))) : ''}
+      ${k.manipulationFlags?.length ? section('Pattern flags', k.manipulationFlags.map((m, i) => flagRow(m.pattern + ': ' + (m.evidence || ''), m.confidence, m.recordedAt, 'manipulation', m.recordedAt || 'man-' + i))) : ''}
       ${issues === 0 ? `<div class="notice forest">✓ Nothing on record. Keep being straight with people — 30 clean days adds +1 to your score.</div>` : `<div class="notice">Disagree with a flag? Dispute it — a human reviews within 7 days.</div>`}
       <div class="card" style="font-size:13px">
         <b style="font-size:11px;color:var(--ink-soft);text-transform:uppercase;letter-spacing:.05em">My activity — what matches can see</b>
@@ -1187,10 +1187,21 @@ function trait(name, val) {
 function section(title, rows) {
   return `<h2>${title}</h2>${rows.join('')}`;
 }
-function flagRow(text, severity, when, disputable) {
+function flagRow(text, severity, when, category, flagId) {
   return `<div class="flag-card"><div class="ft">${esc(severity || '')} severity · ${when ? timeAgo(when) + ' ago' : ''}</div>
     <div class="fd">${esc(text)}</div>
-    ${disputable ? `<button class="btn small mt secondary" onclick="toast('Dispute filed — human review within 7 days')">Dispute</button>` : ''}</div>`;
+    ${category ? `<button class="btn small mt secondary" onclick="disputeFlag('${category}','${esc(String(flagId))}')">Dispute this flag</button>` : ''}</div>`;
+}
+
+// Files a real dispute (POST /karma/dispute) — a moderator reviews within 7 days.
+async function disputeFlag(category, flagId) {
+  const reason = prompt('Why is this flag wrong? A moderator reviews within 7 days.\n(Please give at least 20 characters of detail.)');
+  if (reason === null) return;                       // cancelled
+  if (reason.trim().length < 20) return toast('Please add a bit more detail (at least 20 characters).');
+  try {
+    await api('/karma/dispute', { method: 'POST', body: { flagCategory: category, flagId: String(flagId), reason: reason.trim() } });
+    toast('Dispute filed — a moderator reviews within 7 days.');
+  } catch (e) { toast(e.message); }
 }
 
 // ---------------- Compatibility ----------------

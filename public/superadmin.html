@@ -173,8 +173,10 @@ async function openUser(id) {
     <div class="grid2">
       <div class="card">
         <h3 style="font-family:Georgia,serif">${esc(u.profile?.displayName || u.profile?.firstName || '—')}
-          <span class="pill p">${esc(u.membership?.tier||'free')}</span></h3>
-        <pre>${esc(u.phone)} · ${esc(u.profile?.gender||'—')}, ${u.profile?.age||'—'} · ${esc(u.profile?.city||'—')}
+          <span class="pill p">${esc(u.membership?.tier||'free')}</span>
+          ${d.risk ? `<span class="pill" style="background:${d.risk.tier==='critical'?'#c0392b':d.risk.tier==='high'?'#d97706':d.risk.tier==='elevated'?'#8a6a10':'#14683a'};color:#fff">RISK ${d.risk.score} · ${d.risk.tier.toUpperCase()}</span>` : ''}</h3>
+        ${d.risk && d.risk.reasons.length ? `<div style="font-size:11.5px;color:#b45309;margin:4px 0 6px">⚠ ${d.risk.reasons.slice(0,3).map(esc).join(' · ')}</div>` : ''}
+        <pre>${esc(u.phone || u.email || '—')} · ${esc(u.profile?.gender||'—')}, ${u.profile?.age||'—'} · ${esc(u.profile?.city||'—')}
 Joined ${new Date(u.createdAt).toLocaleDateString()} · Karma ${d.karma?.score ?? 100} · ${d.chatCount} chats
 ID ${u.verification?.idVerified?'✓':'✗'} · Selfie ${u.verification?.selfieVerified?'✓':'✗'} · Fee ${u.membership?.joinFeePaid?'CHF '+(u.membership?.joinFeeAmountCHF??'?')+' paid':'unpaid'}</pre>
         <div class="bar" style="margin:8px 0 0">

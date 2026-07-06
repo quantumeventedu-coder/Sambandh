@@ -354,11 +354,13 @@ router.patch('/profile', requireAuth, async (req, res, next) => {
     }
 
     if (d.photos) {
+      const { photoBytesHash } = require('./services/risk-engine');
       // The verified selfie always stays pinned as the first (primary) photo
       const selfiePhoto = (before.profile?.photos || []).find(p => p.fromSelfie);
       const stored = selfiePhoto
         ? [{ url: selfiePhoto.url, isPrimary: true, fromSelfie: true, uploadedAt: selfiePhoto.uploadedAt }]
         : [];
+      const hashes = new Set(Array.isArray(before.photoHashes) ? before.photoHashes : []);
       for (let i = 0; i < d.photos.length && stored.length < 6; i++) {
         const p = d.photos[i];
         const buffer = Buffer.from(p.base64, 'base64');
@@ -367,8 +369,10 @@ router.patch('/profile', requireAuth, async (req, res, next) => {
         const key = `users/${req.userId}/photos/${Date.now()}_${i}.${ext}`;
         const url = await uploadToR2(key, buffer, ext === 'png' ? 'image/png' : 'image/jpeg');
         stored.push({ url, isPrimary: stored.length === 0, uploadedAt: new Date() });
+        hashes.add(photoBytesHash(buffer)); // fingerprint for catfish / stolen-photo detection
       }
       updates['profile.photos'] = stored;
+      updates.photoHashes = [...hashes];
     }
 
     const user = await User.findByIdAndUpdate(req.userId, updates, { new: true });

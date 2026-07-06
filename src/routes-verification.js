@@ -163,11 +163,14 @@ router.post('/selfie', requireAuth, async (req, res, next) => {
       const photoUrl = await uploadToR2(photoKey, buffer, 'image/jpeg');
       const user = await User.findById(req.userId);
       const others = (user.profile?.photos || []).filter(p => !p.fromSelfie).map(p => ({ ...p.toObject?.() || p, isPrimary: false }));
+      const { photoBytesHash } = require('./services/risk-engine');
+      const hashes = new Set([...(Array.isArray(user.photoHashes) ? user.photoHashes : []), photoBytesHash(buffer)]);
       await User.findByIdAndUpdate(req.userId, {
         'profile.photos': [
           { url: photoUrl, isPrimary: true, fromSelfie: true, uploadedAt: new Date() },
           ...others
-        ].slice(0, 6)
+        ].slice(0, 6),
+        photoHashes: [...hashes]
       });
       track('selfie_verified', req.userId);
     } else {

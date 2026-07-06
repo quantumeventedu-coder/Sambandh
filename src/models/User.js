@@ -84,8 +84,15 @@ const UserSchema = new mongoose.Schema({
     desirability: { type: Number, default: 1500 },
     likesReceived: { type: Number, default: 0 },
     passesReceived: { type: Number, default: 0 },
-    likesGiven: { type: Number, default: 0 }
-  }
+    likesGiven: { type: Number, default: 0 },
+    // Trust & Safety (risk-engine.js): 0 = safe … 100 = critical
+    riskScore: { type: Number, default: 0 },
+    riskTier: { type: String, enum: ['low', 'elevated', 'high', 'critical'], default: 'low' },
+    riskAssessedAt: Date
+  },
+  // sha256 fingerprints of uploaded photos — catches the same stolen photo reused
+  // across accounts (catfish detection).
+  photoHashes: [String]
 });
 UserSchema.index({ 'profile.city': 1, 'profile.gender': 1, 'status.active': 1 });
 UserSchema.index({ 'verification.trustScore': -1 });

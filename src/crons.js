@@ -29,6 +29,22 @@ async function nightlyBatch() {
   // 1. Fraud scan across active users (2 AM IST per spec §2.5.6)
   try { await nightlyFraudScan(); } catch (e) { console.error('[CRON] fraud scan:', e.message); }
 
+  // 1b. Trust & Safety risk assessment — score every recently-active user;
+  // auto-file a system report for anyone who lands in the critical tier.
+  try {
+    const { assessUser } = require('./services/risk-engine');
+    const Report = require('./models/Report');
+    const recent = await User.find({ 'status.active': true, lastActiveAt: { $gt: new Date(Date.now() - 7 * 86400000) } }).select('_id');
+    for (const u of recent) {
+      const a = await assessUser(u._id).catch(() => null);
+      if (a && a.tier === 'critical') {
+        const open = await Report.findOne({ reportedUserId: u._id, source: 'system', category: 'scam', status: { $ne: 'resolved' } });
+        if (open) { open.description = `Risk ${a.score}/100: ${a.reasons.slice(0, 3).join('; ')}`; await open.save(); }
+        else await Report.create({ source: 'system', reportedUserId: u._id, category: 'scam', status: 'pending', autoEscalated: true, description: `Risk ${a.score}/100: ${a.reasons.slice(0, 3).join('; ')}`, createdAt: new Date() });
+      }
+    }
+  } catch (e) { console.error('[CRON] risk assessment:', e.message); }
+
   // 2. Recompute ages from DOB (birthdays)
   try {
     const users = await User.find({ 'profile.dob': { $exists: true, $ne: null } }).select('profile.dob profile.age');

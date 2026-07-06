@@ -223,7 +223,7 @@ final = base         × 0.24   // the original compatibility formula (below), as
 - **Prices:** CHF 0.50 (exclusivity/love-bombing/contradictions) · CHF 1 (manipulation patterns) · free (fraud alerts).
 - **Rate limits (spec §2.5.10):** 3 escalations/day per viewer · ≥ 1 h between escalations on the same person · ≤ 10 per target per 30 days. Violations throw descriptive errors surfaced as toasts.
 - **Reveal content:** up to 5 most-recent relevant statements with `sentDaysAgo` and recipients **fully anonymized** ("Different person"). The flagged user receives an anonymous notification: *"Someone paid to see deeper into your Karma flags. They remain anonymous to you."*
-- **Disputes:** a flagged user may dispute a flag (Dispute model); upheld disputes remove the flag and restore score **[FUTURE — model exists; moderator dispute UI pending]**.
+- **Disputes (complete):** a flagged user files a dispute from **My Karma Book** (`POST /karma/dispute`, reason ≥ 20 chars, 7-day SLA); moderators see the queue (`GET /karma/admin/disputes`) and resolve it (`POST /karma/admin/disputes/:id/resolve`) — clearing a flag restores karma points (full clear +10, partial +5), notifies the user, and writes an audit entry. Fully wired end-to-end (verified live).
 
 ## F9 — Behavioral Reputation Engine
 
@@ -237,6 +237,12 @@ final = base         × 0.24   // the original compatibility formula (below), as
 - **Purpose:** Culturally relevant matching signals.
 - **Astrology — real Ashtakoot Guna Milan (`src/services/astro.js`).** `moonPosition()` computes the Moon's **sidereal ecliptic longitude** from birth date/time via the standard mean-longitude formula + principal equation-of-centre terms, minus the **Lahiri ayanamsa** → Moon **rashi** (sign) and **nakshatra** (real astronomy, not a hash; labelled `internal_sidereal_ashtakoot`; exact when ProKerala is configured). `gunaMilan()` then computes all **eight kootas** with the classical lookup tables and dosha rules — **Varna 1, Vashya 2, Tara 3, Yoni 4, Graha Maitri 5, Gana 6, Bhakoot 7, Nadi 8 = 36** — returning per-koota `got/max`, named **doshas** (Nadi / Bhakoot / Gana), and a verdict (18+ = the traditional marriage threshold). Boy/girl assignment (from gender) drives the order-sensitive kootas. The UI shows the full koota grid + dosha warnings. Covered by `tests/astro.test.js` (12 tests: Nadi/Bhakoot doshas, Yoni enemies, Gana matrix, moon-motion, per-koota bounds) and verified live on Supabase.
 - **Engagement compatibility (real):** computed from the pair's actual chat behaviour — message balance, response-time symmetry, reputation trait alignment (humor/depth/respect), and volume — producing a percentage + verdict. Cached per pair (24h) in the `Compatibility` collection.
+
+## F10.5 — Trust & Safety Risk Engine
+
+- **Purpose:** Combine every safety signal into one real-time risk score + tier and detect catfish/stolen-photo accounts.
+- **`src/services/risk-engine.js`:** `computeRiskScore(signals)` → `{ score 0–100, tier (low/elevated/high/critical), reasons[] }` from weighted signals: ID/selfie unverified, account age, karma, reputation red flags (blocked-by/reports/ghosting), device-fingerprint cluster size, **duplicate-photo accounts**, money-request pattern, open reports, and like/message velocity. `photoBytesHash(buffer)` (sha256 of image bytes, computed at every photo/selfie upload → `user.photoHashes[]`) catches the same stolen photo reused across accounts. `assessUser(userId)` gathers the signals from the DB, scores, and persists `signals.riskScore/riskTier`.
+- **Wiring:** the nightly batch scores every recently-active user and **auto-files a system report (auto-escalated)** for the critical tier; the super-admin dossier shows a live risk assessment with reasons. Covered by `tests/risk-engine.test.js` (8 tests); verified live on Supabase.
 
 ## F11 — Reports & Moderation
 
