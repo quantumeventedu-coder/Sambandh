@@ -1,4 +1,4 @@
-const mongoose = require('mongoose');
+const mongoose = require('../db/odm');
 const VerificationSchema = new mongoose.Schema({
   userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
   type: { type: String, enum: ['id', 'selfie', 'profession', 'education', 'income', 'medical_license', 'bar_license', 'ca_license'], required: true },

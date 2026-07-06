@@ -100,12 +100,13 @@ async function nightlyBatch() {
     }
   } catch (e) { console.error('[CRON] account erasure:', e.message); }
 
-  // 6. Downgrade expired Sambandh Pro / Max subscriptions
+  // 6. Expire lapsed memberships (base/pro/max). Nothing is free: an expired
+  // membership loses access entirely (joinFeePaid is the live-access flag).
   try {
     await User.updateMany(
       { 'membership.tier': { $ne: 'free' }, 'membership.tierExpiresAt': { $lt: new Date() } },
-      { 'membership.tier': 'free' });
-  } catch (e) { console.error('[CRON] tier downgrade:', e.message); }
+      { 'membership.tier': 'free', 'membership.joinFeePaid': false });
+  } catch (e) { console.error('[CRON] membership expiry:', e.message); }
 
   // 7. Verification queue age alert (SLA: 90% within 24h; alert at 20h)
   try {

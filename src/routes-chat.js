@@ -25,8 +25,9 @@ function istDayStart() {
   return new Date(Math.floor(nowIST / 86400000) * 86400000 - IST_OFFSET);
 }
 
+// Pro/Max = unlimited. Base members keep the gendered daily allowance.
 function tierIsActive(user) {
-  return user.membership?.tier !== 'free' &&
+  return ['pro', 'max'].includes(user.membership?.tier) &&
     (!user.membership?.tierExpiresAt || user.membership.tierExpiresAt > new Date());
 }
 
@@ -130,7 +131,7 @@ router.post('/start', requireAuth, async (req, res, next) => {
       return res.status(403).json({ error: 'Both users must be ID-verified' });
     }
     if (!me.membership.joinFeePaid) {
-      return res.status(403).json({ error: 'Pay join fee to start chats' });
+      return res.status(403).json({ error: 'An active membership is required to chat (from CHF 1/month)' });
     }
     if (me.status?.suspended) return res.status(403).json({ error: 'Account suspended' });
 

@@ -1,4 +1,4 @@
-const mongoose = require('mongoose');
+const mongoose = require('../db/odm');
 const DisputeSchema = new mongoose.Schema({
   userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
   flagId: mongoose.Schema.Types.ObjectId,

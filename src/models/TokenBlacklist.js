@@ -1,4 +1,4 @@
-const mongoose = require('mongoose');
+const mongoose = require('../db/odm');
 // Logout invalidation: token hashes live here until their natural expiry (TTL).
 const TokenBlacklistSchema = new mongoose.Schema({
   tokenHash: { type: String, required: true, unique: true },

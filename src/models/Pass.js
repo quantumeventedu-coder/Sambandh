@@ -1,4 +1,4 @@
-const mongoose = require('mongoose');
+const mongoose = require('../db/odm');
 // A pass hides the profile from discover for 7 days (expiresAt TTL re-surfaces it)
 const PassSchema = new mongoose.Schema({
   from: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },

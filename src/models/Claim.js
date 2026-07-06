@@ -1,4 +1,4 @@
-const mongoose = require('mongoose');
+const mongoose = require('../db/odm');
 const ClaimSchema = new mongoose.Schema({
   userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
   chatId: { type: mongoose.Schema.Types.ObjectId, ref: 'Chat', required: true },

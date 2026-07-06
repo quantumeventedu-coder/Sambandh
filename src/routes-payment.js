@@ -27,13 +27,14 @@ if (!DEV_PAYMENTS) {
   });
 }
 
-// ALL prices in CHF (Swiss francs) — no dollars, no rupees.
+// ALL prices in CHF (Swiss francs) — no dollars, no rupees. NOTHING IS FREE:
+// the base membership itself is a monthly subscription, priced by gender.
 // "minor" = rappen (CHF × 100), the smallest currency unit for the gateway.
 // Gender is read from the database — NEVER from the request body.
-function computeJoinFee(gender) {
-  if (gender === 'male') return { chf: 1, minor: 100 };     // CHF 1 minimum
-  if (gender === 'female') return { chf: 5, minor: 500 };   // CHF 5, as specified
-  return { chf: 3, minor: 300 };
+function computeBaseFee(gender) {
+  if (gender === 'male') return { chf: 1, minor: 100 };     // CHF 1 / month
+  if (gender === 'female') return { chf: 5, minor: 500 };   // CHF 5 / month
+  return { chf: 3, minor: 300 };                            // CHF 3 / month
 }
 
 const PURPOSE_PRICES = {
@@ -43,8 +44,13 @@ const PURPOSE_PRICES = {
   pro_subscription: { chf: 6, minor: 600 },   // Sambandh Pro — unlimited messaging
   max_subscription: { chf: 15, minor: 1500 }  // Sambandh Max — Pro + likes list + advanced filters
 };
-// Old tier purpose names (pre-July-2026 clients) map onto the new tiers
-const LEGACY_PURPOSES = { plus_subscription: 'pro_subscription', premium_subscription: 'max_subscription' };
+// Old purpose names (pre-July-2026 clients) map onto the new tiers.
+// join_fee → base_subscription: the join fee became the monthly base membership.
+const LEGACY_PURPOSES = {
+  plus_subscription: 'pro_subscription',
+  premium_subscription: 'max_subscription',
+  join_fee: 'base_subscription'
+};
 const CURRENCY = 'CHF';
 
 // 1. Create order — join fee by default, or another purpose
@@ -53,13 +59,13 @@ router.post('/create-order', requireAuth, async (req, res, next) => {
     const user = await User.findById(req.userId);
     if (!user) return res.status(404).json({ error: 'User not found' });
 
-    const purpose = LEGACY_PURPOSES[req.body.purpose] || req.body.purpose || 'join_fee';
+    const purpose = LEGACY_PURPOSES[req.body.purpose] || req.body.purpose || 'base_subscription';
     let amount;
 
-    if (purpose === 'join_fee') {
-      if (user.membership.joinFeePaid) return res.status(400).json({ error: 'Join fee already paid' });
-      if (!user.verification.idVerified) return res.status(403).json({ error: 'Verify ID before paying join fee' });
-      amount = computeJoinFee(user.profile.gender);
+    if (purpose === 'base_subscription') {
+      // Monthly base membership, priced by verified gender. Renewals stack +30 days.
+      if (!user.verification.idVerified) return res.status(403).json({ error: 'Verify ID before subscribing' });
+      amount = computeBaseFee(user.profile.gender);
     } else if (PURPOSE_PRICES[purpose]) {
       amount = PURPOSE_PRICES[purpose];
     } else {
@@ -118,8 +124,8 @@ router.post('/verify', requireAuth, async (req, res, next) => {
       payment.method = 'dev_simulated';
       await payment.save();
 
-      if (payment.purpose === 'join_fee') await markJoinFeePaid(req.userId, payment);
-      if (payment.purpose.endsWith('_subscription')) await activateTier(req.userId, payment.purpose);
+      if (payment.purpose === 'join_fee') await markJoinFeePaid(req.userId, payment); // legacy stored orders
+      if (payment.purpose.endsWith('_subscription')) await activateTier(req.userId, payment.purpose, payment);
       return res.json({ ok: true, devMode: true, paymentId: payment._id, purpose: payment.purpose });
     }
 
@@ -143,9 +149,9 @@ router.post('/verify', requireAuth, async (req, res, next) => {
     if (existing) return res.json({ ok: true, alreadyProcessed: true, paymentId: existing._id });
 
     const user = await User.findById(req.userId);
-    const purpose = req.body.purpose || 'join_fee';
-    const amount = purpose === 'join_fee'
-      ? computeJoinFee(user.profile.gender)
+    const purpose = LEGACY_PURPOSES[req.body.purpose] || req.body.purpose || 'base_subscription';
+    const amount = purpose === 'base_subscription'
+      ? computeBaseFee(user.profile.gender)
       : PURPOSE_PRICES[purpose] || { chf: 0 };
 
     const payment = await Payment.create({
@@ -162,23 +168,29 @@ router.post('/verify', requireAuth, async (req, res, next) => {
       metadata: { gender: user.profile.gender }
     });
 
-    if (purpose === 'join_fee') await markJoinFeePaid(req.userId, payment);
-    if (purpose.endsWith('_subscription')) await activateTier(req.userId, purpose);
+    if (purpose === 'join_fee') await markJoinFeePaid(req.userId, payment); // legacy stored orders
+    if (purpose.endsWith('_subscription')) await activateTier(req.userId, purpose, payment);
 
     res.json({ ok: true, paymentId: payment._id, purpose });
   } catch (err) { next(err); }
 });
 
-// Sambandh Pro / Max — 30-day subscription per purchase, stacking extends
-async function activateTier(userId, purpose) {
-  const tier = purpose === 'max_subscription' ? 'max' : 'pro';
+// Base / Pro / Max — 30-day subscription per purchase, stacking extends.
+// joinFeePaid doubles as the "membership currently active" flag: set on every
+// activation, cleared by the nightly cron when the tier expires to 'free'.
+async function activateTier(userId, purpose, payment) {
+  const tier = purpose === 'max_subscription' ? 'max'
+    : purpose === 'pro_subscription' ? 'pro' : 'base';
   const user = await User.findById(userId);
-  const base = user.membership?.tierExpiresAt && user.membership.tierExpiresAt > new Date() &&
+  const from = user.membership?.tierExpiresAt && user.membership.tierExpiresAt > new Date() &&
     user.membership.tier === tier
     ? user.membership.tierExpiresAt.getTime() : Date.now();
   await User.findByIdAndUpdate(userId, {
     'membership.tier': tier,
-    'membership.tierExpiresAt': new Date(base + 30 * 86400000)
+    'membership.tierExpiresAt': new Date(from + 30 * 86400000),
+    'membership.joinFeePaid': true,
+    'membership.paidAt': new Date(),
+    ...(payment ? { 'membership.joinFeePaymentId': payment._id, 'membership.joinFeeAmountCHF': payment.amountCHF } : {})
   });
   require('./services/analytics').track('tier_activated', userId, { tier });
 }
@@ -219,8 +231,11 @@ router.post('/admin/:paymentId/refund', requireAdmin, async (req, res, next) => 
     payment.refundedAt = new Date();
     await payment.save();
 
-    if (payment.purpose === 'join_fee') {
-      await User.findByIdAndUpdate(payment.userId, { 'membership.joinFeePaid': false });
+    if (payment.purpose === 'join_fee' || payment.purpose === 'base_subscription') {
+      // Refunding the base membership removes access entirely (nothing is free)
+      await User.findByIdAndUpdate(payment.userId, {
+        'membership.joinFeePaid': false, 'membership.tier': 'free', 'membership.tierExpiresAt': null
+      });
     }
 
     const Notification = require('./models/Notification');

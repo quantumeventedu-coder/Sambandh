@@ -1,4 +1,4 @@
-const mongoose = require('mongoose');
+const mongoose = require('../db/odm');
 const UserSchema = new mongoose.Schema({
   phone: { type: String, required: true, unique: true, index: true },
   phoneVerified: { type: Boolean, default: false },
@@ -42,7 +42,9 @@ const UserSchema = new mongoose.Schema({
     joinFeeAmountCHF: Number,
     joinFeeAmountUSD: Number, joinFeeAmountINR: Number, // legacy, unused
     joinFeePaymentId: mongoose.Schema.Types.ObjectId, paidAt: Date,
-    tier: { type: String, enum: ['free', 'pro', 'max'], default: 'free' },
+    // 'free' = no active membership (cannot use the app). Everything is paid:
+    // base CHF 1/5/3 per month by gender · pro CHF 6/mo · max CHF 15/mo.
+    tier: { type: String, enum: ['free', 'base', 'pro', 'max'], default: 'free' },
     tierExpiresAt: Date
   },
   preferences: {

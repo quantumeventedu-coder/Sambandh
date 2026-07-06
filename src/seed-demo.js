@@ -31,7 +31,7 @@ function demoUser(phone, gender, firstName, age, city, state, intent, extras = {
       level: 'fully_verified', idVerified: true, idType: 'aadhaar', idVerifiedAt: new Date(),
       selfieVerified: true, professionVerified: true, trustScore: 80
     },
-    membership: { joinFeePaid: true, tier: 'free', paidAt: new Date() },
+    membership: { joinFeePaid: true, tier: 'base', tierExpiresAt: new Date(Date.now() + 3650 * 86400000), paidAt: new Date() },
     preferences: {
       interestedInGenders: gender === 'male' ? ['female'] : ['male'],
       showProfessionToOthers: true, showAstrologyToOthers: true,

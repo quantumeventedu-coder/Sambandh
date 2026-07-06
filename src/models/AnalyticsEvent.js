@@ -1,4 +1,4 @@
-const mongoose = require('mongoose');
+const mongoose = require('../db/odm');
 // Product analytics events (spec §2.1.1 analytics events + §12).
 // PostHog replaces/augments this in production; this keeps funnels measurable locally.
 const AnalyticsEventSchema = new mongoose.Schema({

@@ -246,10 +246,10 @@ function renderFeatures() {
        first photo. The face you see is the face on the ID. Doctors, lawyers, CAs and architects can add
        a registry-checked badge. We never store Aadhaar numbers.`)}
 
-    ${section('card', 'No free accounts',
-      `A one-time join fee — <b>CHF 1 men · CHF 5 women · CHF 3 non-binary</b> — keeps bots out.
-       Refundable for 24 hours. Optional plans: <b>Pro, CHF 6/month</b> for unlimited messaging;
-       <b>Max, CHF 15/month</b> for the rest — who liked you, advanced filters, priority.`)}
+    ${section('card', 'Nothing is free',
+      `Membership is monthly — <b>CHF 1 men · CHF 5 women · CHF 3 non-binary</b> — and that's what
+       keeps bots out. First payment refundable for 24 hours. Upgrades: <b>Pro, CHF 6/month</b> for
+       unlimited messaging; <b>Max, CHF 15/month</b> for the rest — who liked you, advanced filters, priority.`)}
 
     ${section('book', 'The Karma Book',
       `Our AI compares what people say with what they do here. "You're the only one" while running four
@@ -287,14 +287,14 @@ function renderFeatures() {
 
     <div class="card mt" style="text-align:center">
       <div style="font-weight:700;font-size:16px">Membership at a glance</div>
-      <div class="kv" style="margin-top:10px"><span>Join once (men)</span><b>CHF 1</b></div>
-      <div class="kv"><span>Join once (women)</span><b>CHF 5</b></div>
-      <div class="kv"><span>Join once (non-binary)</span><b>CHF 3</b></div>
-      <div class="kv"><span>Sambandh Pro (optional)</span><b>CHF 6 / month</b></div>
-      <div class="kv"><span>Sambandh Max (optional)</span><b>CHF 15 / month</b></div>
+      <div class="kv" style="margin-top:10px"><span>Base · men</span><b>CHF 1 / month</b></div>
+      <div class="kv"><span>Base · women</span><b>CHF 5 / month</b></div>
+      <div class="kv"><span>Base · non-binary</span><b>CHF 3 / month</b></div>
+      <div class="kv"><span>Sambandh Pro</span><b>CHF 6 / month</b></div>
+      <div class="kv"><span>Sambandh Max</span><b>CHF 15 / month</b></div>
       <div class="kv"><span>Karma evidence reveal</span><b>CHF 0.50–1</b></div>
       <div class="kv"><span>Fraud alerts</span><b>Free, always</b></div>
-      <p class="hint" style="margin-top:8px">Your join fee is set by your verified profile — full refund within 24 hours.</p>
+      <p class="hint" style="margin-top:8px">Your base price is set by your verified profile — first payment refundable within 24 hours.</p>
     </div>
 
     <button class="btn mt" onclick="nav('${S.token ? '#/discover' : '#/login'}')">${S.token ? 'Back to the app' : 'Get started'}</button>
@@ -564,12 +564,12 @@ function obPay() {
   const g = S.user.profile.gender;
   const fee = g === 'male' ? 1 : g === 'female' ? 5 : 3;
   return `<div class="section-pad">
-    <h1>Pay join fee</h1>
-    <p class="sub">One-time. No free access — every member pays. Filters serious people from browsers.</p>
+    <h1>Start your membership</h1>
+    <p class="sub">Nothing here is free — every member pays monthly. That's what keeps the bots and time-wasters out.</p>
     <div class="card center" style="background:var(--rose-soft);border-color:var(--rose)">
-      <div style="font-size:38px;font-weight:700;color:var(--sindoor-deep);font-family:Georgia,serif">CHF ${fee}</div>
-      <div style="font-size:12px;color:var(--sindoor)">one-time · never again · taxes included</div>
-      <div class="hint">Men CHF 1 · Women CHF 5 · Non-binary CHF 3 — your price is set by your verified profile, not by this page.</div>
+      <div style="font-size:38px;font-weight:700;color:var(--sindoor-deep);font-family:Georgia,serif">CHF ${fee}<span style="font-size:15px;color:var(--sindoor)"> / month</span></div>
+      <div style="font-size:12px;color:var(--sindoor)">30 days per payment · renew when it suits you · taxes included</div>
+      <div class="hint">Men CHF 1 · Women CHF 5 · Non-binary CHF 3 per month — your price is set by your verified profile, not by this page.</div>
     </div>
     <button class="btn" onclick="obPayNow()">Pay with UPI / Card</button>
     <p class="hint center mt">Powered by Razorpay · Secure payment · Full refund within 24 hours, no questions asked</p>
@@ -578,7 +578,7 @@ function obPay() {
 
 async function obPayNow() {
   try {
-    const order = await api('/payment/create-order', { method: 'POST', body: { purpose: 'join_fee' } });
+    const order = await api('/payment/create-order', { method: 'POST', body: { purpose: 'base_subscription' } });
     if (order.devMode) {
       await api('/payment/verify', { method: 'POST', body: { razorpay_order_id: order.orderId } });
       toast('Payment simulated (dev mode) ✓');
@@ -587,9 +587,9 @@ async function obPayNow() {
     // Production Razorpay Checkout
     const rzp = new Razorpay({
       key: order.key, amount: order.amount, currency: order.currency, name: 'Sambandh',
-      description: 'Join fee', order_id: order.orderId, prefill: order.prefill,
+      description: 'Base membership (monthly)', order_id: order.orderId, prefill: order.prefill,
       handler: async resp => {
-        await api('/payment/verify', { method: 'POST', body: { ...resp, purpose: 'join_fee' } });
+        await api('/payment/verify', { method: 'POST', body: { ...resp, purpose: 'base_subscription' } });
         toast('Payment successful ✓');
         refreshUserAndRoute();
       }
@@ -1261,7 +1261,8 @@ async function renderSettings() {
   } catch (e) { screen.querySelector('.section-pad').innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
 }
 
-// Membership tiers (CHF): Member (join fee) · Sambandh Pro CHF 6/mo · Sambandh Max CHF 15/mo
+// Membership tiers (CHF, all monthly — nothing is free):
+// Base 1/5/3 by gender · Sambandh Pro 6 · Sambandh Max 15
 function tierCards(u) {
   const tier = u.membership?.tier || 'free';
   const active = tier !== 'free' && (!u.membership?.tierExpiresAt || new Date(u.membership.tierExpiresAt) > new Date());
@@ -1283,16 +1284,17 @@ function tierCards(u) {
     </div>`;
 
   const g = u.profile?.gender;
-  const joinFee = g === 'male' ? 'CHF 1' : g === 'female' ? 'CHF 5' : 'CHF 3';
-  return card('free', 'Member', `${joinFee} one-time`, [
-    'No free access — every member pays the join fee (CHF 1 men · CHF 5 women · CHF 3 non-binary)',
+  const baseFee = g === 'male' ? 'CHF 1' : g === 'female' ? 'CHF 5' : 'CHF 3';
+  return card('base', 'Base membership', `${baseFee}/month`, [
+    'Nothing is free — every member subscribes (men CHF 1 · women CHF 5 · non-binary CHF 3 per month)',
     'Fully verified community: ID + selfie + profession',
     'Daily allowance: 10 msgs men · 20 msgs women, non-binary & others',
     'Full Karma Book, compatibility & discover'
-  ], null)
+  ], 'base_subscription')
   + card('pro', 'Sambandh Pro', 'CHF 6/month', [
     'Unlimited messages & new chats',
-    'No daily limits, ever'
+    'No daily limits, ever',
+    'Includes everything in Base'
   ], 'pro_subscription')
   + card('max', 'Sambandh Max', 'CHF 15/month', [
     'Everything in Pro (unlimited messaging)',
@@ -1303,7 +1305,9 @@ function tierCards(u) {
 }
 
 async function buyTier(purpose) {
-  const name = purpose === 'max_subscription' ? 'Sambandh Max (CHF 15/month)' : 'Sambandh Pro (CHF 6/month)';
+  const name = purpose === 'max_subscription' ? 'Sambandh Max (CHF 15/month)'
+    : purpose === 'pro_subscription' ? 'Sambandh Pro (CHF 6/month)'
+    : 'Base membership (monthly, priced by your profile)';
   if (!confirm(`Subscribe to ${name}? 30 days from today.`)) return;
   try {
     const order = await api('/payment/create-order', { method: 'POST', body: { purpose } });

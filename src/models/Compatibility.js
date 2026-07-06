@@ -1,4 +1,4 @@
-const mongoose = require('mongoose');
+const mongoose = require('../db/odm');
 const CompatibilitySchema = new mongoose.Schema({
   // userPair is always stored sorted (smaller id first) so a pair has one document
   userPair: { type: [String], required: true },

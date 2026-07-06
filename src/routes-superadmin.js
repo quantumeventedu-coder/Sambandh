@@ -9,7 +9,7 @@
 //     2021 obligations); this is not a general browsing tool.
 
 const express = require('express');
-const mongoose = require('mongoose');
+const mongoose = require('./db/odm');
 const User = require('./models/User');
 const Chat = require('./models/Chat');
 const Message = require('./models/Message');
@@ -35,12 +35,13 @@ const oid = v => mongoose.Types.ObjectId.isValid(v);
 router.get('/stats', async (req, res, next) => {
   try {
     const dayStart = new Date(Date.now() - 24 * 3600 * 1000);
-    const [users, verified, paid, pro, max, suspended, banned,
+    const [users, verified, paid, base, pro, max, suspended, banned,
       chats, messages, messages24h, reportsPending, reportsEscalated,
       payments, escalations] = await Promise.all([
       User.countDocuments({}),
       User.countDocuments({ 'verification.idVerified': true }),
       User.countDocuments({ 'membership.joinFeePaid': true }),
+      User.countDocuments({ 'membership.tier': 'base' }),
       User.countDocuments({ 'membership.tier': 'pro' }),
       User.countDocuments({ 'membership.tier': 'max' }),
       User.countDocuments({ 'status.suspended': true }),
@@ -57,7 +58,7 @@ router.get('/stats', async (req, res, next) => {
       Escalation.countDocuments({})
     ]);
     res.json({
-      users: { total: users, verified, paid, pro, max, suspended, banned },
+      users: { total: users, verified, paid, base, pro, max, suspended, banned },
       chats: { total: chats, messages, messages24h },
       moderation: { reportsPending, reportsEscalated, karmaEscalations: escalations },
       revenue: { capturedPayments: payments[0]?.count || 0, totalCHF: +(payments[0]?.totalCHF || 0).toFixed(2) }

@@ -419,7 +419,7 @@ async function applyApproval(verification) {
     updates[`claims.${verification.type}.verificationId`] = verification._id;
   }
 
-  const v = { ...user.verification.toObject() };
+  const v = { ...(user.verification.toObject ? user.verification.toObject() : user.verification) };
   if (verification.type === 'id') v.idVerified = true;
   if (verification.type === 'selfie') v.selfieVerified = true;
   if (verification.type === 'profession') v.professionVerified = true;

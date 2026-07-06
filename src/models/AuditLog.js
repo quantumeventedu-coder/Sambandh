@@ -1,4 +1,4 @@
-const mongoose = require('mongoose');
+const mongoose = require('../db/odm');
 // Every admin/moderator action is logged here. Retained 3 years per policy.
 const AuditLogSchema = new mongoose.Schema({
   actor: { type: String, required: true },        // moderator userId or 'admin-panel'

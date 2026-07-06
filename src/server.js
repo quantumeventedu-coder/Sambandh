@@ -5,7 +5,7 @@
 // /public, and uploaded photos from /uploads (local dev storage).
 
 const express = require('express');
-const mongoose = require('mongoose');
+const mongoose = require('./db/odm');
 const http = require('http');
 const path = require('path');
 const dns = require('dns');
@@ -160,6 +160,15 @@ app.set('io', io);
 // 3. Fall back to an in-memory local MongoDB so development never blocks.
 
 async function connectDatabase() {
+  // Supabase / PostgreSQL (DATABASE_URL set → src/db/odm loaded the pg engine).
+  // Use the SESSION POOLER hostname (aws-…pooler.supabase.com) — Supabase's
+  // direct db.<ref> host is IPv6-only and unreachable from Vercel/IPv4 networks.
+  if (process.env.DATABASE_URL) {
+    await mongoose.connect(process.env.DATABASE_URL);
+    console.log('[OK] PostgreSQL connected (Supabase)');
+    return;
+  }
+
   const uri = process.env.MONGODB_URI;
 
   if (uri && process.env.USE_MEMORY_DB !== 'true') {

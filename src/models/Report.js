@@ -1,4 +1,4 @@
-const mongoose = require('mongoose');
+const mongoose = require('../db/odm');
 const ReportSchema = new mongoose.Schema({
   // 'user' = filed by a member; 'system' = auto-filed by the AI reputation engine (no reporterId)
   source: { type: String, enum: ['user', 'system'], default: 'user' },

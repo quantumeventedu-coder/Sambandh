@@ -121,7 +121,7 @@ async function renderOverview() {
       <div class="stat"><b>${s.users.total}</b><span>USERS</span></div>
       <div class="stat"><b>${s.users.verified}</b><span>ID VERIFIED</span></div>
       <div class="stat"><b>${s.users.paid}</b><span>JOIN FEE PAID</span></div>
-      <div class="stat"><b>${s.users.pro} / ${s.users.max}</b><span>PRO / MAX</span></div>
+      <div class="stat"><b>${s.users.base ?? 0} / ${s.users.pro} / ${s.users.max}</b><span>BASE / PRO / MAX</span></div>
       <div class="stat"><b>${s.users.suspended} / ${s.users.banned}</b><span>SUSPENDED / BANNED</span></div>
       <div class="stat"><b>${s.chats.total}</b><span>CHATS</span></div>
       <div class="stat"><b>${s.chats.messages24h}</b><span>MESSAGES · 24H</span></div>

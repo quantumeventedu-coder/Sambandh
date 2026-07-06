@@ -1,7 +1,7 @@
-const mongoose = require('mongoose');
+const mongoose = require('../db/odm');
 const PaymentSchema = new mongoose.Schema({
   userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
-  purpose: { type: String, enum: ['join_fee', 'karma_escalation', 'pro_subscription', 'max_subscription', 'boost'], required: true },
+  purpose: { type: String, enum: ['base_subscription', 'join_fee', 'karma_escalation', 'pro_subscription', 'max_subscription', 'boost'], required: true },
   amountCHF: Number,
   currency: { type: String, default: 'CHF' },
   amountINR: Number, amountUSD: Number, // legacy, unused

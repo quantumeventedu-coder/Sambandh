@@ -1,4 +1,4 @@
-const mongoose = require('mongoose');
+const mongoose = require('../db/odm');
 const EscalationSchema = new mongoose.Schema({
   viewingUserId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
   targetUserId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },

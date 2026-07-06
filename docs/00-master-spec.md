@@ -34,7 +34,7 @@
 
 ## 1.1 Purpose
 
-Sambandh ("connection" in Hindi) is a **verified, honesty-first dating platform for India**. Every member is government-ID verified, every member pays a small one-time join fee (no free tier, no bots), and an AI-driven **Karma Book** continuously measures honesty — surfacing lies, contradictions, love-bombing, and fraud patterns to potential matches *without* exposing private chat content.
+Sambandh ("connection" in Hindi) is a **verified, honesty-first dating platform for India**. Every member is government-ID verified, every member pays a small monthly base membership (nothing is free, no bots), and an AI-driven **Karma Book** continuously measures honesty — surfacing lies, contradictions, love-bombing, and fraud patterns to potential matches *without* exposing private chat content.
 
 ## 1.2 Mission
 
@@ -45,7 +45,7 @@ Make online dating in India safe and honest by making **deception expensive and 
 | # | Objective | Mechanism |
 |---|---|---|
 | O1 | Zero fake profiles | Mandatory government ID + selfie liveness before any interaction |
-| O2 | Zero free-rider spam | Paid membership for everyone (CHF 1/5/3 one-time) |
+| O2 | Zero free-rider spam | Paid monthly membership for everyone (base CHF 1/5/3 per month) |
 | O3 | Measurable honesty | Karma Book score 0–100 with public flags; AI claim extraction & contradiction detection |
 | O4 | Safe escalation of harm | Report pipeline with 24 h SLA (IT Rules 2021), AI-auto-filed reports, moderator panel |
 | O5 | Compatibility beyond photos | Vedic astrology (guna milan) + engagement-style compatibility scoring |
@@ -137,9 +137,9 @@ Each feature below states purpose, flow, business logic, validation, errors, suc
 
 | Purpose | Price | Minor units (rappen) | Grants |
 |---|---|---|---|
-| `join_fee` (male) | **CHF 1** | 100 | Membership activation |
-| `join_fee` (female) | **CHF 5** | 500 | Membership activation |
-| `join_fee` (non-binary/other) | **CHF 3** | 300 | Membership activation |
+| `base_subscription` (male) | **CHF 1 / 30 days** | 100 | Base membership — monthly, stacking renewals (legacy purpose `join_fee` maps here) |
+| `base_subscription` (female) | **CHF 5 / 30 days** | 500 | Base membership — monthly |
+| `base_subscription` (non-binary/other) | **CHF 3 / 30 days** | 300 | Base membership — monthly |
 | `pro_subscription` | **CHF 6 / 30 days** | 600 | **Sambandh Pro**: unlimited messages & new chats (legacy purpose name `plus_subscription` still accepted, maps to Pro) |
 | `max_subscription` | **CHF 15 / 30 days** | 1500 | **Sambandh Max**: everything in Pro + see-who-liked-you list + advanced filters (karma grade) + priority support (legacy `premium_subscription` maps here) |
 | `karma_escalation` | **CHF 0.50** | 50 | Reveal evidence behind exclusivity/love-bombing/contradiction flags |
@@ -474,7 +474,7 @@ Base URL `/api`. Auth column: **P** public · **U** user JWT (`Authorization: Be
 | 14 | GET `/verification/admin/queue` | A | Pending manual verifications |
 | 15 | POST `/verification/admin/:id/approve` | A | Approve + apply badges |
 | 16 | POST `/verification/admin/:id/reject` | A | `{reason}` → rejection + notification |
-| 17 | POST `/payment/create-order` | U | `{purpose?}` default `join_fee` → `{orderId, amount, amountCHF, currency:'CHF', purpose, key?, prefill?, devMode?}`; join fee requires idVerified & unpaid; **fee from stored gender** |
+| 17 | POST `/payment/create-order` | U | `{purpose?}` default `base_subscription` → `{orderId, amount, amountCHF, currency:'CHF', purpose, key?, prefill?, devMode?}`; base requires idVerified, renewals stack +30 d; **fee from stored gender**. Tier `free` = no access (amended July 2026: nothing is free; `membership.joinFeePaid` = "membership currently active", set on any activation, cleared by the nightly expiry cron) |
 | 18 | POST `/payment/verify` | U | Dev: `{razorpay_order_id}`; prod: + `razorpay_payment_id, razorpay_signature` (HMAC checked) → grants purpose; idempotent |
 | 19 | POST `/payment/webhook` | P (signature) | Razorpay webhook, raw-body HMAC verification |
 | 20 | GET `/payment/history` | U | Own payments (CHF) |
