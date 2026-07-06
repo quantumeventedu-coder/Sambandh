@@ -390,9 +390,41 @@ Conventions: `_id` ObjectId PK everywhere; `userId`-style fields are ObjectId re
 
 # 6. Backend Architecture
 
+## 6.0 Data layer (switchable, hardened)
+
+The app talks to `src/db/odm.js`, not to Mongoose directly. When `DATABASE_URL` is
+set it loads **`src/db/pg-odm.js`** — a Mongoose-compatible document engine over
+**PostgreSQL/Supabase** (one table per collection: `id text primary key, doc jsonb`);
+otherwise it loads real Mongoose (Atlas or in-memory). Every model and route runs
+unchanged on either backend.
+
+The Postgres engine is built for scale, not just correctness:
+- **Reads are filtered in SQL, not in Node.** Each Mongo filter is translated into a
+  `WHERE` on the JSONB column (`_id`→primary key, scalar equality, `$in`, `$gt/$gte/$lt/$lte`,
+  `$exists`, `$all`, array membership) so Postgres returns only matching rows. The
+  JS matcher then runs on those rows as the **correctness authority** — the SQL
+  pre-filter only ever needs to be a permissive superset, so it can never cause a
+  wrong result. Untranslatable operators (`$ne`, `$nin`, `$size`, `$regex`, `$or`)
+  fall through to the JS matcher. A per-key param snapshot rolls back partial
+  translations so a bound value never outlives its placeholder.
+- **Indexes**: every table gets a GIN index (array membership / containment) plus
+  btree expression indexes on hot reference paths (`chatId`, `from`, `to`, `userId`,
+  …); `findById` hits the primary key. Index creation is best-effort (never bricks a
+  populated table).
+- **DB-level uniqueness**: partial unique indexes on `unique` fields (`phone`,
+  `razorpayPaymentId`); a violation raises a Mongo-style `E11000` (code 11000).
+- **Pooling**: `pg.Pool`, capped at 2 connections under Vercel, 8 otherwise.
+- Verified against live Supabase with the full E2E suite (core journey, tier/limit,
+  super-admin, and a depth suite asserting index existence, 23505 uniqueness, and
+  PK index scans) plus the Mongoose path via jest.
+
+> ‼️ **Supabase host**: use the **session-pooler** hostname
+> (`aws-…pooler.supabase.com:5432`), not the `db.<ref>.supabase.co` direct host,
+> which is IPv6-only and unreachable from Vercel/most IPv4 networks.
+
 ## 6.1 Runtime & module map
 
-Node ≥ 20, Express 4, Socket.io 4, Mongoose 8. Single process serving API + static web app + websockets.
+Node ≥ 20, Express 4, Socket.io 4, Mongoose 8 (or the pg engine above). Single process serving API + static web app + websockets.
 
 ```
 src/server.js                 bootstrap: middleware → routes → static → sockets → DB (Atlas→DNS-retry→in-memory) → seed → crons → listen

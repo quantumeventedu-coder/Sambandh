@@ -5,15 +5,24 @@
 // keep their MongoDB shape — 24-hex string ids, ISO dates — so every route,
 // model and business rule runs unchanged on either backend.
 //
+// SCALE MODEL (hardened July 2026):
+//   · Reads translate the filter into a SQL WHERE on the JSONB column and let
+//     Postgres do the work — no more "SELECT * → filter in Node". The JS matcher
+//     still runs on the returned rows as the CORRECTNESS AUTHORITY, so the SQL
+//     pre-filter only ever needs to be *permissive* (a superset); it can never
+//     cause a wrong result, only affect how many rows Postgres returns.
+//   · Every table gets a GIN index (array membership / containment) plus btree
+//     expression indexes on hot reference paths (chatId, from, to, userId, …)
+//     and unique indexes for fields declared `unique` (phone, razorpayPaymentId).
+//   · findById hits the primary key directly.
+//
 // Implements exactly the API surface this codebase uses (verified by grep):
 //   Model.find/findOne/findById/create/countDocuments/distinct/aggregate
-//   Model.findByIdAndUpdate/findOneAndUpdate/updateMany/deleteOne/deleteMany
-//   chains: .sort .limit .select .lean .populate — plus doc.save()
-//   filters: $ne $in $nin $gt $gte $lt $lte $exists $or $and $all $size,
+//   Model.findByIdAndUpdate/findOneAndUpdate(+upsert,+$setOnInsert)/updateMany
+//   Model.deleteOne/deleteMany · chains .sort .limit .select .lean .populate
+//   filters: $ne $in $nin $gt $gte $lt $lte $exists $or $and $all $size $regex,
 //   RegExp values, dot paths, array-membership equality
-//   updates: plain $set-style paths, $inc, $set
-// Scale note: queries scan the table and match in JS — correct and plenty for
-// launch-scale data; move hot filters into SQL predicates before large scale.
+//   updates: plain paths, $set, $setOnInsert, $inc, $push · doc.save()
 
 const crypto = require('crypto');
 const { Pool } = require('pg');
@@ -22,6 +31,10 @@ let pool = null;
 const registeredModels = {};
 const ensuredTables = new Set();
 const connection = { readyState: 0 };
+
+// Single-level reference fields worth a btree index when present in a schema.
+const HOT_PATHS = ['chatId', 'from', 'to', 'userId', 'viewingUserId', 'targetUserId',
+  'reportedUserId', 'reporterId', 'razorpayOrderId', 'token'];
 
 function newId() { return crypto.randomBytes(12).toString('hex'); }
 
@@ -86,7 +99,7 @@ function setPath(doc, path, value) {
   cur[parts[parts.length - 1]] = value;
 }
 
-// ---------- query matcher (Mongo semantics for the operators we use) ----------
+// ---------- query matcher (authoritative Mongo semantics) ----------
 function comparable(v) {
   if (v instanceof Date) return v.getTime();
   if (typeof v === 'string' && ISO_RE.test(v)) return new Date(v).getTime();
@@ -132,10 +145,7 @@ function valueMatches(docVal, cond) {
             if (!arg.every(a => arr.some(d => scalarEq(d, a)))) return false;
             break;
           }
-          case '$size': {
-            if (!Array.isArray(docVal) || docVal.length !== arg) return false;
-            break;
-          }
+          case '$size': if (!Array.isArray(docVal) || docVal.length !== arg) return false; break;
           case '$regex': {
             const rx = arg instanceof RegExp ? arg : new RegExp(arg, cond.$options || '');
             if (!(typeof docVal === 'string' && rx.test(docVal))) return false;
@@ -152,9 +162,7 @@ function valueMatches(docVal, cond) {
 }
 
 function matchEquality(docVal, target) {
-  if (Array.isArray(docVal) && !Array.isArray(target)) {
-    return docVal.some(d => scalarEq(d, target));
-  }
+  if (Array.isArray(docVal) && !Array.isArray(target)) return docVal.some(d => scalarEq(d, target));
   return scalarEq(docVal, target);
 }
 
@@ -166,6 +174,93 @@ function matches(doc, filter) {
     if (!valueMatches(getPath(doc, key), cond)) return false;
   }
   return true;
+}
+
+// ---------- SQL pre-filter (a permissive superset; JS matcher is authority) ----------
+function jsonExpr(key) {
+  const parts = key.split('.');
+  if (parts.length === 1) return { text: `doc->>'${parts[0]}'`, node: `doc->'${parts[0]}'` };
+  const lit = `'{${parts.join(',')}}'`;
+  return { text: `doc#>>${lit}`, node: `doc#>${lit}` };
+}
+
+function scalarStr(v) {
+  return v instanceof ObjectId ? v.toString()
+    : v instanceof Date ? v.toISOString()
+      : String(v);
+}
+
+// Returns { where, params, full }. `full` = every key translated with EXACT
+// semantics (safe to COUNT in SQL without the JS pass). Any key we can't
+// translate is simply omitted from WHERE (superset) and clears `full`.
+function sqlPrefilter(filter) {
+  const parts = [], params = [];
+  let full = true;
+  const bind = v => { params.push(v); return '$' + params.length; };
+
+  for (const key of Object.keys(filter || {})) {
+    const cond = filter[key];
+    const snap = params.length;           // roll-back point if this key isn't fully translatable
+    const skip = () => { params.length = snap; full = false; }; // undo any stray binds
+
+    if (key === '$or' || key === '$and') { full = false; continue; }
+    if (!/^[A-Za-z0-9_.]+$/.test(key)) { full = false; continue; }
+
+    if (key === '_id') {
+      if (cond && typeof cond === 'object' && !(cond instanceof ObjectId) && !(cond instanceof Date)) {
+        if ('$in' in cond) { parts.push(`id = ANY(${bind(cond.$in.map(String))}::text[])`); continue; }
+        if ('$nin' in cond) { parts.push(`NOT (id = ANY(${bind(cond.$nin.map(String))}::text[]))`); continue; }
+        if ('$ne' in cond) { parts.push(`id <> ${bind(String(cond.$ne))}`); continue; }
+        full = false; continue;
+      }
+      parts.push(`id = ${bind(scalarStr(cond))}`); continue;
+    }
+
+    const e = jsonExpr(key);
+    if (cond instanceof RegExp) { full = false; continue; }
+
+    // operator object
+    if (cond && typeof cond === 'object' && !(cond instanceof Date) && !(cond instanceof ObjectId) && !Array.isArray(cond)) {
+      const ops = Object.keys(cond);
+      if (!ops.length || !ops.every(k => k.startsWith('$'))) { full = false; continue; }
+      const local = []; let ok = true;
+      for (const op of ops) {
+        const arg = cond[op];
+        if (op === '$exists') local.push(arg ? `${e.node} IS NOT NULL` : `${e.node} IS NULL`);
+        else if (['$gt', '$gte', '$lt', '$lte'].includes(op)) {
+          const s = { $gt: '>', $gte: '>=', $lt: '<', $lte: '<=' }[op];
+          if (arg instanceof Date || typeof arg === 'string') {
+            local.push(`(jsonb_typeof(${e.node}) = 'string' AND ${e.text} ${s} ${bind(arg instanceof Date ? arg.toISOString() : arg)})`);
+          } else if (typeof arg === 'number') {
+            local.push(`(jsonb_typeof(${e.node}) = 'number' AND (${e.text})::numeric ${s} ${bind(String(arg))}::numeric)`);
+          } else { ok = false; break; }
+        }
+        else if (op === '$in') {
+          if (!Array.isArray(arg) || !arg.every(a => a === null || ['string', 'number', 'boolean'].includes(typeof a) || a instanceof ObjectId)) { ok = false; break; }
+          const arr = arg.map(scalarStr), p = bind(arr);
+          // jsonb_exists_any = the ?| operator in function form (node-postgres mis-parses "?")
+          local.push(`(${e.text} = ANY(${p}::text[]) OR (jsonb_typeof(${e.node}) = 'array' AND jsonb_exists_any(${e.node}, ${p}::text[])))`);
+        }
+        else if (op === '$all') {
+          if (!Array.isArray(arg) || !arg.every(a => typeof a === 'string' || a instanceof ObjectId)) { ok = false; break; }
+          local.push(`(jsonb_typeof(${e.node}) = 'array' AND jsonb_exists_all(${e.node}, ${bind(arg.map(scalarStr))}::text[]))`);
+        }
+        else { ok = false; break; } // $ne/$nin/$size/$regex → JS handles
+      }
+      // A key is only translatable if EVERY operator translated. A partial
+      // translation would leave a bound param with no placeholder — roll back.
+      if (ok && local.length && local.length === ops.filter(o => o !== '$options').length) parts.push(local.join(' AND '));
+      else skip();
+      continue;
+    }
+
+    // scalar equality: field == value OR (field is array containing value)
+    if (cond === null || (typeof cond === 'object' && !(cond instanceof Date) && !(cond instanceof ObjectId))) { full = false; continue; }
+    const p = bind(scalarStr(cond));
+    // jsonb_exists = the "?" operator in function form (node-postgres mis-parses "?")
+    parts.push(`(${e.text} = ${p} OR (jsonb_typeof(${e.node}) = 'array' AND jsonb_exists(${e.node}, ${p})))`);
+  }
+  return { where: parts.length ? parts.join(' AND ') : 'true', params, full };
 }
 
 // ---------- schema ----------
@@ -184,14 +279,10 @@ function applyDefaults(def, doc) {
   for (const key of Object.keys(def)) {
     const spec = def[key];
     if (key === '_id') continue;
-    if (Array.isArray(spec)) {
-      if (doc[key] === undefined) doc[key] = [];
-    } else if (isFieldSpec(spec)) {
-      if (doc[key] === undefined && spec.default !== undefined) {
-        doc[key] = typeof spec.default === 'function' ? spec.default() : spec.default;
-      }
-    } else if (spec && typeof spec === 'object' && !(spec === Types.Mixed) && spec !== 'Mixed' && typeof spec !== 'function') {
-      // nested object definition
+    if (Array.isArray(spec)) { if (doc[key] === undefined) doc[key] = []; }
+    else if (isFieldSpec(spec)) {
+      if (doc[key] === undefined && spec.default !== undefined) doc[key] = typeof spec.default === 'function' ? spec.default() : spec.default;
+    } else if (spec && typeof spec === 'object' && spec !== Types.Mixed && spec !== 'Mixed' && typeof spec !== 'function') {
       if (doc[key] === undefined) doc[key] = {};
       if (doc[key] && typeof doc[key] === 'object' && !Array.isArray(doc[key])) applyDefaults(spec, doc[key]);
     }
@@ -214,10 +305,13 @@ function validate(def, doc, modelName) {
   }
 }
 
+function uniqueFieldsOf(def) {
+  return Object.keys(def).filter(k => isFieldSpec(def[k]) && def[k].unique === true);
+}
+
 function refFor(def, path) {
-  const spec = getPath(def, path.split('.').join('.'));
   const s = def[path];
-  const candidate = s || spec;
+  const candidate = s || getPath(def, path);
   if (Array.isArray(candidate)) return candidate[0] && candidate[0].ref;
   return candidate && candidate.ref;
 }
@@ -225,15 +319,49 @@ function refFor(def, path) {
 // ---------- table plumbing ----------
 function tableName(modelName) { return modelName.toLowerCase() + 's'; }
 
-async function ensureTable(t) {
+async function ensureTable(model) {
+  const t = model.table;
   if (ensuredTables.has(t)) return;
   await pool.query(`create table if not exists ${t} (id text primary key, doc jsonb not null)`);
-  ensuredTables.add(t);
+  ensuredTables.add(t); // mark early: the table exists; indexes are best-effort accelerators
+
+  // Index creation is non-fatal — a pre-existing duplicate on an already-populated
+  // table must never brick reads/writes. New/clean tables get every index.
+  const tryIndex = async (sql, label) => {
+    try { await pool.query(sql); }
+    catch (e) { console.warn(`[pg-odm] index ${label} on ${t} skipped: ${e.message.split('\n')[0]}`); }
+  };
+  // GIN accelerates array membership (?) and containment (@>)
+  await tryIndex(`create index if not exists ${t}_doc_gin on ${t} using gin (doc)`, 'gin');
+  // btree expression indexes on hot single-level reference paths present in the schema
+  for (const f of HOT_PATHS) {
+    if (model.schema.def[f] !== undefined) {
+      await tryIndex(`create index if not exists ${t}_${f.toLowerCase()}_idx on ${t} ((doc->>'${f}'))`, f);
+    }
+  }
+  // DB-level uniqueness (partial: only when the field is present)
+  for (const f of model._uniqueFields) {
+    await tryIndex(`create unique index if not exists ${t}_${f.toLowerCase()}_uniq on ${t} ((doc->>'${f}')) where doc->>'${f}' is not null`, f + '_uniq');
+  }
 }
 
-async function allDocs(t) {
-  await ensureTable(t);
-  const r = await pool.query(`select doc from ${t}`);
+async function loadDocs(model, filter) {
+  await ensureTable(model);
+  const { where, params } = sqlPrefilter(filter || {});
+  let r;
+  try {
+    r = await pool.query(`select doc from ${model.table} where ${where}`, params);
+  } catch (err) {
+    console.error('[pg-odm] query failed on', model.table, '::', where, ':: params', JSON.stringify(params), '::', err.message);
+    throw err;
+  }
+  const docs = r.rows.map(row => revive(row.doc));
+  return (filter && Object.keys(filter).length) ? docs.filter(d => matches(d, filter)) : docs;
+}
+
+async function allDocs(model) {
+  await ensureTable(model);
+  const r = await pool.query(`select doc from ${model.table}`);
   return r.rows.map(row => revive(row.doc));
 }
 
@@ -250,7 +378,7 @@ class Query {
   populate(path, select) { this._populate.push({ path, select }); return this; }
 
   async exec() {
-    let docs = (await allDocs(this.model.table)).filter(d => matches(d, this.filter));
+    let docs = await loadDocs(this.model, this.filter);
     if (this._sort) {
       const keys = Object.entries(this._sort);
       docs.sort((a, b) => {
@@ -281,10 +409,7 @@ function project(doc, selectStr) {
   const fields = String(selectStr).trim().split(/\s+/).filter(f => f && !f.startsWith('-'));
   if (!fields.length) return doc;
   const out = { _id: doc._id };
-  for (const f of fields) {
-    const v = getPath(doc, f);
-    if (v !== undefined) setPath(out, f, v);
-  }
+  for (const f of fields) { const v = getPath(doc, f); if (v !== undefined) setPath(out, f, v); }
   return out;
 }
 
@@ -299,7 +424,7 @@ async function populateDocs(model, docs, { path, select }) {
     else if (v) ids.add(String(v));
   }
   if (!ids.size) return docs;
-  const refs = (await allDocs(refModel.table)).filter(r => ids.has(String(r._id)));
+  const refs = await loadDocs(refModel, { _id: { $in: [...ids] } });
   const byId = Object.fromEntries(refs.map(r => [String(r._id), select ? project(r, select) : r]));
   for (const d of docs) {
     const v = getPath(d, path);
@@ -316,18 +441,18 @@ function applyUpdate(doc, update, isInsert = false) {
     if (key === '$set') { for (const p of Object.keys(val)) setPath(doc, p, toPlain(val[p])); }
     else if (key === '$setOnInsert') { if (isInsert) for (const p of Object.keys(val)) setPath(doc, p, toPlain(val[p])); }
     else if (key === '$inc') { for (const p of Object.keys(val)) setPath(doc, p, (Number(getPath(doc, p)) || 0) + val[p]); }
-    else if (key === '$push') {
-      for (const p of Object.keys(val)) {
-        const arr = getPath(doc, p) || [];
-        arr.push(toPlain(val[p]));
-        setPath(doc, p, arr);
-      }
-    }
+    else if (key === '$push') { for (const p of Object.keys(val)) { const arr = getPath(doc, p) || []; arr.push(toPlain(val[p])); setPath(doc, p, arr); } }
     else if (key.startsWith('$')) throw new Error('pg-odm: unsupported update operator ' + key);
     else setPath(doc, key, toPlain(val));
   }
 }
 function toPlain(v) { return v instanceof ObjectId ? v.toString() : v; }
+
+function dupError(modelName, err) {
+  const e = new Error(`E11000 duplicate key error collection: ${modelName}`);
+  e.code = 11000; e.cause = err;
+  return e;
+}
 
 // ---------- model factory ----------
 function model(name, schema) {
@@ -335,9 +460,9 @@ function model(name, schema) {
 
   class Model {
     constructor(data) { Object.assign(this, data); }
-
     static get table() { return tableName(name); }
     static get schema() { return schema; }
+    static get _uniqueFields() { return uniqueFieldsOf(schema.def); }
 
     static _instance(plain) {
       const inst = new Model(plain);
@@ -346,9 +471,10 @@ function model(name, schema) {
       }});
       Object.defineProperty(inst, 'save', { enumerable: false, value: async function () {
         validate(schema.def, this, name);
-        const stored = toStorable({ ...this });
-        await ensureTable(Model.table);
-        await pool.query(`update ${Model.table} set doc = $2 where id = $1`, [String(this._id), JSON.stringify(stored)]);
+        await ensureTable(Model);
+        try {
+          await pool.query(`update ${Model.table} set doc = $2 where id = $1`, [String(this._id), JSON.stringify(toStorable({ ...this }))]);
+        } catch (err) { if (err.code === '23505') throw dupError(name, err); throw err; }
         return this;
       }});
       return inst;
@@ -365,8 +491,10 @@ function model(name, schema) {
       doc._id = doc._id ? String(doc._id) : newId();
       const revived = revive(doc);
       validate(schema.def, revived, name);
-      await ensureTable(Model.table);
-      await pool.query(`insert into ${Model.table} (id, doc) values ($1, $2)`, [doc._id, JSON.stringify(doc)]);
+      await ensureTable(Model);
+      try {
+        await pool.query(`insert into ${Model.table} (id, doc) values ($1, $2)`, [doc._id, JSON.stringify(doc)]);
+      } catch (err) { if (err.code === '23505') throw dupError(name, err); throw err; }
       return Model._instance(revived);
     }
 
@@ -378,21 +506,21 @@ function model(name, schema) {
     }
 
     static async countDocuments(filter) {
-      if (!filter || !Object.keys(filter).length) {
-        await ensureTable(Model.table);
-        const r = await pool.query(`select count(*)::int as n from ${Model.table}`);
+      await ensureTable(Model);
+      const { where, params, full } = sqlPrefilter(filter || {});
+      if (full) {
+        const r = await pool.query(`select count(*)::int n from ${Model.table} where ${where}`, params);
         return r.rows[0].n;
       }
-      return (await allDocs(Model.table)).filter(d => matches(d, filter)).length;
+      return (await loadDocs(Model, filter)).length;
     }
 
     static async distinct(field, filter) {
-      const docs = (await allDocs(Model.table)).filter(d => matches(d, filter || {}));
+      const docs = await loadDocs(Model, filter || {});
       const seen = new Map();
       for (const d of docs) {
         const v = getPath(d, field);
-        const vals = Array.isArray(v) ? v : [v];
-        for (const x of vals) if (x !== undefined && x !== null) seen.set(String(x), x);
+        for (const x of (Array.isArray(v) ? v : [v])) if (x !== undefined && x !== null) seen.set(String(x), x);
       }
       return [...seen.values()];
     }
@@ -402,52 +530,46 @@ function model(name, schema) {
     }
 
     static async findOneAndUpdate(filter, update, options = {}) {
-      const docs = (await allDocs(Model.table)).filter(d => matches(d, filter));
-      let doc = docs[0];
+      const doc = (await loadDocs(Model, filter))[0];
       if (!doc) {
         if (!options.upsert) return null;
-        // Seed from equality fields in the filter, then apply the update
         const seed = {};
-        for (const k of Object.keys(filter)) {
-          if (k.startsWith('$')) continue;
-          const val = filter[k];
-          if (val === null || typeof val !== 'object' || val instanceof Date || val instanceof ObjectId) setPath(seed, k, toPlain(val));
-        }
+        for (const k of Object.keys(filter)) if (!k.startsWith('$') && typeof filter[k] !== 'object') setPath(seed, k, filter[k]);
         applyUpdate(seed, update, true);
         const created = await Model.create(seed);
         return options.new ? created : null;
       }
       const before = JSON.parse(JSON.stringify(toStorable(doc)));
       applyUpdate(doc, update);
-      await pool.query(`update ${Model.table} set doc = $2 where id = $1`,
-        [String(doc._id), JSON.stringify(toStorable(doc))]);
+      try {
+        await pool.query(`update ${Model.table} set doc = $2 where id = $1`, [String(doc._id), JSON.stringify(toStorable(doc))]);
+      } catch (err) { if (err.code === '23505') throw dupError(name, err); throw err; }
       return Model._instance(options.new ? doc : revive(before));
     }
 
     static async updateMany(filter, update) {
-      const docs = (await allDocs(Model.table)).filter(d => matches(d, filter));
+      const docs = await loadDocs(Model, filter);
       for (const doc of docs) {
         applyUpdate(doc, update);
-        await pool.query(`update ${Model.table} set doc = $2 where id = $1`,
-          [String(doc._id), JSON.stringify(toStorable(doc))]);
+        await pool.query(`update ${Model.table} set doc = $2 where id = $1`, [String(doc._id), JSON.stringify(toStorable(doc))]);
       }
       return { modifiedCount: docs.length };
     }
 
     static async deleteOne(filter) {
-      const docs = (await allDocs(Model.table)).filter(d => matches(d, filter));
-      if (docs[0]) await pool.query(`delete from ${Model.table} where id = $1`, [String(docs[0]._id)]);
-      return { deletedCount: docs[0] ? 1 : 0 };
+      const doc = (await loadDocs(Model, filter))[0];
+      if (doc) await pool.query(`delete from ${Model.table} where id = $1`, [String(doc._id)]);
+      return { deletedCount: doc ? 1 : 0 };
     }
 
     static async deleteMany(filter) {
-      const docs = (await allDocs(Model.table)).filter(d => matches(d, filter));
+      const docs = await loadDocs(Model, filter);
       for (const d of docs) await pool.query(`delete from ${Model.table} where id = $1`, [String(d._id)]);
       return { deletedCount: docs.length };
     }
 
     static async aggregate(pipeline) {
-      let rows = await allDocs(Model.table);
+      let rows = await allDocs(Model);
       let grouped = null;
       for (const stage of pipeline) {
         if (stage.$match) rows = rows.filter(d => matches(d, stage.$match));
@@ -458,20 +580,12 @@ function model(name, schema) {
             const key = spec._id === null ? null :
               typeof spec._id === 'string' && spec._id.startsWith('$') ? getPath(d, spec._id.slice(1)) : spec._id;
             const k = key === null ? '__null__' : String(key);
-            if (!groups.has(k)) {
-              const init = { _id: key };
-              for (const f of Object.keys(spec)) if (f !== '_id') init[f] = 0;
-              groups.set(k, init);
-            }
+            if (!groups.has(k)) { const init = { _id: key }; for (const f of Object.keys(spec)) if (f !== '_id') init[f] = 0; groups.set(k, init); }
             const g = groups.get(k);
             for (const f of Object.keys(spec)) {
               if (f === '_id') continue;
               const acc = spec[f];
-              if (acc.$sum !== undefined) {
-                const inc = acc.$sum === 1 ? 1 :
-                  typeof acc.$sum === 'string' ? (Number(getPath(d, acc.$sum.slice(1))) || 0) : acc.$sum;
-                g[f] += inc;
-              }
+              if (acc.$sum !== undefined) g[f] += acc.$sum === 1 ? 1 : typeof acc.$sum === 'string' ? (Number(getPath(d, acc.$sum.slice(1))) || 0) : acc.$sum;
             }
           }
           grouped = [...groups.values()];
@@ -507,7 +621,7 @@ async function connect(url) {
     user: decodeURIComponent(u.username),
     password: decodeURIComponent(u.password),
     ssl: { rejectUnauthorized: false },
-    max: process.env.VERCEL ? 2 : 6,
+    max: process.env.VERCEL ? 2 : 8,
     idleTimeoutMillis: 20000,
     connectionTimeoutMillis: 15000
   });
