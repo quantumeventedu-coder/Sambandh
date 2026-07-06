@@ -74,6 +74,14 @@ const UserSchema = new mongoose.Schema({
     suspended: { type: Boolean, default: false },
     banned: { type: Boolean, default: false },
     deletedAt: Date
+  },
+  // Recommender signals (recommender.js): ELO-style desirability updated on every
+  // like/pass received, plus swipe counters used for cold-start visibility.
+  signals: {
+    desirability: { type: Number, default: 1500 },
+    likesReceived: { type: Number, default: 0 },
+    passesReceived: { type: Number, default: 0 },
+    likesGiven: { type: Number, default: 0 }
   }
 });
 UserSchema.index({ 'profile.city': 1, 'profile.gender': 1, 'status.active': 1 });

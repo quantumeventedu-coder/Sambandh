@@ -157,16 +157,26 @@ Each feature below states purpose, flow, business logic, validation, errors, suc
 
 ## F5 — Discover (Ranked Feed, Like/Pass, Match)
 
-- **Purpose:** Present compatible, trustworthy candidates ranked by a transparent formula.
-- **Ranking formula (authoritative — `src/routes-discover.js`):**
+- **Purpose:** Present compatible, trustworthy candidates ranked by a real recommender that learns from behaviour, not a static formula.
+- **Recommender (authoritative — `src/services/recommender.js`, wired into `src/routes-discover.js`).** Per viewer, the final score blends seven signals (weights sum to 1.0):
 
 ```
-score = trustScore/100 × 0.30
-      + karmaScore/100 × 0.25
-      + intentMatch    × 0.20
-      + distanceScore  × 0.15   (city-centroid distance, near = high)
-      + astroScore     × 0.10   (guna-milan approximation when both have astrology data)
+final = base         × 0.24   // the original compatibility formula (below), as one input
+      + tasteMatch   × 0.20   // LEARNED: content-model of what THIS viewer likes/passes
+      + reciprocity  × 0.24   // predicts if the candidate will like the viewer back
+      + engagement   × 0.12   // responsiveness/depth − ghosting/blocks (reputation engine)
+      + activity     × 0.08   // recency + cold-start visibility for new profiles
+      + collaborative× 0.08   // "people liked by users who like who you like" (CF)
+      + exploration  × 0.04   // stable per-pair jitter to avoid filter bubbles
 ```
+
+  - **base** (unchanged legacy compatibility, still one input): `trust/100×.30 + karma/100×.25 + intentMatch×.20 + distanceScore×.15 + astro×.10`.
+  - **tasteMatch** — `learnTaste()` compares the feature vectors (intent/language overlap, verified profession, age closeness, same-city, photo count, activity) of everyone the viewer has **liked vs passed** (last 60/120) and derives a per-feature preference weight; a candidate is scored against it via a logistic. Below 4 likes / 3 passes it returns null and a cold-start proxy (intent+language) is used.
+  - **reciprocity** — product of: does the viewer fit the candidate's stated `interestedInGenders`/`ageRange`/`maxDistanceKm`; intent overlap; and desirability-"league" proximity. Weighted heavily because dating is two-sided.
+  - **desirability** — an **ELO-style** score per user (`signals.desirability`, default 1500, band 800–2500) updated on every like/pass received via `recordSwipe()`, weighted by the swiper's own desirability; drives league matching. `signals.{likesReceived,passesReceived,likesGiven}` also tracked.
+  - **collaborative** — user-based CF over the like graph: neighbours = others who liked the same profiles the viewer did; their other likes become weighted recommendations (bounded, normalised 0..1).
+  - **reasons** — each ranked profile carries a `reasons[]` array ("Likely to like you back", "Matches your taste", "Popular with people like you", "Great conversationalist", "Active recently", "Shares your intent") surfaced on the discover card, keeping the recommender transparent.
+  - Every signal degrades gracefully to base compatibility on thin data or error, so cold-start users always get a sensible feed. Covered by `tests/recommender.test.js` (11 tests) and verified live on Supabase (desirability persists and moves on like/pass).
 
 - **Business logic:**
   - Feed excludes: yourself, already-liked/passed users, blocked users (both directions), users on your incognito list, suspended/banned/paused accounts, users without ID verification, and users whose intent doesn't overlap yours.

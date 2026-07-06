@@ -20,6 +20,7 @@ const Notification = require('./models/Notification');
 const { requireAuth } = require('./routes-auth');
 const { computeActivitySignals } = require('./karma-book');
 const { cityDistanceKm } = require('./data/cities');
+const recommender = require('./services/recommender');
 
 const router = express.Router();
 
@@ -107,6 +108,9 @@ router.get('/', requireAuth, async (req, res, next) => {
     }
     const wantGrade = req.query.karmaGrade && req.query.karmaGrade !== 'any' ? GRADE_MIN[req.query.karmaGrade] : null;
 
+    // Recommender context: learn the viewer's taste + collaborative signal once.
+    const recCtx = await recommender.buildContext(me).catch(() => ({ taste: null, coLike: new Map(), myDesir: recommender.DEFAULT_DESIR, seed: 1 }));
+
     const ranked = [];
     for (const u of candidates) {
       const uid = u._id.toString();
@@ -126,7 +130,10 @@ router.get('/', requireAuth, async (req, res, next) => {
       const dScore = distanceScore(km, isFinite(maxKm) ? maxKm : 5000);
       const astro = 0.5; // neutral until pair-level compat is computed on demand
 
-      const score =
+      // Base compatibility (the original spec formula) is one input; the
+      // recommender blends it with learned taste, reciprocity, CF, engagement,
+      // activity and exploration — see services/recommender.js.
+      const base =
         (u.verification?.trustScore || 0) / 100 * 0.30 +
         karmaScore / 100 * 0.25 +
         intentMatch * 0.20 +
@@ -134,6 +141,7 @@ router.get('/', requireAuth, async (req, res, next) => {
         astro * 0.10;
 
       const rep = repBy[uid];
+      const { score, reasons } = recommender.score(recCtx, me, u, { km, rep, base });
       const anonymous = !!u.preferences?.anonymousModeEnabled;
       ranked.push({
         userId: u._id,
@@ -154,7 +162,8 @@ router.get('/', requireAuth, async (req, res, next) => {
         likedByMe: iLiked.has(uid),
         likesMe: theyLiked.has(uid),
         online: u.lastActiveAt > new Date(Date.now() - 24 * 3600 * 1000),
-        _score: +score.toFixed(4)
+        reasons,                    // why the recommender surfaced this profile
+        _score: score
       });
     }
 
@@ -177,6 +186,7 @@ router.post('/:userId/like', requireAuth, async (req, res, next) => {
       { $setOnInsert: { createdAt: new Date() } },
       { upsert: true });
     await Pass.deleteOne({ from: req.userId, to: targetId }); // liking overrides a past pass
+    recommender.recordSwipe(req.userId, targetId, true).catch(() => {}); // learn desirability (async)
 
     // Mutual like → match (spec §2.3.2)
     const reciprocal = await Like.findOne({ from: targetId, to: req.userId });
@@ -227,6 +237,7 @@ router.post('/:userId/pass', requireAuth, async (req, res, next) => {
       { from: req.userId, to: req.params.userId },
       { createdAt: new Date(), expiresAt: new Date(Date.now() + 7 * 86400000) },
       { upsert: true });
+    recommender.recordSwipe(req.userId, req.params.userId, false).catch(() => {}); // learn desirability (async)
     res.json({ ok: true });
   } catch (err) { next(err); }
 });

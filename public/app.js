@@ -731,6 +731,7 @@ async function renderDiscover() {
             ${p.tagsNegative.map(t => `<span class="wtag" style="color:var(--haldi)">${esc(t)}</span>`).join('')}
             <span class="karma">Karma: ${p.karma.score} ${p.karma.grade}</span>
           </div>
+          ${(p.reasons && p.reasons.length) ? `<div class="why">${ic('sparkle')} ${p.reasons.map(r => esc(r)).join(' · ')}</div>` : ''}
         </div>
       </div>
       <div class="pcard-actions" id="pa-${p.userId}">
