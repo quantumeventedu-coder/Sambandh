@@ -330,6 +330,9 @@ function renderLogin() {
       <button class="btn mt" id="otp-btn" onclick="sendOtp()">Send code</button>
       <div id="otp-area"></div>
     </div>
+    <div class="row" style="align-items:center;gap:10px;margin:14px 0"><div style="flex:1;height:1px;background:var(--sand-mid)"></div><span class="hint">or</span><div style="flex:1;height:1px;background:var(--sand-mid)"></div></div>
+    <button class="btn secondary ic-row" style="justify-content:center" onclick="passkeyLogin()">${ic('lock')} Sign in with a passkey</button>
+    <p class="hint center mt">Use your fingerprint, Face ID or security key — no code needed.</p>
     <p class="hint center">We never show your email or number to other users.</p>
   </div>`;
 }
@@ -1416,15 +1419,29 @@ async function renderSettings() {
 // ---- Two-factor authentication settings ----
 async function load2FA() {
   try {
-    const s = await api('/auth/2fa/status');
+    const [s, pk] = await Promise.all([api('/auth/2fa/status'), api('/auth/passkey/list').catch(() => ({ passkeys: [] }))]);
     const card = $('#twofa-card'); if (!card) return;
-    card.innerHTML = s.enabled
-      ? `<div class="setting-row"><span class="ic-row">${ic('shieldCheck')} Two-factor authentication</span><span class="tag forest">On</span></div>
+    const twofa = s.enabled
+      ? `<div class="setting-row"><span class="ic-row">${ic('shieldCheck')} Authenticator app (2FA)</span><span class="tag forest">On</span></div>
          <button class="btn small secondary mt" onclick="disable2FA()">Turn off 2FA</button>`
-      : `<div class="setting-row"><span class="ic-row">${ic('lock')} Two-factor authentication</span><span class="hint">Off</span></div>
+      : `<div class="setting-row"><span class="ic-row">${ic('lock')} Authenticator app (2FA)</span><span class="hint">Off</span></div>
          <p class="hint">Protect your account with an authenticator app (Google Authenticator, Authy…).</p>
          <button class="btn small mt" onclick="setup2FA()">Enable 2FA</button>`;
+    const passkeys = (pk.passkeys || []);
+    const pkSection = `<div style="border-top:1px solid var(--sand-mid);margin-top:14px;padding-top:14px">
+      <div class="setting-row"><span class="ic-row">${ic('unlock')} Passkeys (fingerprint / Face ID)</span><span class="hint">${passkeys.length} set up</span></div>
+      ${passkeys.map(p => `<div class="setting-row" style="font-size:13px"><span>${esc(p.name || 'Passkey')} · added ${new Date(p.createdAt).toLocaleDateString()}</span><button class="btn small ghost danger" onclick="removePasskey('${p.id}')">Remove</button></div>`).join('')}
+      <p class="hint">Sign in instantly with your device biometrics — nothing to type.</p>
+      <button class="btn small mt" onclick="addPasskey()">Add a passkey</button>
+    </div>`;
+    card.innerHTML = twofa + pkSection;
   } catch { /* card stays as-is */ }
+}
+
+async function removePasskey(id) {
+  if (!confirm('Remove this passkey?')) return;
+  try { await api('/auth/passkey/' + id, { method: 'DELETE' }); toast('Passkey removed'); load2FA(); }
+  catch (e) { toast(e.message); }
 }
 
 async function setup2FA() {
@@ -1463,6 +1480,59 @@ async function disable2FA() {
     toast('Two-factor authentication turned off.');
     load2FA();
   } catch (e) { toast(e.message); }
+}
+
+// ---- WebAuthn passkeys (fingerprint / Face ID / Windows Hello / security key) ----
+const passkeySupported = () => !!(window.PublicKeyCredential && navigator.credentials && navigator.credentials.create);
+function _b64urlToBuf(s) { s = (s || '').replace(/-/g, '+').replace(/_/g, '/'); while (s.length % 4) s += '='; const bin = atob(s), b = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) b[i] = bin.charCodeAt(i); return b.buffer; }
+function _bufToB64url(buf) { const b = new Uint8Array(buf); let s = ''; for (let i = 0; i < b.length; i++) s += String.fromCharCode(b[i]); return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, ''); }
+
+async function addPasskey() {
+  if (!passkeySupported()) return toast('This device does not support passkeys.');
+  try {
+    const d = await api('/auth/passkey/register-options', { method: 'POST' });
+    const o = d.options;
+    const cred = await navigator.credentials.create({ publicKey: {
+      challenge: _b64urlToBuf(o.challenge), rp: o.rp,
+      user: { id: _b64urlToBuf(o.user.id), name: o.user.name, displayName: o.user.displayName },
+      pubKeyCredParams: o.pubKeyCredParams, authenticatorSelection: o.authenticatorSelection,
+      attestation: o.attestation, timeout: o.timeout,
+      excludeCredentials: (o.excludeCredentials || []).map(c => ({ id: _b64urlToBuf(c.id), type: c.type, transports: c.transports }))
+    }});
+    await api('/auth/passkey/register-verify', { method: 'POST', body: {
+      id: cred.id, rawId: _bufToB64url(cred.rawId), type: cred.type,
+      name: 'Passkey', transports: (cred.response.getTransports && cred.response.getTransports()) || [],
+      response: { attestationObject: _bufToB64url(cred.response.attestationObject), clientDataJSON: _bufToB64url(cred.response.clientDataJSON) }
+    }});
+    toast('Passkey added — you can now sign in with your fingerprint or Face ID.');
+    load2FA();
+  } catch (e) { toast(e.name === 'NotAllowedError' ? 'Passkey cancelled' : (e.message || 'Could not add passkey')); }
+}
+
+async function passkeyLogin() {
+  if (!passkeySupported()) return toast('This device does not support passkeys.');
+  try {
+    const d = await api('/auth/passkey/login-options', { method: 'POST' });
+    const o = d.options;
+    const assertion = await navigator.credentials.get({ publicKey: {
+      challenge: _b64urlToBuf(o.challenge), rpId: o.rpId,
+      allowCredentials: (o.allowCredentials || []).map(c => ({ id: _b64urlToBuf(c.id), type: c.type, transports: c.transports })),
+      userVerification: o.userVerification, timeout: o.timeout
+    }});
+    const r = await api('/auth/passkey/login-verify', { method: 'POST', body: {
+      id: assertion.id, rawId: _bufToB64url(assertion.rawId), type: assertion.type,
+      response: {
+        authenticatorData: _bufToB64url(assertion.response.authenticatorData),
+        clientDataJSON: _bufToB64url(assertion.response.clientDataJSON),
+        signature: _bufToB64url(assertion.response.signature),
+        userHandle: assertion.response.userHandle ? _bufToB64url(assertion.response.userHandle) : null
+      }
+    }});
+    S.token = r.token; localStorage.setItem('sb_token', r.token);
+    S.user = (await api('/auth/me')).user;
+    connectSocket(); registerWebPush();
+    nav(onboardingStep() === 'done' ? '#/discover' : '#/onboarding');
+  } catch (e) { toast(e.name === 'NotAllowedError' ? 'Passkey cancelled' : (e.message || 'Passkey sign-in failed')); }
 }
 
 // Membership tiers (CHF, all monthly — nothing is free):

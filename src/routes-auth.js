@@ -488,6 +488,81 @@ router.post('/2fa/disable', (req, res, next) => requireAuth(req, res, async () =
   } catch (err) { next(err); }
 }));
 
+// ---- WebAuthn passkeys (fingerprint / Face ID / Windows Hello / security key) ----
+
+// Short-lived challenge store (5 min). reg:<userId> for enrolment, login:<challenge> for sign-in.
+const challengeStore = new Map();
+function putChallenge(key, data) { challengeStore.set(key, { ...data, expiresAt: Date.now() + 5 * 60 * 1000 }); }
+function takeChallenge(key) {
+  const c = challengeStore.get(key);
+  if (!c || c.expiresAt < Date.now()) { challengeStore.delete(key); return null; }
+  challengeStore.delete(key);
+  return c;
+}
+
+// Enrol a passkey (signed-in user)
+router.post('/passkey/register-options', (req, res, next) => requireAuth(req, res, async () => {
+  try {
+    const wa = require('./services/webauthn');
+    const user = await User.findById(req.userId);
+    const { origin, rpId } = wa.rpFromRequest(req);
+    const challenge = wa.newChallenge();
+    putChallenge('reg:' + req.userId, { challenge, origin, rpId });
+    const options = await wa.registrationOptions({ userId: req.userId, email: user.email, name: user.profile?.firstName, rpId, challenge });
+    res.json({ ok: true, options });
+  } catch (err) { next(err); }
+}));
+
+router.post('/passkey/register-verify', (req, res, next) => requireAuth(req, res, async () => {
+  try {
+    const wa = require('./services/webauthn');
+    const exp = takeChallenge('reg:' + req.userId);
+    if (!exp) return res.status(400).json({ error: 'Challenge expired — try again' });
+    const result = await wa.verifyRegistration(req.userId, req.body, exp);
+    res.json({ ok: true, credentialId: result.credentialId });
+  } catch (err) { res.status(400).json({ error: err.message }); }
+}));
+
+// Passwordless / step-up sign-in with a passkey
+router.post('/passkey/login-options', async (req, res, next) => {
+  try {
+    const wa = require('./services/webauthn');
+    const { origin, rpId } = wa.rpFromRequest(req);
+    const challenge = wa.newChallenge();
+    putChallenge('login:' + challenge, { challenge, origin, rpId });
+    const options = await wa.authenticationOptions(null, rpId, challenge); // discoverable: browser picks the passkey
+    res.json({ ok: true, options });
+  } catch (err) { next(err); }
+});
+
+router.post('/passkey/login-verify', async (req, res, next) => {
+  try {
+    const wa = require('./services/webauthn');
+    const clientData = JSON.parse(wa.b64urlToBuf(req.body.response.clientDataJSON).toString('utf8'));
+    const exp = takeChallenge('login:' + clientData.challenge);
+    if (!exp) return res.status(400).json({ error: 'Challenge expired — try again' });
+    const { userId } = await wa.verifyAuthentication(req.body, exp);
+    const user = await User.findById(userId);
+    if (!user) return res.status(404).json({ error: 'Account not found' });
+    if (user.status?.banned) return res.status(403).json({ error: 'This account is not eligible for Sambandh.' });
+    if (user.status?.deletedAt && Date.now() - user.status.deletedAt >= 30 * 86400000) return res.status(403).json({ error: 'This account was deleted.' });
+    if (user.status?.suspended && (!user.suspension?.endsAt || user.suspension.endsAt > new Date())) return res.status(403).json({ error: 'Your account is suspended.' });
+    await User.findByIdAndUpdate(user._id, { lastActiveAt: new Date() });
+    const token = issueToken(res, user);
+    track('passkey_login', user._id, {});
+    res.json({ ok: true, token, user: { id: user._id, email: user.email, phone: user.phone, hasProfile: !!user.profile?.firstName } });
+  } catch (err) { res.status(400).json({ error: err.message }); }
+});
+
+router.get('/passkey/list', (req, res, next) => requireAuth(req, res, async () => {
+  try { res.json({ passkeys: await require('./services/webauthn').listPasskeys(req.userId) }); }
+  catch (err) { next(err); }
+}));
+router.delete('/passkey/:id', (req, res, next) => requireAuth(req, res, async () => {
+  try { await require('./services/webauthn').deletePasskey(req.userId, req.params.id); res.json({ ok: true }); }
+  catch (err) { next(err); }
+}));
+
 // ---- Middleware ----
 
 async function requireAuth(req, res, next) {
