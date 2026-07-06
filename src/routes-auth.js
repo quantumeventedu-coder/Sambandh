@@ -44,7 +44,9 @@ const verifyOtpSchema = z.object({
   email: z.string().email().max(200).optional(),
   phone: z.string().regex(INDIAN_PHONE).optional(),
   firebaseIdToken: z.string().optional(),
-  otp: z.string().regex(/^\d{6}$/).optional()
+  otp: z.string().regex(/^\d{6}$/).optional(),
+  totp: z.string().regex(/^\d{6}$/).optional(),          // 2FA authenticator code
+  backupCode: z.string().max(20).optional()              // 2FA recovery code
 }).refine(d => d.email || d.phone, { message: 'Provide an email or phone' });
 
 // Latin letters + Devanagari script (names in English or Hindi)
@@ -190,7 +192,8 @@ router.post('/verify-otp', async (req, res, next) => {
         }
         return res.status(401).json({ error: 'Wrong or expired code' });
       }
-      otpStore.delete(id);
+      // Do NOT consume the OTP yet — if 2FA is required the client re-submits the
+      // same OTP with the authenticator code. Deleted after the full check passes.
     } else {
       // Production phone path via Firebase.
       if (!firebaseIdToken) return res.status(400).json({ error: 'firebaseIdToken required' });
@@ -239,6 +242,31 @@ router.post('/verify-otp', async (req, res, next) => {
       }
     }
 
+    // Second factor: if the user enabled an authenticator, the OTP alone is not
+    // enough — require a valid TOTP or a one-time backup code before issuing the token.
+    if (user.security?.totp?.confirmedAt) {
+      const { verifyTotp, matchBackupCode } = require('./services/twofa');
+      const totp = parsed.data.totp;
+      const backupCode = parsed.data.backupCode;
+      if (!totp && !backupCode) {
+        return res.json({ twoFactorRequired: true }); // client re-submits with `totp`
+      }
+      let ok = false;
+      if (totp && verifyTotp(user.security.totp.secret, totp)) ok = true;
+      else if (backupCode) {
+        const idx = matchBackupCode(backupCode, user.security.backupCodes || []);
+        if (idx >= 0) {
+          const codes = user.security.backupCodes.slice();
+          codes[idx] = { ...(codes[idx].toObject?.() || codes[idx]), usedAt: new Date() };
+          await User.findByIdAndUpdate(user._id, { 'security.backupCodes': codes });
+          ok = true;
+        }
+      }
+      if (!ok) return res.status(401).json({ error: 'Invalid 2FA code', twoFactorRequired: true });
+      await User.findByIdAndUpdate(user._id, { 'security.totp.lastUsedAt': new Date() });
+    }
+
+    if (email || DEV_MODE) otpStore.delete(id); // all checks passed — consume the OTP now
     await User.findByIdAndUpdate(user._id, { lastActiveAt: new Date() });
     const token = issueToken(res, user);
     track('otp_verified', user._id, { newUser: !user.profile?.firstName });
@@ -405,6 +433,60 @@ router.post('/delete-account', requireAuth, async (req, res, next) => {
     res.json({ ok: true, message: 'Account queued for deletion. All data will be erased within 30 days. Log in within 30 days to cancel.' });
   } catch (err) { next(err); }
 });
+
+// ---- Two-factor authentication (authenticator app / TOTP) ----
+
+// GET /auth/2fa/status
+router.get('/2fa/status', (req, res, next) => requireAuth(req, res, async () => {
+  try {
+    const user = await User.findById(req.userId);
+    res.json({ enabled: !!user.security?.totp?.confirmedAt, faceEnrolled: !!user.faceEnrolledAt });
+  } catch (err) { next(err); }
+}));
+
+// POST /auth/2fa/setup — generate a secret (unconfirmed); return the QR URI + secret
+router.post('/2fa/setup', (req, res, next) => requireAuth(req, res, async () => {
+  try {
+    const { generateTotpSecret, otpauthUri, formatSecret } = require('./services/twofa');
+    const user = await User.findById(req.userId);
+    if (user.security?.totp?.confirmedAt) return res.status(400).json({ error: '2FA already enabled' });
+    const secret = generateTotpSecret();
+    await User.findByIdAndUpdate(req.userId, { 'security.totp': { secret, confirmedAt: null } });
+    const account = user.email || user.phone || String(user._id);
+    res.json({ otpauthUri: otpauthUri(secret, account), secret: formatSecret(secret) });
+  } catch (err) { next(err); }
+}));
+
+// POST /auth/2fa/enable — confirm with a code; returns one-time backup codes
+router.post('/2fa/enable', (req, res, next) => requireAuth(req, res, async () => {
+  try {
+    const { verifyTotp, generateBackupCodes } = require('./services/twofa');
+    const user = await User.findById(req.userId);
+    const secret = user.security?.totp?.secret;
+    if (!secret) return res.status(400).json({ error: 'Start setup first' });
+    if (user.security.totp.confirmedAt) return res.status(400).json({ error: 'Already enabled' });
+    if (!verifyTotp(secret, req.body.totp)) return res.status(401).json({ error: 'Code incorrect — check your authenticator app' });
+    const { plain, stored } = generateBackupCodes();
+    await User.findByIdAndUpdate(req.userId, {
+      'security.totp.confirmedAt': new Date(), 'security.backupCodes': stored
+    });
+    res.json({ ok: true, enabled: true, backupCodes: plain });
+  } catch (err) { next(err); }
+}));
+
+// POST /auth/2fa/disable — requires a current code (or backup code)
+router.post('/2fa/disable', (req, res, next) => requireAuth(req, res, async () => {
+  try {
+    const { verifyTotp, matchBackupCode } = require('./services/twofa');
+    const user = await User.findById(req.userId);
+    if (!user.security?.totp?.confirmedAt) return res.status(400).json({ error: '2FA is not enabled' });
+    const ok = verifyTotp(user.security.totp.secret, req.body.totp) ||
+      matchBackupCode(req.body.backupCode || '', user.security.backupCodes || []) >= 0;
+    if (!ok) return res.status(401).json({ error: 'Code incorrect' });
+    await User.findByIdAndUpdate(req.userId, { 'security.totp': null, 'security.backupCodes': [] });
+    res.json({ ok: true, enabled: false });
+  } catch (err) { next(err); }
+}));
 
 // ---- Middleware ----
 

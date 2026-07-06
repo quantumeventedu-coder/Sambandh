@@ -70,7 +70,16 @@ const UserSchema = new mongoose.Schema({
   role: { type: String, enum: ['user', 'moderator', 'admin'], default: 'user' },
   blockedUsers: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
   incognitoBlockList: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
-  security: { deviceFingerprint: String, lastIp: String },
+  security: {
+    deviceFingerprint: String, lastIp: String,
+    // Two-factor auth (services/twofa.js). secret stored until confirmed via a code.
+    totp: { secret: String, confirmedAt: Date, lastUsedAt: Date },
+    backupCodes: [{ hash: String, usedAt: Date }]
+  },
+  // Own face verification (services/face-engine.js): 128-d descriptor from the
+  // browser (@vladmandic/face-api). Enables face login + duplicate-face fraud detection.
+  faceDescriptor: [Number],
+  faceEnrolledAt: Date,
   suspension: { endsAt: Date, reason: String },
   status: {
     active: { type: Boolean, default: true },

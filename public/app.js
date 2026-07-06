@@ -361,11 +361,23 @@ async function sendOtp() {
   $('#otp-btn').disabled = false;
 }
 
-async function verifyOtp(ident) {
+async function verifyOtp(ident, totp) {
   try {
-    const r = await api('/auth/verify-otp', { method: 'POST', body: { ...ident, otp: $('#otp').value.trim() } });
+    if (!totp) S._pendingOtp = $('#otp').value.trim();       // remember OTP for the 2FA step
+    const body = { ...ident, otp: S._pendingOtp, ...(totp ? { totp } : {}) };
+    const r = await api('/auth/verify-otp', { method: 'POST', body });
+    if (r.twoFactorRequired) {                               // account has an authenticator
+      $('#otp-area').innerHTML = `
+        <div class="field mt"><label>Authenticator code (2FA)</label>
+          <input id="totp" class="otp-boxes" maxlength="6" inputmode="numeric" placeholder="••••••"/>
+          <div class="hint">Enter the 6-digit code from your authenticator app.</div></div>
+        <button class="btn forest" onclick='verifyOtp(${JSON.stringify(ident)}, document.getElementById("totp").value.trim())'>Verify</button>`;
+      document.getElementById('totp')?.focus();
+      return;
+    }
     S.token = r.token;
     localStorage.setItem('sb_token', r.token);
+    S._pendingOtp = null;
     S.user = (await api('/auth/me')).user;
     connectSocket();
     registerWebPush();  // ask for browser notifications after sign-in
@@ -533,14 +545,25 @@ async function obUploadId() {
 
 function obSelfie() {
   return `<div class="section-pad">
-    <h1>Selfie check</h1>
-    <p class="sub">Instant automated check — liveness + face match against your ID. No human ever reviews it.</p>
-    <div class="field"><label>Take or choose a selfie</label><input id="ob-selfie" type="file" accept="image/*" capture="user"/></div>
-    <button class="btn" onclick="obSendSelfie()">Verify selfie</button>
-    <div class="notice forest ic-row" style="display:flex">${ic('camera')} <span>Your verified selfie automatically becomes your first profile photo — people always see the verified face first. You can add up to 5 more photos later.</span></div>
+    <h1>Face check</h1>
+    <p class="sub">Our own face verification runs entirely in your browser — a live camera capture, no third party, no upload of your face to anyone. It becomes your first profile photo.</p>
+    <div id="face-stage">
+      <button class="btn" onclick="startFaceVerification()">${ic('camera')} Verify with camera</button>
+      <div id="face-live" style="display:none;margin-top:12px">
+        <video id="face-vid" autoplay muted playsinline style="width:100%;max-width:320px;border-radius:16px;background:#11151c;aspect-ratio:3/4;object-fit:cover;transform:scaleX(-1);display:block;margin:0 auto"></video>
+        <p id="face-status" class="hint center" style="margin-top:10px">Loading face model…</p>
+        <button class="btn forest" id="face-capture" disabled onclick="captureFace()">Capture &amp; verify</button>
+      </div>
+    </div>
+    <details style="margin-top:14px"><summary class="hint" style="cursor:pointer">No camera? Upload a selfie instead</summary>
+      <div class="field mt"><input id="ob-selfie" type="file" accept="image/*" capture="user"/></div>
+      <button class="btn secondary" onclick="obSendSelfie()">Verify uploaded selfie</button>
+    </details>
+    <div class="notice forest ic-row" style="display:flex;margin-top:12px">${ic('shieldCheck')} <span>The same face can't be enrolled on two accounts — our engine detects duplicate identities to stop catfishing and ban-evasion.</span></div>
   </div>`;
 }
 
+// Fallback: plain selfie upload (no in-browser face descriptor).
 async function obSendSelfie() {
   const f = $('#ob-selfie').files[0];
   if (!f) return toast('Choose a selfie first');
@@ -550,6 +573,66 @@ async function obSendSelfie() {
     if (r.status === 'approved') { toast('Selfie verified — set as your first profile photo ✓'); await refreshUserAndRoute(); }
     else toast('Not verified: ' + (r.reason || 'face match failed'));
   } catch (e) { toast(e.message); }
+}
+
+// ---- Own face verification via @vladmandic/face-api (client-side ML, CDN) ----
+const FACE_CDN = 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api@1.7.13/dist/face-api.min.js';
+const FACE_MODELS = 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api@1.7.13/model';
+let _faceStream = null;
+
+function loadScript(src) {
+  return new Promise((resolve, reject) => {
+    if (window.faceapi) return resolve();
+    const s = document.createElement('script');
+    s.src = src; s.onload = resolve; s.onerror = () => reject(new Error('Could not load face model'));
+    document.head.appendChild(s);
+  });
+}
+
+async function startFaceVerification() {
+  const setStatus = m => { const el = $('#face-status'); if (el) el.textContent = m; };
+  $('#face-live').style.display = 'block';
+  try {
+    await loadScript(FACE_CDN);
+    setStatus('Loading face model…');
+    try { if (faceapi.tf) { try { await faceapi.tf.setBackend('webgl'); } catch { /* fall back */ } if (faceapi.tf.ready) await faceapi.tf.ready(); } } catch { /* ignore */ }
+    await Promise.all([
+      faceapi.nets.tinyFaceDetector.loadFromUri(FACE_MODELS),
+      faceapi.nets.faceLandmark68TinyNet.loadFromUri(FACE_MODELS),
+      faceapi.nets.faceRecognitionNet.loadFromUri(FACE_MODELS)
+    ]);
+    _faceStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user', width: 640 }, audio: false });
+    $('#face-vid').srcObject = _faceStream;
+    setStatus('Ready — look straight at the camera in good light.');
+    $('#face-capture').disabled = false;
+  } catch (e) {
+    setStatus('');
+    toast(e.name === 'NotAllowedError' ? 'Camera blocked — allow it in your browser, or use the upload option.' : (e.message || 'Camera unavailable — use the upload option.'));
+  }
+}
+
+function stopFaceStream() { if (_faceStream) { _faceStream.getTracks().forEach(t => t.stop()); _faceStream = null; } }
+
+async function captureFace() {
+  const vid = $('#face-vid'), setStatus = m => { const el = $('#face-status'); if (el) el.textContent = m; };
+  $('#face-capture').disabled = true;
+  setStatus('Detecting your face…');
+  try {
+    const opts = new faceapi.TinyFaceDetectorOptions({ inputSize: 416, scoreThreshold: 0.5 });
+    const det = await faceapi.detectSingleFace(vid, opts).withFaceLandmarks(true).withFaceDescriptor();
+    if (!det) { setStatus('No face detected — move into the light and try again.'); $('#face-capture').disabled = false; return; }
+    const faceDescriptor = Array.from(det.descriptor);
+    // Grab the current frame as the selfie image
+    const c = document.createElement('canvas');
+    c.width = vid.videoWidth; c.height = vid.videoHeight;
+    c.getContext('2d').drawImage(vid, 0, 0);
+    const base64 = c.toDataURL('image/jpeg', 0.85).split(',')[1];
+    setStatus('Verifying…');
+    const r = await api('/verification/selfie', { method: 'POST', body: { base64, faceDescriptor } });
+    stopFaceStream();
+    if (r.status === 'approved') { toast('Face verified — set as your first profile photo ✓'); await refreshUserAndRoute(); }
+    else { setStatus(''); toast('Not verified: ' + (r.reason || 'please try again')); $('#face-capture').disabled = false; }
+  } catch (e) { setStatus(''); toast(e.message); $('#face-capture').disabled = false; }
 }
 
 function obProfession() {
@@ -1294,6 +1377,9 @@ async function renderSettings() {
       <h2>Membership</h2>
       ${tierCards(u)}
 
+      <h2>Security</h2>
+      <div class="card" id="twofa-card"><div class="setting-row"><span class="ic-row">${ic('lock')} Two-factor authentication</span><span class="hint">Loading…</span></div></div>
+
       <h2>Privacy</h2>
       <div class="card">
         ${settingSwitch('anonymousModeEnabled', 'Anonymous mode', p.anonymousModeEnabled)}
@@ -1323,7 +1409,60 @@ async function renderSettings() {
       </div>
       <button class="btn danger" onclick="deleteAccount()">Delete account — erased within 30 days</button>
       <p class="hint center mt">Sambandh · verified, honest dating · Grievances: grievance@sambandh.in</p>`;
+    load2FA();
   } catch (e) { screen.querySelector('.section-pad').innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+}
+
+// ---- Two-factor authentication settings ----
+async function load2FA() {
+  try {
+    const s = await api('/auth/2fa/status');
+    const card = $('#twofa-card'); if (!card) return;
+    card.innerHTML = s.enabled
+      ? `<div class="setting-row"><span class="ic-row">${ic('shieldCheck')} Two-factor authentication</span><span class="tag forest">On</span></div>
+         <button class="btn small secondary mt" onclick="disable2FA()">Turn off 2FA</button>`
+      : `<div class="setting-row"><span class="ic-row">${ic('lock')} Two-factor authentication</span><span class="hint">Off</span></div>
+         <p class="hint">Protect your account with an authenticator app (Google Authenticator, Authy…).</p>
+         <button class="btn small mt" onclick="setup2FA()">Enable 2FA</button>`;
+  } catch { /* card stays as-is */ }
+}
+
+async function setup2FA() {
+  try {
+    const r = await api('/auth/2fa/setup', { method: 'POST' });
+    const qr = 'https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=' + encodeURIComponent(r.otpauthUri);
+    $('#twofa-card').innerHTML = `
+      <b>Scan with your authenticator app</b>
+      <div style="text-align:center;margin:12px 0"><img src="${qr}" alt="2FA QR" style="border-radius:10px" onerror="this.style.display='none'"/></div>
+      <p class="hint">Or enter this key manually: <b style="letter-spacing:1px">${esc(r.secret)}</b></p>
+      <div class="field mt"><label>Enter the 6-digit code to confirm</label><input id="tf-code" class="otp-boxes" maxlength="6" inputmode="numeric" placeholder="••••••"/></div>
+      <button class="btn forest" onclick="confirm2FA()">Confirm &amp; enable</button>
+      <button class="btn small secondary mt" onclick="load2FA()">Cancel</button>`;
+    $('#tf-code')?.focus();
+  } catch (e) { toast(e.message); }
+}
+
+async function confirm2FA() {
+  try {
+    const r = await api('/auth/2fa/enable', { method: 'POST', body: { totp: $('#tf-code').value.trim() } });
+    $('#twofa-card').innerHTML = `
+      <div class="notice forest">✓ Two-factor authentication is on.</div>
+      <b>Save your backup codes</b>
+      <p class="hint">Each works once if you lose your authenticator. Store them somewhere safe.</p>
+      <pre style="background:var(--sand);padding:12px;border-radius:10px;font-size:13px;line-height:1.8;letter-spacing:1px">${r.backupCodes.map(esc).join('\n')}</pre>
+      <button class="btn small mt" onclick="load2FA()">Done</button>`;
+  } catch (e) { toast(e.message); }
+}
+
+async function disable2FA() {
+  const totp = prompt('Enter a current authenticator code (or a backup code) to turn off 2FA:');
+  if (!totp) return;
+  try {
+    const body = /^\d{6}$/.test(totp.trim()) ? { totp: totp.trim() } : { backupCode: totp.trim() };
+    await api('/auth/2fa/disable', { method: 'POST', body });
+    toast('Two-factor authentication turned off.');
+    load2FA();
+  } catch (e) { toast(e.message); }
 }
 
 // Membership tiers (CHF, all monthly — nothing is free):

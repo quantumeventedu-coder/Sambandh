@@ -137,8 +137,26 @@ router.post('/selfie', requireAuth, async (req, res, next) => {
     const key = `verification/${req.userId}/id/selfie_${Date.now()}.jpg`;
     const url = await uploadToR2(key, buffer, 'image/jpeg');
 
+    // Our own face verification: the browser sends a 128-d face descriptor
+    // (@vladmandic/face-api). Validate server-side, then check for the same face
+    // already enrolled on another account (ban-evasion / duplicate-identity fraud).
+    const { isValidDescriptor, normalizeDescriptor, scanForDuplicateFace, matchFaces } = require('./services/face-engine');
+    const faceDescriptor = req.body.faceDescriptor ? normalizeDescriptor(req.body.faceDescriptor) : null;
+    let faceLive = null, faceDuplicates = [];
+    if (faceDescriptor && isValidDescriptor(faceDescriptor)) {
+      faceLive = true;
+      faceDuplicates = await scanForDuplicateFace(req.userId, faceDescriptor);
+      // Optional selfie↔ID-photo match when the client also sends the ID face
+      if (req.body.idFaceDescriptor && isValidDescriptor(req.body.idFaceDescriptor)) {
+        faceLive = matchFaces(faceDescriptor, req.body.idFaceDescriptor).matched;
+      }
+    }
+
     // Automated: liveness + face match against the ID photo — instant decision
     const decision = await decideSelfie(buffer, null);
+    // If the browser proved a live face descriptor, honour it; if it proved a
+    // face MISMATCH against the ID, reject regardless of the dev simulation.
+    if (faceLive === false) { decision.approved = false; decision.reason = 'Selfie does not match your ID photo'; }
 
     const verification = await Verification.create({
       userId: req.userId,
@@ -165,14 +183,28 @@ router.post('/selfie', requireAuth, async (req, res, next) => {
       const others = (user.profile?.photos || []).filter(p => !p.fromSelfie).map(p => ({ ...p.toObject?.() || p, isPrimary: false }));
       const { photoBytesHash } = require('./services/risk-engine');
       const hashes = new Set([...(Array.isArray(user.photoHashes) ? user.photoHashes : []), photoBytesHash(buffer)]);
+      const faceUpdate = (faceDescriptor && isValidDescriptor(faceDescriptor))
+        ? { faceDescriptor, faceEnrolledAt: new Date() } : {};
       await User.findByIdAndUpdate(req.userId, {
         'profile.photos': [
           { url: photoUrl, isPrimary: true, fromSelfie: true, uploadedAt: new Date() },
           ...others
         ].slice(0, 6),
-        photoHashes: [...hashes]
+        photoHashes: [...hashes],
+        ...faceUpdate
       });
       track('selfie_verified', req.userId);
+
+      // Same face on another account → auto-file an escalated ban-evasion report.
+      if (faceDuplicates.length) {
+        const Report = require('./models/Report');
+        await Report.create({
+          source: 'system', reportedUserId: req.userId, category: 'fake_profile',
+          status: 'pending', autoEscalated: true,
+          description: `Face matches ${faceDuplicates.length} other account(s) (closest distance ${faceDuplicates[0].distance}) — possible duplicate identity / ban evasion`,
+          createdAt: new Date()
+        });
+      }
     } else {
       await Notification.create({
         userId: req.userId, type: 'verification_rejected', severity: 'warning',
