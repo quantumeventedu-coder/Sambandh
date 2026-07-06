@@ -313,15 +313,15 @@ router.patch('/profile', requireAuth, async (req, res, next) => {
         const c = findCity(d.astrology.birthPlace.city);
         if (c) { updates['astrology.birthPlace.lat'] = c.lat; updates['astrology.birthPlace.lng'] = c.lng; }
       }
-      // Compute and cache the chart on the user record (spec §2.2.6, §2.6.1)
-      const { approximateChart } = require('./services/astro');
-      const chart = approximateChart(d.astrology);
+      // Compute and cache the sidereal Moon chart on the user record (spec §2.2.6, §2.6.1)
+      const { chartFor } = require('./services/astro');
+      const chart = chartFor(d.astrology);
       if (chart) {
         updates['astrology.sunSign'] = chart.sunSign;
-        updates['astrology.moonSign'] = chart.rashi;
+        updates['astrology.moonSign'] = chart.rashiEn;
         updates['astrology.rashi'] = chart.rashi;
         updates['astrology.nakshatra'] = chart.nakshatra;
-        updates['astrology.mangalDosha'] = chart.mangalDosha;
+        updates['astrology.pada'] = chart.pada;
       }
       updates['astrology.computedAt'] = new Date();
     }

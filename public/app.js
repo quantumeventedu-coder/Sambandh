@@ -1161,13 +1161,21 @@ async function renderCompat(userId) {
       <div class="card">
         <h2 style="margin-top:0" class="ic-row">${ic('star')} Astrology</h2>
         ${a ? `
-          <div class="compat-score"><b style="color:var(--sindoor-deep)">${a.gunaPercent ?? '—'}%</b><span style="color:var(--sindoor)">${esc(a.verdict || '')}</span></div>
-          ${a.gunaScore != null ? `<div class="kv"><span>Vedic Guna Milan</span><b>${a.gunaScore} / ${a.gunaMax} gunas</b></div>` : `<div class="kv"><span>Guna Milan</span><b>needs both birth times</b></div>`}
+          <div class="compat-score"><b style="color:var(--sindoor-deep)">${a.gunaScore} / 36</b><span style="color:var(--sindoor)">${esc(a.gunaVerdict || a.verdict || '')}</span></div>
           <div class="kv"><span>Sun signs</span><b>${esc((a.sunSigns || []).join(' × '))}</b></div>
           <div class="kv"><span>Moon signs</span><b>${esc((a.moonSigns || []).join(' × '))}</b></div>
           <div class="kv"><span>Nakshatra</span><b>${esc((a.nakshatras || []).join(' × '))}</b></div>
-          <div class="kv"><span>Mangal dosha</span><b class="${a.mangalCompatible ? 'ok' : ''}">${a.mangalCompatible ? 'Compatible ✓' : 'Mismatch'}</b></div>
-          ${a.computedVia === 'internal_approximation' ? `<div class="hint mt">Vedic values are an approximation until the ProKerala API is connected. For compatibility insight — never deterministic.</div>` : ''}
+          ${a.breakdown ? `<div class="guna-grid">${[
+            ['Varna', a.breakdown.varna], ['Vashya', a.breakdown.vashya], ['Tara', a.breakdown.tara], ['Yoni', a.breakdown.yoni],
+            ['Maitri', a.breakdown.grahaMaitri], ['Gana', a.breakdown.gana], ['Bhakoot', a.breakdown.bhakoot], ['Nadi', a.breakdown.nadi]
+          ].map(([label, k]) => `<div class="guna-koota ${k.got === 0 ? 'zero' : k.got >= k.max ? 'full' : ''}">
+              <span class="gl">${label}</span>
+              <span class="gv">${k.got}<i>/${k.max}</i></span>
+              <span class="gbar"><i style="width:${Math.round((k.got / k.max) * 100)}%"></i></span>
+            </div>`).join('')}</div>` : ''}
+          ${(a.doshas && a.doshas.length) ? `<div class="notice danger" style="margin-top:10px">${a.doshas.map(d => esc(d)).join('<br>')}</div>` : `<div class="notice forest" style="margin-top:10px">No major doshas — Nadi and Bhakoot both clear.</div>`}
+          ${!a.birthTimeKnown ? `<div class="hint mt">More accurate with exact birth times for both partners (Moon changes sign every ~2.25 days).</div>` : ''}
+          <div class="hint mt">Real Ashtakoot Guna Milan from computed Moon positions${a.computedVia === 'internal_sidereal_ashtakoot' ? ' (sidereal approximation; exact when ProKerala is connected)' : ''}. 18+ gunas is the traditional threshold for marriage.</div>
         ` : `<p class="sub">Add birth details in Settings (both of you) to unlock astrology compatibility.</p>`}
       </div>
       <div class="card">

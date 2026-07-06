@@ -574,3 +574,15 @@ h1 { letter-spacing: -0.01em; }
   font-size: 11px; color: var(--haldi); opacity: 0.95; font-weight: 600;
 }
 .pcard .info .why svg { width: 13px; height: 13px; flex-shrink: 0; }
+
+/* Ashtakoot guna-milan breakdown grid on the compatibility page */
+.guna-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 14px; margin: 12px 0 4px; }
+.guna-koota { display: grid; grid-template-columns: 54px auto; grid-template-rows: auto auto; column-gap: 8px; align-items: baseline; }
+.guna-koota .gl { font-size: 12px; color: var(--ink-mid); font-weight: 600; }
+.guna-koota .gv { font-size: 13px; font-weight: 800; color: var(--sindoor-deep); text-align: right; }
+.guna-koota .gv i { font-size: 10px; font-weight: 500; color: var(--ink-soft); font-style: normal; }
+.guna-koota .gbar { grid-column: 1 / -1; height: 5px; border-radius: 4px; background: var(--sand-mid); overflow: hidden; margin-top: 3px; }
+.guna-koota .gbar i { display: block; height: 100%; border-radius: 4px; background: linear-gradient(90deg, var(--rose), var(--sindoor)); }
+.guna-koota.full .gbar i { background: linear-gradient(90deg, #2ea75f, var(--forest)); }
+.guna-koota.zero .gv { color: var(--danger); }
+.guna-koota.zero .gbar i { background: var(--danger); }

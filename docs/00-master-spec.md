@@ -233,8 +233,8 @@ final = base         × 0.24   // the original compatibility formula (below), as
 ## F10 — Compatibility (Astrology + Engagement)
 
 - **Purpose:** Culturally relevant matching signals.
-- **Astrology:** internal **guna-milan approximation** from birth date/time/place — clearly labeled as an approximation in the UI until the ProKerala API is wired (then real Vedic kundli matching, ~₹2–3/request). Output: score /36 with per-guna breakdown.
-- **Engagement compatibility:** heuristic comparison of communication styles/activity rhythms producing a percentage + explanation. Cached per pair in the `Compatibility` collection.
+- **Astrology — real Ashtakoot Guna Milan (`src/services/astro.js`).** `moonPosition()` computes the Moon's **sidereal ecliptic longitude** from birth date/time via the standard mean-longitude formula + principal equation-of-centre terms, minus the **Lahiri ayanamsa** → Moon **rashi** (sign) and **nakshatra** (real astronomy, not a hash; labelled `internal_sidereal_ashtakoot`; exact when ProKerala is configured). `gunaMilan()` then computes all **eight kootas** with the classical lookup tables and dosha rules — **Varna 1, Vashya 2, Tara 3, Yoni 4, Graha Maitri 5, Gana 6, Bhakoot 7, Nadi 8 = 36** — returning per-koota `got/max`, named **doshas** (Nadi / Bhakoot / Gana), and a verdict (18+ = the traditional marriage threshold). Boy/girl assignment (from gender) drives the order-sensitive kootas. The UI shows the full koota grid + dosha warnings. Covered by `tests/astro.test.js` (12 tests: Nadi/Bhakoot doshas, Yoni enemies, Gana matrix, moon-motion, per-koota bounds) and verified live on Supabase.
+- **Engagement compatibility (real):** computed from the pair's actual chat behaviour — message balance, response-time symmetry, reputation trait alignment (humor/depth/respect), and volume — producing a percentage + verdict. Cached per pair (24h) in the `Compatibility` collection.
 
 ## F11 — Reports & Moderation
 

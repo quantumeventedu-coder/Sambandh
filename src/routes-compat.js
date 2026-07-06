@@ -17,47 +17,39 @@ const router = express.Router();
 
 // ---------------- Astrology helpers (shared service) ----------------
 
-const { RASHIS, seededInt, approximateChart, sunCompatibility } = require('./services/astro');
+const { chartFor, gunaMilan, sunCompatibility } = require('./services/astro');
 
 function computeAstrology(userA, userB) {
   const a = userA.astrology, b = userB.astrology;
   if (!a?.birthDate || !b?.birthDate) return null;
 
-  const chartA = approximateChart(a);
-  const chartB = approximateChart(b);
+  const chartA = chartFor(a), chartB = chartFor(b);
+  if (!chartA || !chartB) return null;
 
-  const sunA = chartA.sunSign, sunB = chartB.sunSign;
-  const sunCompat = sunCompatibility(sunA, sunB);
+  const sunCompat = sunCompatibility(chartA.sunSign, chartB.sunSign);
 
-  // Guna milan requires birth time for both; without it we fall back to sun-sign only
-  let gunaScore = null, gunaPercent = null;
-  if (chartA.hasBirthTime && chartB.hasBirthTime) {
-    const pairSeed = [a.birthDate + a.birthTime, b.birthDate + b.birthTime].sort().join('~');
-    // 8 kootas approximated deterministically, weighted toward the middle of each range
-    const kootaMax = [1, 2, 3, 4, 5, 6, 7, 8]; // varna..nadi = 36 total
-    gunaScore = kootaMax.reduce((sum, max, i) =>
-      sum + Math.min(max, seededInt(pairSeed + i, max * 2 + 1) * 0.75 | 0), 0);
-    // Bias with sun compatibility so results feel coherent
-    gunaScore = Math.max(6, Math.min(34, Math.round(gunaScore * 0.7 + (sunCompat / 100) * 36 * 0.3)));
-    gunaPercent = Math.round((gunaScore / 36) * 100);
-  }
+  // Assign boy/girl for the (minor) order-sensitive kootas (Varna/Gana/Vashya).
+  const boy = userA.profile?.gender === 'female' ? chartB : chartA;
+  const girl = boy === chartA ? chartB : chartA;
+  const gm = gunaMilan(boy, girl);   // the real Ashtakoot 36-point computation
 
-  const moonCompatible = Math.abs(RASHIS.indexOf(chartA.rashi) - RASHIS.indexOf(chartB.rashi)) % 6 !== 5;
-  const mangalCompatible = chartA.mangalDosha === chartB.mangalDosha; // both or neither
-
-  const percent = gunaPercent !== null
-    ? Math.round(gunaPercent * 0.7 + sunCompat * 0.2 + (mangalCompatible ? 10 : 0))
-    : Math.round(sunCompat * 0.8 + (mangalCompatible ? 10 : 0));
+  // Overall blends the 36-guna result (dominant) with sun-element affinity.
+  const percent = Math.min(100, Math.round(gm.percent * 0.85 + sunCompat * 0.15));
 
   return {
-    gunaScore, gunaMax: 36,
-    gunaPercent: Math.min(100, percent),
-    mangalCompatible, moonSignCompatible: moonCompatible,
-    sunSigns: [sunA, sunB],
-    moonSigns: [chartA.rashi, chartB.rashi],
+    gunaScore: gm.total, gunaMax: 36, gunaPercent: gm.percent,
+    breakdown: gm.breakdown,          // per-koota got/max
+    doshas: gm.doshas,                // Nadi/Bhakoot/Gana warnings, if any
+    gunaVerdict: gm.verdict,
+    moonSignCompatible: gm.breakdown.bhakoot.got > 0,
+    nadiOk: gm.breakdown.nadi.got > 0,
+    sunSigns: [chartA.sunSign, chartB.sunSign],
+    moonSigns: [chartA.rashiEn, chartB.rashiEn],
     nakshatras: [chartA.nakshatra, chartB.nakshatra],
-    verdict: percent >= 75 ? 'Strong match' : percent >= 55 ? 'Good match' : percent >= 40 ? 'Workable' : 'Challenging',
-    computedVia: 'internal_approximation'
+    overallPercent: percent,
+    verdict: gm.verdict,
+    birthTimeKnown: chartA.hasBirthTime && chartB.hasBirthTime,
+    computedVia: 'internal_sidereal_ashtakoot'  // exact when ProKerala configured
   };
 }
 
