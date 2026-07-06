@@ -201,12 +201,15 @@ router.post('/:chatId/messages', requireAuth, async (req, res, next) => {
       chatId: chat._id, message: msg, from: req.userId, createdAt: msg.createdAt
     });
 
-    // Karma Book + reputation analysis every 30 messages (async, never blocks send)
-    if (process.env.ANTHROPIC_API_KEY && updated.messageCount % 30 === 0) {
+    // Karma Book every 30 messages (rule-based always, LLM-augmented with a key);
+    // reputation scoring is LLM-only. Async — never blocks the send.
+    if (updated.messageCount % 30 === 0) {
       const { processChatBatch } = require('./karma-book');
-      const { analyzeChat } = require('./reputation-engine');
       processChatBatch(chat._id).catch(e => console.error('[KARMA]', e.message));
-      analyzeChat(chat._id).catch(e => console.error('[REPUTATION]', e.message));
+      if (process.env.ANTHROPIC_API_KEY) {
+        const { analyzeChat } = require('./reputation-engine');
+        analyzeChat(chat._id).catch(e => console.error('[REPUTATION]', e.message));
+      }
     }
 
     res.json({ message: msg });

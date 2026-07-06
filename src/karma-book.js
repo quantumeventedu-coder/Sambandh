@@ -79,42 +79,128 @@ Below are messages SENT BY the user (other side omitted):
 `;
 
 async function extractClaims(userId, chatId, since = null) {
-  if (!llm) return [];
   const filter = { chatId, from: userId, type: 'text', deleted: false };
   if (since) filter.createdAt = { $gt: since };
 
   const messages = await Message.find(filter).sort({ createdAt: 1 }).limit(80);
   if (messages.length < 2) return [];
 
-  const formatted = messages.map((m, i) => `[${i + 1}] ${m.text}`).join('\n');
+  // LLM extraction when a key is configured (highest quality); otherwise the
+  // always-on rule-based extractor keeps the Karma Book working for everyone.
+  let claims;
+  if (llm) {
+    try { claims = await extractClaimsLLM(messages); }
+    catch (e) { console.warn('[KARMA] LLM extraction failed, using rules:', e.message); claims = extractClaimsRuleBased(messages); }
+  } else {
+    claims = extractClaimsRuleBased(messages);
+  }
 
+  const docs = await Promise.all(claims.map(c => Claim.create({
+    userId, chatId,
+    type: c.type, statement: c.statement, normalized: c.normalized, strength: c.strength,
+    method: c.method || (llm ? 'llm' : 'rules'),
+    createdAt: new Date(), contradicted: false
+  })));
+  return docs;
+}
+
+async function extractClaimsLLM(messages) {
+  const formatted = messages.map((m, i) => `[${i + 1}] ${m.text}`).join('\n');
   const resp = await llm.messages.create({
     model: 'claude-haiku-4-5-20251001',
     max_tokens: 1500,
     messages: [{ role: 'user', content: CLAIM_EXTRACTION_PROMPT + formatted }]
   });
-
   let parsed;
-  try {
-    parsed = JSON.parse(resp.content[0].text);
-  } catch {
-    console.warn('[KARMA] Claim extraction returned non-JSON');
-    return [];
+  try { parsed = JSON.parse(resp.content[0].text); }
+  catch { console.warn('[KARMA] Claim extraction returned non-JSON'); return []; }
+  return (parsed.claims || []).map(c => ({ ...c, method: 'llm' }));
+}
+
+// ---------------------------------------------------------------------
+// Rule-based claim extraction — the always-on floor (no LLM required).
+// Deterministic regex patterns per claim type; conservative by design.
+// ---------------------------------------------------------------------
+
+// Contractions are apostrophe-optional throughout ("im", "i'm", "i am"; "youre",
+// "you're", "you are") — chat text routinely drops apostrophes.
+const CLAIM_PATTERNS = {
+  exclusivity: [
+    /\b(?:only|just)\s+(?:talking|chatting|texting|speaking)\s+(?:to|with)\s+you\b/i,
+    /\byou(?:'?re| are)\s+the\s+only\s+(?:one|person|girl|guy)\b/i,
+    /\b(?:not|no longer)\s+(?:talking|chatting|seeing)\s+(?:to |with )?anyone else\b/i,
+    /\bdeleted (?:the|my) (?:app|other apps?)\b/i,
+    /\b(?:off|deleting) (?:the|all) apps? for you\b/i
+  ],
+  experience: [
+    /\b(?:this is my )?first time (?:on|here|using)\b/i,
+    /\b(?:i(?:'?m| am) )?new (?:here|to (?:this|these|the) app)\b/i,
+    /\bjust (?:joined|signed up|downloaded|made (?:my|an) account)\b/i,
+    /\bnever (?:used|been on) (?:a |an )?(?:dating )?app\b/i
+  ],
+  emotional: [
+    /\bi love you\b/i,
+    /\byou(?:'?re| are) my (?:soulmate|everything|the one|world)\b/i,
+    /\b(?:you(?:'?re| are) my|found my) soulmate\b/i,
+    /\bi(?:'?ve| have) never felt (?:this|like this)\b/i,
+    /\b(?:falling|i(?:'?m| am) fall(?:ing|en)) for you\b/i,
+    /\bmeant to be (?:together)?\b/i
+  ],
+  availability: [
+    /\bi (?:have|got|have got) (?:all the|so much|plenty of|loads of) time (?:for you)?\b/i,
+    /\bi(?:'?m| am) (?:always )?(?:free|available) (?:all|any) ?(?:the )?time\b/i,
+    /\balways (?:here|around) for you\b/i
+  ]
+};
+
+// Identity (age / profession / marital) and history/intent need capture groups.
+const AGE_RE = /\bi(?:'?m| am)\s+(\d{2})\b(?!\s*(?:%|km|kg|min))/i;
+const JOB_RE = /\bi(?:'?m| am)\s+an?\s+([a-z][a-z ]{2,24}?)(?:\.|,|!|\?|$|\s+(?:at|in|for|and|but|who|from))/i;
+const WORK_RE = /\bi work (?:at|for|as an?)\s+([a-z0-9][a-z0-9 .&'-]{1,28})/i;
+const MARITAL_RE = /\bi(?:'?m| am)\s+(single|married|divorced|separated|widowed|engaged)\b/i;
+const HISTORY_RE = /\b(?:just )?(?:got out of|broke up|ended (?:a|my)|got divorced|left my ex)\b/i;
+const INTENT_MAP = [
+  [/\b(?:want|looking|ready) (?:to get married|for marriage|to (?:settle down|marry))\b/i, 'marriage'],
+  [/\b(?:just|only) (?:want|looking for|here for) (?:something casual|casual|fun|a hookup|hooking up)\b/i, 'casual'],
+  [/\blooking for (?:a )?(?:serious )?relationship\b/i, 'dating'],
+  [/\b(?:just|only) (?:want|looking) (?:to make |for )?friends?\b/i, 'friendship']
+];
+
+function firstSentence(text, idx) {
+  const parts = String(text).split(/(?<=[.!?])\s+/);
+  return (parts[0] && parts[0].length <= 160 ? parts[0] : String(text).slice(0, 160)).trim() || `[${idx}]`;
+}
+
+function extractClaimsRuleBased(messages) {
+  const out = [];
+  const seen = new Set();
+  const push = (type, statement, normalized, strength) => {
+    const key = type + '|' + normalized.toLowerCase();
+    if (seen.has(key)) return;
+    seen.add(key);
+    out.push({ type, statement: statement.slice(0, 200), normalized, strength, method: 'rules' });
+  };
+
+  for (const m of messages) {
+    const t = m.text || '';
+    for (const [type, patterns] of Object.entries(CLAIM_PATTERNS)) {
+      for (const rx of patterns) {
+        if (rx.test(t)) {
+          const strong = type === 'exclusivity' || type === 'emotional';
+          push(type, t, type + ':' + (t.match(rx)[0].toLowerCase()), strong ? 'strong' : 'moderate');
+          break;
+        }
+      }
+    }
+    let mm;
+    if ((mm = t.match(AGE_RE))) push('identity', t, 'age:' + mm[1], 'strong');
+    if ((mm = t.match(JOB_RE))) push('identity', t, 'job:' + mm[1].trim().toLowerCase(), 'moderate');
+    else if ((mm = t.match(WORK_RE))) push('identity', t, 'work:' + mm[1].trim().toLowerCase(), 'moderate');
+    if ((mm = t.match(MARITAL_RE))) push('identity', t, 'marital:' + mm[1].toLowerCase(), 'strong');
+    if (HISTORY_RE.test(t)) push('history', t, 'history:' + firstSentence(t).toLowerCase(), 'moderate');
+    for (const [rx, intent] of INTENT_MAP) if (rx.test(t)) { push('intent', t, 'intent:' + intent, 'moderate'); break; }
   }
-
-  // Persist claims
-  const docs = await Promise.all((parsed.claims || []).map(c => Claim.create({
-    userId,
-    chatId,
-    type: c.type,
-    statement: c.statement,
-    normalized: c.normalized,
-    strength: c.strength,
-    createdAt: new Date(),
-    contradicted: false
-  })));
-
-  return docs;
+  return out;
 }
 
 // ---------------------------------------------------------------------
@@ -231,7 +317,7 @@ Return JSON:
 }`;
 
 async function detectConflict(newClaim, priorClaims) {
-  if (!llm) return null;
+  if (!llm) return detectConflictRuleBased(newClaim, priorClaims);
   for (const prior of priorClaims) {
     const daysApart = Math.abs((newClaim.createdAt - prior.createdAt) / 86400000);
     if (daysApart > 60 && newClaim.type !== 'identity') continue;
@@ -255,7 +341,46 @@ Type: ${prior.type}`;
         return { priorClaim: prior, severity: result.severity, reason: result.reason };
       }
     } catch (err) {
-      console.warn('[KARMA] Conflict check failed:', err.message);
+      // Any LLM failure (bad key, rate limit, timeout) → the always-on rule engine takes over
+      console.warn('[KARMA] Conflict check failed, using rules:', err.message);
+      return detectConflictRuleBased(newClaim, priorClaims);
+    }
+  }
+  return null;
+}
+
+// Rule-based contradiction detection — the always-on floor (no LLM required).
+// Only flags what's mechanically certain: same exclusivity claim to different
+// people close in time, and conflicting identity facts (age/job/marital status).
+// Honest changes of mind over months are deliberately NOT flagged.
+function normValue(claim) {
+  const n = String(claim.normalized || '');
+  const i = n.indexOf(':');
+  return { key: i >= 0 ? n.slice(0, i) : n, val: i >= 0 ? n.slice(i + 1) : '' };
+}
+function detectConflictRuleBased(newClaim, priorClaims) {
+  const a = normValue(newClaim);
+  for (const prior of priorClaims) {
+    const b = normValue(prior);
+    const daysApart = Math.abs((newClaim.createdAt - prior.createdAt) / 86400000);
+    const differentChat = String(prior.chatId) !== String(newClaim.chatId);
+
+    if (newClaim.type === 'exclusivity' && differentChat && daysApart <= 7) {
+      return { priorClaim: prior, severity: 'high', reason: 'Claimed exclusivity to two different people within a week' };
+    }
+    if (newClaim.type === 'identity' && a.key === b.key && a.val && b.val && a.val !== b.val) {
+      if (a.key === 'age' && daysApart <= 90) {
+        return { priorClaim: prior, severity: 'high', reason: `Stated different ages (${b.val} then ${a.val})` };
+      }
+      if (a.key === 'marital' && daysApart <= 60) {
+        return { priorClaim: prior, severity: 'high', reason: `Stated different marital status (${b.val} then ${a.val})` };
+      }
+      if ((a.key === 'job' || a.key === 'work') && daysApart <= 30) {
+        return { priorClaim: prior, severity: 'medium', reason: `Stated different jobs (${b.val} then ${a.val})` };
+      }
+    }
+    if (newClaim.type === 'intent' && differentChat && a.val && b.val && a.val !== b.val && daysApart <= 30) {
+      return { priorClaim: prior, severity: 'medium', reason: `Told different people different intentions (${b.val} vs ${a.val})` };
     }
   }
   return null;
@@ -289,26 +414,55 @@ Return JSON:
 Return only patterns you have moderate-to-high confidence about. False positives hurt innocent users.`;
 
 async function detectManipulation(userId, chatId) {
-  if (!llm) return [];
   const messages = await Message.find({
     chatId, from: userId, type: 'text', deleted: false
   }).sort({ createdAt: 1 }).limit(60);
 
   if (messages.length < 5) return [];
 
-  const formatted = messages.map((m, i) => `[${i + 1}] ${m.text}`).join('\n');
-  const resp = await llm.messages.create({
-    model: 'claude-haiku-4-5-20251001',
-    max_tokens: 800,
-    messages: [{ role: 'user', content: `${MANIPULATION_PROMPT}\n\nMESSAGES:\n${formatted}` }]
-  });
+  if (!llm) return detectManipulationRuleBased(messages);
 
+  const formatted = messages.map((m, i) => `[${i + 1}] ${m.text}`).join('\n');
   try {
+    const resp = await llm.messages.create({
+      model: 'claude-haiku-4-5-20251001',
+      max_tokens: 800,
+      messages: [{ role: 'user', content: `${MANIPULATION_PROMPT}\n\nMESSAGES:\n${formatted}` }]
+    });
     const parsed = JSON.parse(resp.content[0].text);
     return parsed.patterns || [];
   } catch {
-    return [];
+    return detectManipulationRuleBased(messages);   // fall back to rules on any LLM error
   }
+}
+
+// Rule-based manipulation detection — the always-on floor (no LLM required).
+// Conservative regexes for the mechanically-detectable patterns; moderate/high
+// confidence only, since false positives hurt innocent users.
+function detectManipulationRuleBased(messages) {
+  const patterns = [];
+  const early = messages.slice(0, 8).map(m => m.text || '').join(' \n ');
+  const all = messages.map(m => m.text || '').join(' \n ');
+
+  if (/\b(i love you|you(?:'re| are) my soulmate|you(?:'re| are) the one|meant to be|marry (?:you|me))\b/i.test(early))
+    patterns.push({ pattern: 'love_bombing', confidence: 'medium', evidence: 'Strong declarations within the first few messages' });
+
+  if (messages.length < 30 && /\b(whats ?app|telegram|insta(?:gram)?|snap ?chat|signal|kik|my number is|text me on|\b[6-9]\d{9}\b)\b/i.test(all))
+    patterns.push({ pattern: 'off_platform_redirect', confidence: 'medium', evidence: 'Pushing to move off-platform early' });
+
+  if (/\b(?:send|transfer|need|lend|loan|wire|deposit)\b[^.!?\n]{0,40}\b(?:money|cash|rupees|dollars|usd|inr|gift ?cards?|crypto|bitcoin|usdt|upi|paytm|gpay|google pay)\b/i.test(all))
+    patterns.push({ pattern: 'money_request', confidence: 'high', evidence: 'Requested money, gift cards or crypto' });
+
+  if (/\b(leaving the country|only have today|last chance|act now|before it(?:'s| is) too late|running out of time|can(?:'t| not) wait)\b/i.test(all))
+    patterns.push({ pattern: 'urgency_manufacturing', confidence: 'medium', evidence: 'Manufactured urgency / fake deadline' });
+
+  if (/\b(stop talking to (?:your|other)|don(?:'t| not) talk to (?:him|her|them|others)|why are you (?:still )?on (?:the app|this app)|delete your (?:account|profile))\b/i.test(all))
+    patterns.push({ pattern: 'isolation', confidence: 'medium', evidence: 'Discouraging contact with others / isolation' });
+
+  if (/\b(?:send|share)\b[^.!?\n]{0,25}\b(?:nudes?|naked|nsfw)\b|\bif you (?:really )?(?:love|liked?) me[^.!?\n]{0,25}(?:photo|pic|send)\b/i.test(all))
+    patterns.push({ pattern: 'pressure_explicit', confidence: 'medium', evidence: 'Pressuring for explicit content' });
+
+  return patterns;
 }
 
 // ---------------------------------------------------------------------
@@ -756,5 +910,9 @@ module.exports = {
   buildPublicKarmaSummary,
   escalateAndReveal,
   computeActivitySignals,
-  CLAIM_TYPES
+  CLAIM_TYPES,
+  // rule-based engine (the always-on floor) — exported for tests
+  extractClaimsRuleBased,
+  detectConflictRuleBased,
+  detectManipulationRuleBased
 };

@@ -79,11 +79,15 @@ module.exports = function setupChatSockets(io) {
           chatId, message: msg, from: socket.userId, createdAt: msg.createdAt
         });
 
-        if (process.env.ANTHROPIC_API_KEY && updated.messageCount % 30 === 0) {
+        // Karma Book runs every 30 messages — rule-based always, LLM-augmented
+        // when a key is set. Reputation scoring is LLM-only (sentiment).
+        if (updated.messageCount % 30 === 0) {
           const { processChatBatch } = require('./karma-book');
-          const { analyzeChat } = require('./reputation-engine');
           processChatBatch(chat._id).catch(e => console.error('[KARMA]', e.message));
-          analyzeChat(chat._id).catch(e => console.error('[REPUTATION]', e.message));
+          if (process.env.ANTHROPIC_API_KEY) {
+            const { analyzeChat } = require('./reputation-engine');
+            analyzeChat(chat._id).catch(e => console.error('[REPUTATION]', e.message));
+          }
         }
 
         ack?.({ ok: true, messageId: msg._id });
