@@ -83,11 +83,23 @@ router.get('/', requireAuth, async (req, res, next) => {
     if (req.query.showAnonymous === 'false') filter['preferences.anonymousModeEnabled'] = { $ne: true };
     if (req.query.onlineOnly === 'true') filter.lastActiveAt = { $gt: new Date(Date.now() - 24 * 3600 * 1000) };
 
-    // Passed profiles are hidden for 7 days (Pass docs TTL out automatically)
-    const passed = await Pass.find({ from: me._id }).select('to').lean();
-    const passedIds = new Set(passed.map(p => p.to.toString()));
+    // Karma-grade filtering is a Sambandh Max perk — validate before any DB work.
+    if (req.query.karmaGrade && req.query.karmaGrade !== 'any' && !maxTierActive(me)) {
+      return res.status(403).json({ error: 'Filtering by karma grade is a Sambandh Max perk (CHF 15/month).', requiredTier: 'max' });
+    }
+    const wantGrade = req.query.karmaGrade && req.query.karmaGrade !== 'any' ? GRADE_MIN[req.query.karmaGrade] : null;
 
-    const candidates = await User.find(filter).limit(400);
+    // The recommender context only needs `me`, so start it now and let it run
+    // in parallel with the candidate queries instead of after them.
+    const recCtxPromise = recommender.buildContext(me)
+      .catch(() => ({ taste: null, coLike: new Map(), myDesir: recommender.DEFAULT_DESIR, seed: 1 }));
+
+    // Pass list (hidden 7 days, TTL) and the candidate list are independent — one round trip.
+    const [passed, candidates] = await Promise.all([
+      Pass.find({ from: me._id }).select('to').lean(),
+      User.find(filter).limit(400)
+    ]);
+    const passedIds = new Set(passed.map(p => p.to.toString()));
 
     const ids = candidates.map(c => c._id);
     const [books, reps, myLikes, likedMe] = await Promise.all([
@@ -102,14 +114,7 @@ router.get('/', requireAuth, async (req, res, next) => {
     const theyLiked = new Set(likedMe.map(l => l.from.toString()));
 
     const myIntents = new Set(me.intent || []);
-    // Karma-grade filtering is a Sambandh Max perk (advanced filters)
-    if (req.query.karmaGrade && req.query.karmaGrade !== 'any' && !maxTierActive(me)) {
-      return res.status(403).json({ error: 'Filtering by karma grade is a Sambandh Max perk (CHF 15/month).', requiredTier: 'max' });
-    }
-    const wantGrade = req.query.karmaGrade && req.query.karmaGrade !== 'any' ? GRADE_MIN[req.query.karmaGrade] : null;
-
-    // Recommender context: learn the viewer's taste + collaborative signal once.
-    const recCtx = await recommender.buildContext(me).catch(() => ({ taste: null, coLike: new Map(), myDesir: recommender.DEFAULT_DESIR, seed: 1 }));
+    const recCtx = await recCtxPromise;   // already computed in parallel above
     // Our own self-trained match model (services/trainer.js), if one exists yet.
     const learnedModel = await trainer.getModel().catch(() => null);
 
