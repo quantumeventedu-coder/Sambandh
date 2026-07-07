@@ -2,15 +2,11 @@
 // Analyzes chat messages with an LLM to derive behavioral signals.
 // Run as a background job; do NOT block message-send on this.
 
-const Anthropic = require('@anthropic-ai/sdk');
+const llm = require('./services/llm'); // admin-controllable LLM gateway
 const Message = require('./models/Message');
 const Reputation = require('./models/Reputation');
 const Chat = require('./models/Chat');
 const Report = require('./models/Report');
-
-const client = process.env.ANTHROPIC_API_KEY
-  ? new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
-  : null; // AI analysis disabled until ANTHROPIC_API_KEY is set
 
 const ANALYSIS_PROMPT = `You are analyzing a chat from a dating app to derive behavioral signals about the SENDER (the user being analyzed).
 
@@ -36,7 +32,7 @@ Be conservative with negative tags and red flags — only flag what's clearly ev
 Return ONLY the JSON, no other text.`;
 
 async function analyzeChat(chatId) {
-  if (!client) return;
+  if (!(await llm.isEnabled('reputation'))) return;
   const chat = await Chat.findById(chatId);
   if (!chat) return;
 
@@ -58,16 +54,14 @@ async function analyzeChat(chatId) {
     }).join('\n');
 
     try {
-      const response = await client.messages.create({
-        model: 'claude-haiku-4-5-20251001',
-        max_tokens: 600,
+      const raw = await llm.complete({
         messages: [{
           role: 'user',
           content: `${ANALYSIS_PROMPT}\n\n--- CHAT ---\n${formatted}`
-        }]
+        }],
+        maxTokens: 600,
+        feature: 'reputation'
       });
-
-      const raw = response.content[0].text;
       const json = JSON.parse(raw);
 
       await updateReputation(userIdStr, json, messages.length, chatId);

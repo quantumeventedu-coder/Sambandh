@@ -21,6 +21,7 @@ const Verification = require('./models/Verification');
 const Escalation = require('./models/Escalation');
 const Notification = require('./models/Notification');
 const AuditLog = require('./models/AuditLog');
+const llm = require('./services/llm');
 const { requireSuperAdmin } = require('./routes-auth');
 
 const router = express.Router();
@@ -235,6 +236,42 @@ router.get('/audit', async (req, res, next) => {
     const entries = await AuditLog.find().sort({ createdAt: -1 }).limit(limit).lean();
     res.json({ entries });
   } catch (err) { next(err); }
+});
+
+// ---- LLM control plane ------------------------------------------------------
+// Owner-only. Turn the model on/off, swap models, rotate the key, meter usage.
+// The key is never returned in full (masked only). Config overrides env live.
+
+router.get('/llm', async (req, res, next) => {
+  try { res.json(await llm.status()); } catch (err) { next(err); }
+});
+
+router.put('/llm', async (req, res, next) => {
+  try {
+    const body = req.body || {};
+    const patch = {};
+    if (typeof body.enabled === 'boolean') patch.enabled = body.enabled;
+    if (typeof body.model === 'string') patch.model = body.model;
+    if (typeof body.maxTokens === 'number') patch.maxTokens = body.maxTokens;
+    if (body.temperature === null || typeof body.temperature === 'number') patch.temperature = body.temperature;
+    if (body.features && typeof body.features === 'object') patch.features = body.features;
+    if (typeof body.apiKey === 'string') patch.apiKey = body.apiKey; // '' ignored, 'CLEAR' removes
+    const status = await llm.updateConfig(patch);
+    // Never log the key itself — only which fields changed.
+    await audit('llm_config_updated', 'AppConfig', 'singleton',
+      'fields: ' + Object.keys(patch).filter(k => k !== 'apiKey').join(',') +
+      (typeof body.apiKey === 'string' && body.apiKey ? ' (+apiKey)' : ''));
+    res.json(status);
+  } catch (err) { next(err); }
+});
+
+router.post('/llm/test', async (req, res, next) => {
+  try {
+    const r = await llm.test();
+    res.json(r);
+  } catch (err) {
+    res.status(400).json({ ok: false, error: err.message });
+  }
 });
 
 module.exports = router;

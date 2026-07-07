@@ -13,17 +13,13 @@
 //   3. Update Karma Book + notify user privately on first offense
 //   4. Show flag-level signals to potential matches; reveal lines only on paid escalation
 
-const Anthropic = require('@anthropic-ai/sdk');
+const llm = require('./services/llm'); // admin-controllable LLM gateway
 const Message = require('./models/Message');
 const Chat = require('./models/Chat');
 const User = require('./models/User');
 const KarmaBook = require('./models/KarmaBook');
 const Claim = require('./models/Claim');
 const Notification = require('./models/Notification');
-
-const llm = process.env.ANTHROPIC_API_KEY
-  ? new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
-  : null; // AI analysis disabled until ANTHROPIC_API_KEY is set
 
 // ---------------------------------------------------------------------
 // CLAIM TYPES — what we extract and check
@@ -85,10 +81,11 @@ async function extractClaims(userId, chatId, since = null) {
   const messages = await Message.find(filter).sort({ createdAt: 1 }).limit(80);
   if (messages.length < 2) return [];
 
-  // LLM extraction when a key is configured (highest quality); otherwise the
+  // LLM extraction when the gateway is enabled (highest quality); otherwise the
   // always-on rule-based extractor keeps the Karma Book working for everyone.
+  const llmOn = await llm.isEnabled('karma');
   let claims;
-  if (llm) {
+  if (llmOn) {
     try { claims = await extractClaimsLLM(messages); }
     catch (e) { console.warn('[KARMA] LLM extraction failed, using rules:', e.message); claims = extractClaimsRuleBased(messages); }
   } else {
@@ -98,7 +95,7 @@ async function extractClaims(userId, chatId, since = null) {
   const docs = await Promise.all(claims.map(c => Claim.create({
     userId, chatId,
     type: c.type, statement: c.statement, normalized: c.normalized, strength: c.strength,
-    method: c.method || (llm ? 'llm' : 'rules'),
+    method: c.method || (llmOn ? 'llm' : 'rules'),
     createdAt: new Date(), contradicted: false
   })));
   return docs;
@@ -106,13 +103,13 @@ async function extractClaims(userId, chatId, since = null) {
 
 async function extractClaimsLLM(messages) {
   const formatted = messages.map((m, i) => `[${i + 1}] ${m.text}`).join('\n');
-  const resp = await llm.messages.create({
-    model: 'claude-haiku-4-5-20251001',
-    max_tokens: 1500,
-    messages: [{ role: 'user', content: CLAIM_EXTRACTION_PROMPT + formatted }]
+  const text = await llm.complete({
+    messages: [{ role: 'user', content: CLAIM_EXTRACTION_PROMPT + formatted }],
+    maxTokens: 1500,
+    feature: 'karma'
   });
   let parsed;
-  try { parsed = JSON.parse(resp.content[0].text); }
+  try { parsed = JSON.parse(text); }
   catch { console.warn('[KARMA] Claim extraction returned non-JSON'); return []; }
   return (parsed.claims || []).map(c => ({ ...c, method: 'llm' }));
 }
@@ -317,7 +314,7 @@ Return JSON:
 }`;
 
 async function detectConflict(newClaim, priorClaims) {
-  if (!llm) return detectConflictRuleBased(newClaim, priorClaims);
+  if (!(await llm.isEnabled('karma'))) return detectConflictRuleBased(newClaim, priorClaims);
   for (const prior of priorClaims) {
     const daysApart = Math.abs((newClaim.createdAt - prior.createdAt) / 86400000);
     if (daysApart > 60 && newClaim.type !== 'identity') continue;
@@ -331,12 +328,12 @@ PAST CLAIM (${Math.round(daysApart)} days ago): "${prior.statement}"
 Type: ${prior.type}`;
 
     try {
-      const resp = await llm.messages.create({
-        model: 'claude-haiku-4-5-20251001',
-        max_tokens: 200,
-        messages: [{ role: 'user', content: prompt }]
+      const text = await llm.complete({
+        messages: [{ role: 'user', content: prompt }],
+        maxTokens: 200,
+        feature: 'karma'
       });
-      const result = JSON.parse(resp.content[0].text);
+      const result = JSON.parse(text);
       if (result.isContradiction) {
         return { priorClaim: prior, severity: result.severity, reason: result.reason };
       }
@@ -420,16 +417,16 @@ async function detectManipulation(userId, chatId) {
 
   if (messages.length < 5) return [];
 
-  if (!llm) return detectManipulationRuleBased(messages);
+  if (!(await llm.isEnabled('karma'))) return detectManipulationRuleBased(messages);
 
   const formatted = messages.map((m, i) => `[${i + 1}] ${m.text}`).join('\n');
   try {
-    const resp = await llm.messages.create({
-      model: 'claude-haiku-4-5-20251001',
-      max_tokens: 800,
-      messages: [{ role: 'user', content: `${MANIPULATION_PROMPT}\n\nMESSAGES:\n${formatted}` }]
+    const text = await llm.complete({
+      messages: [{ role: 'user', content: `${MANIPULATION_PROMPT}\n\nMESSAGES:\n${formatted}` }],
+      maxTokens: 800,
+      feature: 'karma'
     });
-    const parsed = JSON.parse(resp.content[0].text);
+    const parsed = JSON.parse(text);
     return parsed.patterns || [];
   } catch {
     return detectManipulationRuleBased(messages);   // fall back to rules on any LLM error

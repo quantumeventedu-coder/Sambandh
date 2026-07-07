@@ -84,10 +84,9 @@ module.exports = function setupChatSockets(io) {
         if (updated.messageCount % 30 === 0) {
           const { processChatBatch } = require('./karma-book');
           processChatBatch(chat._id).catch(e => console.error('[KARMA]', e.message));
-          if (process.env.ANTHROPIC_API_KEY) {
-            const { analyzeChat } = require('./reputation-engine');
-            analyzeChat(chat._id).catch(e => console.error('[REPUTATION]', e.message));
-          }
+          // Reputation self-gates via the admin-controlled LLM service.
+          const { analyzeChat } = require('./reputation-engine');
+          analyzeChat(chat._id).catch(e => console.error('[REPUTATION]', e.message));
         }
 
         ack?.({ ok: true, messageId: msg._id });

@@ -67,6 +67,7 @@
     <div class="tabs">
       <button id="tb-overview" class="on" onclick="show('overview')">Overview</button>
       <button id="tb-users" onclick="show('users')">Users &amp; Chats</button>
+      <button id="tb-llm" onclick="show('llm')">AI Engine</button>
       <button id="tb-audit" onclick="show('audit')">Audit trail</button>
     </div>
     <div id="view"></div>
@@ -93,6 +94,13 @@ async function apiPost(path, body) {
   if (!r.ok) throw new Error(j.error || ('HTTP ' + r.status));
   return j;
 }
+async function apiPut(path, body) {
+  const r = await fetch('/api/superadmin' + path, { method:'PUT',
+    headers: { 'X-Super-Key': KEY, 'Content-Type':'application/json' }, body: JSON.stringify(body) });
+  const j = await r.json().catch(()=>({}));
+  if (!r.ok) throw new Error(j.error || ('HTTP ' + r.status));
+  return j;
+}
 
 async function connect() {
   KEY = $('#key').value.trim();
@@ -108,9 +116,10 @@ async function connect() {
 }
 
 function show(tab) {
-  ['overview','users','audit'].forEach(t => $('#tb-'+t).classList.toggle('on', t===tab));
+  ['overview','users','llm','audit'].forEach(t => $('#tb-'+t).classList.toggle('on', t===tab));
   if (tab==='overview') renderOverview();
   if (tab==='users') renderUsers();
+  if (tab==='llm') renderLLM();
   if (tab==='audit') renderAudit();
 }
 
@@ -232,6 +241,106 @@ async function openChat(chatId) {
           <div class="when">${new Date(m.createdAt).toLocaleString()}${m.readAt?' · read':''}</div></div>`).join('')}
       </div>`;
   } catch (e) { toast(e.message); }
+}
+
+async function renderLLM() {
+  const s = await api('/llm');
+  const num = n => (n || 0).toLocaleString();
+  const feat = (k, label) => `
+    <label style="display:flex;align-items:center;gap:8px;font-size:13px">
+      <input type="checkbox" id="feat-${k}" ${s.features?.[k] !== false ? 'checked' : ''}/> ${label}
+    </label>`;
+  $('#view').innerHTML = `
+    <div class="grid2">
+      <div class="card">
+        <h3 style="font-family:Georgia,serif;margin-bottom:4px">AI Engine
+          <span class="pill ${s.enabled && s.keyConfigured ? 'g' : 'r'}">${s.enabled ? (s.keyConfigured ? 'ON' : 'NO KEY') : 'OFF'}</span></h3>
+        <div class="sub">Controls the LLM behind the Karma Book, reputation scoring, and the AI API.
+          Settings here override server env. The key is stored securely and shown masked only.</div>
+
+        <label style="display:flex;align-items:center;gap:8px;margin:10px 0 12px;font-size:13.5px">
+          <input type="checkbox" id="llm-enabled" ${s.enabled ? 'checked' : ''}/>
+          <b>Engine enabled</b> — when off, all AI features fall back to the deterministic rule engines.
+        </label>
+
+        <div style="display:flex;flex-direction:column;gap:10px">
+          <div>
+            <div class="sub" style="margin-bottom:3px">API key ${s.keyConfigured ? `· current: <b>${esc(s.keyMasked || '')}</b> (from ${esc(s.keySource)})` : '· <b style="color:var(--red)">none set</b>'}</div>
+            <input id="llm-key" type="password" placeholder="Paste new Anthropic key (leave blank to keep)" style="width:100%"/>
+            <div class="sub" style="margin-top:4px"><a class="back" style="margin:0" onclick="clearKey()">Remove panel key (revert to server env)</a></div>
+          </div>
+          <div>
+            <div class="sub" style="margin-bottom:3px">Model</div>
+            <select id="llm-model" style="width:100%">
+              ${['claude-haiku-4-5-20251001','claude-sonnet-5','claude-opus-4-8','claude-fable-5']
+                .map(m => `<option value="${m}" ${s.model===m?'selected':''}>${m}</option>`).join('')}
+              ${['claude-haiku-4-5-20251001','claude-sonnet-5','claude-opus-4-8','claude-fable-5'].includes(s.model)?'':`<option value="${esc(s.model)}" selected>${esc(s.model)}</option>`}
+            </select>
+          </div>
+          <div>
+            <div class="sub" style="margin-bottom:3px">Max output tokens</div>
+            <input id="llm-maxtok" type="number" min="16" max="8192" value="${s.maxTokens || 1024}" style="width:140px"/>
+          </div>
+          <div>
+            <div class="sub" style="margin-bottom:5px">Features</div>
+            <div style="display:flex;flex-direction:column;gap:6px">
+              ${feat('karma','Karma Book (lie / contradiction / manipulation detection)')}
+              ${feat('reputation','Reputation scoring (behavioural signals)')}
+              ${feat('api','Reusable AI API')}
+            </div>
+          </div>
+        </div>
+
+        <div class="bar" style="margin-top:14px">
+          <button class="gold" onclick="saveLLM()">Save settings</button>
+          <button class="ghost" onclick="testLLM()">Test connection</button>
+          <span id="llm-test"></span>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3 style="margin-bottom:8px">Usage</h3>
+        <div class="stats" style="grid-template-columns:1fr 1fr">
+          <div class="stat"><b>${num(s.usage?.calls)}</b><span>TOTAL CALLS</span></div>
+          <div class="stat"><b>${num(s.usage?.errors)}</b><span>ERRORS</span></div>
+          <div class="stat"><b>${num(s.usage?.inputTokens)}</b><span>INPUT TOKENS</span></div>
+          <div class="stat"><b>${num(s.usage?.outputTokens)}</b><span>OUTPUT TOKENS</span></div>
+          <div class="stat"><b>CHF ${(s.usage?.estimatedCostCHF ?? 0)}</b><span>EST. SPEND</span></div>
+          <div class="stat"><b style="font-size:14px">${s.usage?.lastUsedAt ? new Date(s.usage.lastUsedAt).toLocaleString() : '—'}</b><span>LAST USED</span></div>
+        </div>
+        <div class="notice" style="margin-top:12px">Cost is an estimate at Haiku-class pricing, for guidance only — not billing.
+          Turning the engine off (or removing the key) instantly reverts every AI feature to the always-on rule engines, so the app never breaks.</div>
+      </div>
+    </div>`;
+}
+
+async function saveLLM() {
+  const patch = {
+    enabled: $('#llm-enabled').checked,
+    model: $('#llm-model').value,
+    maxTokens: parseInt($('#llm-maxtok').value) || 1024,
+    features: {
+      karma: $('#feat-karma').checked,
+      reputation: $('#feat-reputation').checked,
+      api: $('#feat-api').checked
+    }
+  };
+  const key = $('#llm-key').value.trim();
+  if (key) patch.apiKey = key;
+  try { await apiPut('/llm', patch); toast('AI settings saved'); renderLLM(); }
+  catch (e) { toast(e.message); }
+}
+async function clearKey() {
+  if (!confirm('Remove the panel API key and revert to the server env key (if any)?')) return;
+  try { await apiPut('/llm', { apiKey: 'CLEAR' }); toast('Panel key removed'); renderLLM(); }
+  catch (e) { toast(e.message); }
+}
+async function testLLM() {
+  const el = $('#llm-test'); el.textContent = 'testing…'; el.className = 'sub';
+  try {
+    const r = await apiPost('/llm/test', {});
+    el.innerHTML = r.ok ? '<span class="pill g">connection OK</span>' : `<span class="pill r">unexpected reply: ${esc(r.reply||'')}</span>`;
+  } catch (e) { el.innerHTML = `<span class="pill r">${esc(e.message)}</span>`; }
 }
 
 async function renderAudit() {
