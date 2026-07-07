@@ -240,7 +240,7 @@ function renderWelcome() {
     <div class="wordmark">sambandh</div>
     <div class="tagline">connections, made meaningful.</div>
     <div class="points">
-      ${[['shieldCheck', 'Every profile verified with government ID'],
+      ${[['shieldCheck', 'Every member face-verified — a real, unique person'],
          ['book', 'The Karma Book — honesty, tracked by AI'],
          ['target', 'Say what you want: marriage, dating, casual, friendship'],
          ['ghost', 'Anonymous-first chat with mutual reveal'],
@@ -249,7 +249,7 @@ function renderWelcome() {
     </div>
     <button class="btn" style="background:var(--haldi);color:var(--sindoor-deep)" onclick="nav('#/login')">Get started</button>
     <button class="btn" style="background:transparent;color:rgba(255,255,255,0.9);border:1px solid rgba(255,255,255,0.35);margin-top:10px" onclick="nav('#/features')">See how it works</button>
-    <p style="font-size:11px;opacity:0.5;margin-top:18px">18+ only · By continuing you agree to our Terms.<br>Your ID will be verified before chatting.</p>
+    <p style="font-size:11px;opacity:0.5;margin-top:18px">18+ only · By continuing you agree to our Terms.<br>A quick face check verifies you before chatting.</p>
   </div>`;
 }
 
@@ -529,7 +529,7 @@ function obProfile() {
     <div class="field"><label>Gender</label><select id="ob-gender">
       <option value="">Select…</option><option value="male">Male</option><option value="female">Female</option>
       <option value="non_binary">Non-binary</option><option value="other">Other</option></select></div>
-    <div class="field"><label>Date of birth</label><input id="ob-dob" type="date"/><div class="hint">You must be 18 or older. Verified against your government ID.</div></div>
+    <div class="field"><label>Date of birth</label><input id="ob-dob" type="date"/><div class="hint">You must be 18 or older.</div></div>
     <div class="field"><label>City</label>
       <input id="ob-city" list="city-list" placeholder="Start typing… e.g. Guwahati" oninput="cityLookup(this.value)" autocomplete="off"/>
       <datalist id="city-list"></datalist>
