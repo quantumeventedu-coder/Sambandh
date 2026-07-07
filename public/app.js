@@ -131,6 +131,18 @@ function fileToResizedBase64(file, maxW = 1280) {
   });
 }
 
+// When a profile photo fails to load (missing file, storage not configured,
+// etc.), replace the broken <img> with the person's initial instead of the
+// browser's broken-image icon. data-i carries the letter.
+function imgFail(img) {
+  const letter = (img.getAttribute('data-i') || '?').toUpperCase();
+  const span = document.createElement('span');
+  span.className = 'ini-fallback';
+  span.textContent = letter;
+  img.replaceWith(span);
+}
+window.imgFail = imgFail;
+
 // Read any file as base64 (no canvas) — used for PDFs and non-image documents.
 function fileToBase64(file) {
   return new Promise((resolve, reject) => {
@@ -921,7 +933,9 @@ async function renderDiscover() {
     feed.innerHTML = r.profiles.map(p => `
       <div class="pcard-wrap" id="pw-${p.userId}">
       <div class="pcard" id="pc-${p.userId}" onclick="nav('#/profile/${p.userId}')">
-        ${p.photo ? `<img class="photo" src="${esc(p.photo)}"/>` : p.anonymous ? `<div class="anon-face" style="color:rgba(255,255,255,0.85)">${ic('ghost', 'ic-xl')}</div>` : ''}
+        ${p.anonymous
+          ? `<div class="anon-face" style="color:rgba(255,255,255,0.85)">${ic('ghost', 'ic-xl')}</div>`
+          : `<div class="pcard-ini" aria-hidden="true">${esc((p.firstName || '?')[0].toUpperCase())}</div>${p.photo ? `<img class="photo" src="${esc(p.photo)}" onerror="this.style.display='none'"/>` : ''}`}
         <span class="badge-tl">${esc((p.intent[0] || 'dating'))}</span>
         ${p.verificationLevel !== 'phone_only' ? `<span class="badge-tr ic-row">${ic('shieldCheck')} ${p.verificationLevel === 'fully_verified' ? 'FULLY VERIFIED' : 'VERIFIED'}</span>` : ''}
         <div class="info">
@@ -992,7 +1006,7 @@ async function showWhoLikedMe() {
         ? `<div class="notice rose">Seeing <b>who</b> liked you is a Sambandh Max perk (CHF 15/month). Like people back in Discover — mutual likes always match.</div>`
         : (r.profiles || []).map(p => `
           <div class="chat-item" style="border-radius:12px;margin-bottom:8px" onclick="closeModal();nav('#/profile/${p.userId}')">
-            <div class="avatar">${p.photo ? `<img src="${esc(p.photo)}"/>` : esc((p.firstName || '?')[0])}</div>
+            <div class="avatar">${p.photo ? `<img src="${esc(p.photo)}" data-i="${esc((p.firstName || '?')[0])}" onerror="imgFail(this)"/>` : esc((p.firstName || '?')[0])}</div>
             <div class="cbody"><div class="cname"><span>${esc(p.firstName)}${p.age ? ', ' + p.age : ''}</span></div>
             <div class="clast">${esc(p.city || '')}</div></div>
           </div>`).join('') || '<p class="sub">No likes yet — polish that bio!</p>'}
@@ -1079,7 +1093,7 @@ async function renderProfile(userId) {
         <button style="background:none;border:none;cursor:pointer;color:var(--danger)" title="Report" onclick="openReport('${p.userId}')">${ic('flag', 'ic-lg')}</button>
       </div>
       <div class="section-pad">
-        ${photo ? `<img src="${esc(photo)}" style="width:100%;border-radius:16px;max-height:380px;object-fit:cover;margin-bottom:14px"/>`
+        ${photo ? `<img src="${esc(photo)}" onerror="this.style.display='none'" style="width:100%;border-radius:16px;max-height:380px;object-fit:cover;margin-bottom:14px"/>`
           : p.anonymous ? `<div class="notice anon ic-row" style="display:flex">${ic('ghost')} <span>This person browses anonymously. Chat first — identities reveal by mutual consent.</span></div>` : ''}
         <div class="stat-row">
           <div class="stat"><b>${karma.score}</b><span>karma score</span></div>
@@ -1205,7 +1219,7 @@ async function renderChats() {
     }
     list.innerHTML = r.chats.map(c => `
       <div class="chat-item" onclick="nav('#/chat/${c.chatId}')">
-        <div class="avatar ${c.other.anonymous ? 'anon' : ''}">${c.other.anonymous ? ic('ghost', 'ic-lg') : c.other.photo ? `<img src="${esc(c.other.photo)}"/>` : esc((c.other.displayName || '?')[0].toUpperCase())}</div>
+        <div class="avatar ${c.other.anonymous ? 'anon' : ''}">${c.other.anonymous ? ic('ghost', 'ic-lg') : c.other.photo ? `<img src="${esc(c.other.photo)}" data-i="${esc((c.other.displayName || '?')[0])}" onerror="imgFail(this)"/>` : esc((c.other.displayName || '?')[0].toUpperCase())}</div>
         <div class="cbody">
           <div class="cname"><span class="ic-row">${esc(c.other.displayName || 'Anonymous')}${c.anonymous ? ic('ghost') : ''}</span><time>${c.lastMessage ? timeAgo(c.lastMessage.createdAt) : ''}</time></div>
           <div class="clast" ${c.unreadCount ? 'style="font-weight:700;color:var(--ink)"' : ''}>${esc(c.lastMessage?.text || 'Say hi')}</div>
@@ -1242,7 +1256,7 @@ async function renderChat(chatId) {
     if (meta) {
       $('#ch-name').textContent = meta.other.displayName || 'Anonymous';
       $('#ch-sub').textContent = (meta.anonymous ? 'identity hidden · ' : 'verified · ') + (meta.intent || '');
-      $('#ch-avatar').innerHTML = meta.other.anonymous ? ic('ghost') : meta.other.photo ? `<img src="${esc(meta.other.photo)}"/>` : esc((meta.other.displayName || '?')[0].toUpperCase());
+      $('#ch-avatar').innerHTML = meta.other.anonymous ? ic('ghost') : meta.other.photo ? `<img src="${esc(meta.other.photo)}" data-i="${esc((meta.other.displayName || '?')[0])}" onerror="imgFail(this)"/>` : esc((meta.other.displayName || '?')[0].toUpperCase());
       if (meta.anonymous) $('#ch-reveal').style.display = 'inline-flex';
     }
     const r = await api(`/chat/${chatId}/messages`);
@@ -1440,7 +1454,7 @@ async function renderSettings() {
     const photo = u.profile?.photos?.find(x => x.isPrimary)?.url || u.profile?.photos?.[0]?.url;
     screen.querySelector('.section-pad').innerHTML = `
       <div style="display:flex;gap:14px;align-items:center;margin-bottom:16px">
-        <div class="avatar" style="width:64px;height:64px;font-size:26px">${photo ? `<img src="${esc(photo)}"/>` : esc((u.profile?.firstName || '?')[0])}</div>
+        <div class="avatar" style="width:64px;height:64px;font-size:26px">${photo ? `<img src="${esc(photo)}" data-i="${esc((u.profile?.firstName || '?')[0])}" onerror="imgFail(this)"/>` : esc((u.profile?.firstName || '?')[0])}</div>
         <div><b style="font-size:18px">${esc(u.profile?.firstName || '')}, ${u.profile?.age || ''}</b>
           <div style="font-size:12px;color:var(--forest)">${verLabel(u.verification)} · Trust ${u.verification?.trustScore || 0}/100</div>
           <div style="font-size:12px;color:var(--ink-soft)">${esc(u.profile?.city || '')} · ${(u.intent || []).join(', ')}</div>
