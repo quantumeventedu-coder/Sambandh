@@ -133,6 +133,18 @@ async function nightlyBatch() {
     }
   } catch (e) { console.error('[CRON] queue alert:', e.message); }
 
+  // 8. Self-learning match model: retrain nightly on the day's fresh organic
+  // swipe data when the owner has enabled auto-training (services/trainer.js).
+  try {
+    const AppConfig = require('./models/AppConfig');
+    const cfg = await AppConfig.findOne({ key: 'singleton' }).select('learnedModel.auto').lean();
+    if (cfg?.learnedModel?.auto) {
+      const trainer = require('./services/trainer');
+      const r = await trainer.train({ minExamples: 40 });
+      console.log('[CRON] match model retrain:', r.trained ? `accuracy ${r.accuracy} on ${r.examples} examples` : r.reason);
+    }
+  } catch (e) { console.error('[CRON] model retrain:', e.message); }
+
   console.log('[CRON] Nightly batch complete');
 }
 

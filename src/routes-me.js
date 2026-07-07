@@ -54,6 +54,7 @@ const settingsSchema = z.object({
   showProfessionToOthers: z.boolean().optional(),
   showAstrologyToOthers: z.boolean().optional(),
   allowNSFWChats: z.boolean().optional(),
+  aiTrainingConsent: z.boolean().optional(),
   // Karma Book updates are deliberately absent — always delivered (spec §2.8.3)
   notificationPrefs: z.object({
     new_match: channelEnum.optional(),

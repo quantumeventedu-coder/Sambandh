@@ -65,6 +65,9 @@ const UserSchema = new mongoose.Schema({
     showProfessionToOthers: { type: Boolean, default: true },
     showAstrologyToOthers: { type: Boolean, default: true },
     allowNSFWChats: { type: Boolean, default: false },
+    // Opt-in: let Sambandh's own match model learn from your anonymised swipe
+    // outcomes (no names/messages — see services/trainer.js). Default off.
+    aiTrainingConsent: { type: Boolean, default: false },
     // Per-type delivery channels (spec §2.8.3). Karma updates are always on.
     notificationPrefs: {
       new_match: { type: String, enum: ['push', 'email', 'both', 'none'], default: 'both' },

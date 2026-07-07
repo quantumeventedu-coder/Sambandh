@@ -20,6 +20,7 @@ const { requireAuth } = require('./routes-auth');
 const { computeActivitySignals } = require('./karma-book');
 const { userDistanceKm } = require('./data/cities');
 const recommender = require('./services/recommender');
+const trainer = require('./services/trainer');
 
 const router = express.Router();
 
@@ -109,6 +110,8 @@ router.get('/', requireAuth, async (req, res, next) => {
 
     // Recommender context: learn the viewer's taste + collaborative signal once.
     const recCtx = await recommender.buildContext(me).catch(() => ({ taste: null, coLike: new Map(), myDesir: recommender.DEFAULT_DESIR, seed: 1 }));
+    // Our own self-trained match model (services/trainer.js), if one exists yet.
+    const learnedModel = await trainer.getModel().catch(() => null);
 
     const ranked = [];
     for (const u of candidates) {
@@ -141,6 +144,13 @@ router.get('/', requireAuth, async (req, res, next) => {
 
       const rep = repBy[uid];
       const { score, reasons } = recommender.score(recCtx, me, u, { km, rep, base });
+      // Blend in our self-trained model's like-probability when available (the
+      // organic learning loop). Guarded — with no model, ranking is unchanged.
+      let finalScore = score;
+      if (learnedModel) {
+        const p = trainer.predictWith(learnedModel, me, u, km);
+        if (p != null) finalScore = 0.85 * score + 0.15 * p;
+      }
       const anonymous = !!u.preferences?.anonymousModeEnabled;
       ranked.push({
         userId: u._id,
@@ -162,7 +172,7 @@ router.get('/', requireAuth, async (req, res, next) => {
         likesMe: theyLiked.has(uid),
         online: u.lastActiveAt > new Date(Date.now() - 24 * 3600 * 1000),
         reasons,                    // why the recommender surfaced this profile
-        _score: score
+        _score: finalScore
       });
     }
 
@@ -186,6 +196,7 @@ router.post('/:userId/like', requireAuth, async (req, res, next) => {
       { upsert: true });
     await Pass.deleteOne({ from: req.userId, to: targetId }); // liking overrides a past pass
     recommender.recordSwipe(req.userId, targetId, true).catch(() => {}); // learn desirability (async)
+    trainer.captureSwipe(req.userId, targetId, true).catch(() => {}); // consent-gated organic training data
 
     // Mutual like → match (spec §2.3.2)
     const reciprocal = await Like.findOne({ from: targetId, to: req.userId });
@@ -238,6 +249,7 @@ router.post('/:userId/pass', requireAuth, async (req, res, next) => {
       { createdAt: new Date(), expiresAt: new Date(Date.now() + 7 * 86400000) },
       { upsert: true });
     recommender.recordSwipe(req.userId, req.params.userId, false).catch(() => {}); // learn desirability (async)
+    trainer.captureSwipe(req.userId, req.params.userId, false).catch(() => {}); // consent-gated organic training data
     res.json({ ok: true });
   } catch (err) { next(err); }
 });

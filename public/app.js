@@ -1512,6 +1512,7 @@ async function renderSettings() {
         ${settingSwitch('showProfessionToOthers', 'Show profession', p.showProfessionToOthers !== false)}
         ${settingSwitch('showAstrologyToOthers', 'Show astrology', p.showAstrologyToOthers !== false)}
         ${settingSwitch('allowNSFWChats', 'Allow NSFW chats', p.allowNSFWChats)}
+        ${settingSwitch('aiTrainingConsent', 'Help improve matching (use my anonymised swipes to train Sambandh\'s own model — no names or messages)', p.aiTrainingConsent)}
         <div class="setting-row" style="cursor:pointer" onclick="showIncognito()"><span class="ic-row">${ic('eyeOff')} Incognito — hide me from specific people</span><span>→</span></div>
       </div>
 

@@ -328,4 +328,38 @@ router.delete('/ai-keys/:id', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+// ---- Self-learning match model ---------------------------------------------
+const trainer = require('./services/trainer');
+const AppConfig = require('./models/AppConfig');
+
+router.get('/ai/model', async (req, res, next) => {
+  try {
+    const s = await trainer.stats();
+    const doc = await AppConfig.findOne({ key: 'singleton' }).select('learnedModel.auto').lean();
+    res.json({ ...s, auto: !!doc?.learnedModel?.auto });
+  } catch (err) { next(err); }
+});
+
+router.post('/ai/train', async (req, res, next) => {
+  try {
+    const result = await trainer.train({ minExamples: 40 });
+    await audit('ai_model_trained', 'AppConfig', 'singleton',
+      result.trained ? `examples: ${result.examples}, accuracy: ${result.accuracy}` : result.reason);
+    res.json(result);
+  } catch (err) { next(err); }
+});
+
+router.put('/ai/model', async (req, res, next) => {
+  try {
+    if (typeof req.body?.auto === 'boolean') {
+      await AppConfig.findOneAndUpdate({ key: 'singleton' },
+        { $set: { 'learnedModel.auto': req.body.auto } }, { upsert: true });
+      await audit('ai_model_config', 'AppConfig', 'singleton', 'auto: ' + req.body.auto);
+    }
+    const s = await trainer.stats();
+    const doc = await AppConfig.findOne({ key: 'singleton' }).select('learnedModel.auto').lean();
+    res.json({ ...s, auto: !!doc?.learnedModel?.auto });
+  } catch (err) { next(err); }
+});
+
 module.exports = router;

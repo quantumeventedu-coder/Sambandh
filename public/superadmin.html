@@ -246,6 +246,7 @@ async function openChat(chatId) {
 async function renderLLM() {
   const s = await api('/llm');
   const { keys } = await api('/ai-keys');
+  const m = await api('/ai/model');
   const num = n => (n || 0).toLocaleString();
   const feat = (k, label) => `
     <label style="display:flex;align-items:center;gap:8px;font-size:13px">
@@ -340,7 +341,46 @@ async function renderLLM() {
           </td>
         </tr>`).join('') : '<tr><td colspan="7">No API keys yet.</td></tr>'}
       </table>
+    </div>
+
+    <div class="card">
+      <h3 style="font-family:Georgia,serif;margin-bottom:4px">Self-learning match model
+        ${m.model ? `<span class="pill g">trained · ${Math.round((m.model.accuracy||0)*100)}% acc</span>` : '<span class="pill y">not trained yet</span>'}</h3>
+      <div class="sub">Sambandh's own model — a logistic regression trained in-house on <b>anonymised</b> swipe
+        outcomes from users who opted in. No names or messages are ever stored. It blends into discover ranking once trained.</div>
+      <div class="stats" style="grid-template-columns:repeat(auto-fit,minmax(140px,1fr));margin-top:10px">
+        <div class="stat"><b>${num(m.examples)}</b><span>ORGANIC EXAMPLES</span></div>
+        <div class="stat"><b>${num(m.consentingUsers)}</b><span>OPTED-IN USERS</span></div>
+        <div class="stat"><b>${m.model ? Math.round((m.model.accuracy||0)*100)+'%' : '—'}</b><span>HOLDOUT ACCURACY</span></div>
+        <div class="stat"><b style="font-size:14px">${m.model?.trainedAt ? new Date(m.model.trainedAt).toLocaleString() : '—'}</b><span>LAST TRAINED</span></div>
+      </div>
+      ${m.model ? `<div style="margin-top:10px;font-size:12px;color:var(--mut)">Learned feature weights:
+        <div style="margin-top:4px;display:flex;flex-wrap:wrap;gap:6px">
+          ${m.model.featureNames.map((f,i)=>`<span class="pill ${m.model.weights[i]>=0?'g':'r'}">${esc(f)}: ${m.model.weights[i]>0?'+':''}${m.model.weights[i]}</span>`).join('')}
+        </div></div>` : ''}
+      <div class="bar" style="margin-top:12px">
+        <button class="gold" onclick="trainModel()">Train now</button>
+        <label style="display:flex;align-items:center;gap:8px;font-size:13px">
+          <input type="checkbox" id="model-auto" ${m.auto?'checked':''} onchange="toggleAuto()"/> Auto-retrain nightly
+        </label>
+        <span id="train-status" class="sub"></span>
+      </div>
     </div>`;
+}
+
+async function trainModel() {
+  const el = $('#train-status'); el.textContent = 'training…';
+  try {
+    const r = await apiPost('/ai/train', {});
+    el.innerHTML = r.trained
+      ? `<span class="pill g">trained: ${Math.round(r.accuracy*100)}% on ${r.examples} examples</span>`
+      : `<span class="pill y">${esc(r.reason||'not enough data')}</span>`;
+    setTimeout(renderLLM, 1200);
+  } catch (e) { el.innerHTML = `<span class="pill r">${esc(e.message)}</span>`; }
+}
+async function toggleAuto() {
+  try { await apiPut('/ai/model', { auto: $('#model-auto').checked }); toast('Auto-retrain ' + ($('#model-auto').checked?'on':'off')); }
+  catch (e) { toast(e.message); }
 }
 
 async function createAiKey() {

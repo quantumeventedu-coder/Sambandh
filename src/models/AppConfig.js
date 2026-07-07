@@ -25,6 +25,16 @@ const AppConfigSchema = new mongoose.Schema({
     errors: { type: Number, default: 0 },
     lastUsedAt: Date
   },
+  // In-house self-learning match model (services/trainer.js).
+  learnedModel: {
+    weights: [Number],
+    bias: Number,
+    featureNames: [String],
+    trainedAt: Date,
+    examples: Number,
+    accuracy: Number,
+    auto: { type: Boolean, default: false }   // nightly auto-retrain
+  },
   updatedAt: Date
 });
 
