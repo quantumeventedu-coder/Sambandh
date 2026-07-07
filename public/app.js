@@ -1381,10 +1381,38 @@ async function renderCompat(userId) {
     <button class="btn ghost" style="text-align:left;padding-left:0" onclick="history.back()">← Back</button>
     <h1>Compatibility</h1><div id="compat-body"><div class="empty">Computing…</div></div></div>`;
   try {
-    const c = await api('/compat/' + userId);
+    const [c, intel] = await Promise.all([
+      api('/compat/' + userId),
+      api('/compat/' + userId + '/intelligence').catch(() => null)
+    ]);
     const a = c.astrology, e = c.engagement;
+    const COMP_LABEL = {
+      vedic: 'Vedic astrology', yoni: 'Intimate nature (Yoni)', gana: 'Temperament (Gana)',
+      attachment: 'Emotional styles', bigfive: 'Personality (OCEAN)', love: 'Love languages',
+      engagement: 'Conversation rhythm', karma: 'Trust & karma'
+    };
+    const bar = pct => `<div style="height:7px;background:rgba(0,0,0,.07);border-radius:99px;margin:3px 0 9px;overflow:hidden"><i style="display:block;height:100%;width:${pct}%;background:linear-gradient(90deg,var(--sindoor),var(--haldi))"></i></div>`;
+    const intelHtml = intel ? `
+      <div class="karma-hero ${intel.score >= 65 ? 'good' : intel.score >= 40 ? '' : 'bad'}">
+        <b>${intel.score}%</b><span>${esc(intel.verdict)}</span></div>
+      <div class="card">
+        <h2 style="margin-top:0" class="ic-row">${ic('sparkle')} Deep compatibility</h2>
+        <p class="hint" style="margin-top:-4px;margin-bottom:10px">A blend of astrology, personality, conversation and trust — weighted by what predicts real relationships.</p>
+        ${intel.components.map(cm => {
+          const pct = Math.round(cm.raw * 100);
+          return `<div class="kv"><span>${COMP_LABEL[cm.name] || cm.name} <i class="hint">(${Math.round(cm.weight * 100)}%)</i></span><b>${pct}%</b></div>${bar(pct)}`;
+        }).join('')}
+      </div>
+      ${intel.signals && intel.signals.yoni ? `<div class="card">
+        <h2 style="margin-top:0" class="ic-row">${ic('heart')} Intimate energy</h2>
+        <div class="compat-score"><b style="color:var(--sindoor-deep)">${intel.signals.yoni.score}/4</b><span style="color:var(--sindoor)">${esc(intel.signals.yoni.label)}</span></div>
+        <div class="hint">${esc((intel.signals.yoni.animals || []).join(' × '))} energies</div>
+      </div>` : ''}
+      ${(intel.warnings && intel.warnings.length) ? `<div class="notice danger" style="margin-bottom:14px">${intel.warnings.map(esc).join('<br>')}</div>` : ''}
+      <p class="hint" style="margin:-4px 0 14px">${intel.signals && intel.signals.psychologyAvailable ? 'Personality &amp; emotional-style signals are read privately from your chat and never shown as labels.' : 'Chat a little to unlock the personality &amp; emotional-style signals.'}</p>
+    ` : '';
     $('#compat-body').innerHTML = `
-      ${c.overall != null ? `<div class="karma-hero good"><b>${c.overall}%</b><span>Overall compatibility</span></div>` : ''}
+      ${intelHtml || (c.overall != null ? `<div class="karma-hero good"><b>${c.overall}%</b><span>Overall compatibility</span></div>` : '')}
       <div class="card">
         <h2 style="margin-top:0" class="ic-row">${ic('star')} Astrology</h2>
         ${a ? `
@@ -1462,6 +1490,8 @@ async function renderSettings() {
       </div>
       <button class="btn secondary ic-row" style="display:flex;justify-content:center" onclick="openEditProfile()">${ic('edit')} Edit profile & photos</button>
 
+      <div id="me-nakshatra"></div>
+
       <h2>Membership</h2>
       ${tierCards(u)}
 
@@ -1499,7 +1529,40 @@ async function renderSettings() {
       <button class="btn danger" onclick="deleteAccount()">Delete account — erased within 30 days</button>
       <p class="hint center mt">Sambandh · verified, honest dating · Grievances: grievance@sambandh.in</p>`;
     load2FA();
+    loadMyNakshatra();
   } catch (e) { screen.querySelector('.section-pad').innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+}
+
+// Your own nakshatra personality profile (Sambandh Intelligence System §4.3).
+async function loadMyNakshatra() {
+  const el = $('#me-nakshatra'); if (!el) return;
+  try {
+    const r = await api('/me/nakshatra');
+    if (!r.profile) {
+      el.innerHTML = `<div class="card" style="margin-top:14px">
+        <b class="ic-row">${ic('sparkle')} Your personality profile</b>
+        <p class="hint" style="margin:6px 0 10px">Add your birth date, time and city to unlock your nakshatra personality and deeper astrological matching.</p>
+        <button class="btn secondary" onclick="openEditProfile()">Add birth details</button></div>`;
+      return;
+    }
+    const n = r.profile;
+    const chip = (label, val) => val ? `<span class="wtag" style="background:var(--rose-soft);color:var(--sindoor-deep)">${esc(label)}: ${esc(val)}</span>` : '';
+    el.innerHTML = `
+      <div class="card nak-card" style="margin-top:14px;background:linear-gradient(160deg,var(--rose-soft),#fff);border-color:var(--rose)">
+        <div class="ic-row" style="color:var(--sindoor);font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase">${ic('sparkle')} Your nakshatra</div>
+        <div style="font-family:Georgia,serif;font-size:22px;color:var(--sindoor-deep);margin:2px 0 8px">${esc(n.headline)}</div>
+        ${n.personality ? `<p style="font-size:13.5px;margin-bottom:8px">${esc(n.personality)}.</p>` : ''}
+        <div class="trow" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">
+          ${chip('Moon', n.moonSign)} ${chip('Sun', n.sunSign)} ${chip('Temperament', n.gana)} ${n.yoniAnimal ? chip('Nature', n.yoniAnimal) : ''}
+        </div>
+        <div style="font-size:12.5px;color:var(--ink-soft);line-height:1.6">
+          ${n.emotionalNature ? `<div><b>Emotionally:</b> ${esc(n.emotionalNature)}</div>` : ''}
+          ${n.intimateNature ? `<div><b>In intimacy:</b> ${esc(n.intimateNature)}</div>` : ''}
+          ${(n.bestMatches && n.bestMatches.length) ? `<div style="margin-top:6px"><b>Naturally harmonious with:</b> ${n.bestMatches.map(esc).join(', ')}</div>` : ''}
+        </div>
+        ${!n.hasBirthTime ? `<p class="hint" style="margin-top:8px">Add your exact birth time for a more precise reading and full guna-milan matching.</p>` : ''}
+      </div>`;
+  } catch { el.innerHTML = ''; }
 }
 
 // ---- Two-factor authentication settings ----
