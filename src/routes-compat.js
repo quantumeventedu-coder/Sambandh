@@ -177,4 +177,32 @@ router.get('/:userId/engagement', requireAuth, async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+// GET /:userId/intelligence — the FULL compatibility formula (spec §4.2):
+// astrology + psychology (from the shared chat) + engagement + karma safety.
+const intelligence = require('./services/intelligence');
+const KarmaBook = require('./models/KarmaBook');
+router.get('/:userId/intelligence', requireAuth, async (req, res, next) => {
+  try {
+    const [me, other] = await Promise.all([User.findById(req.userId), User.findById(req.params.userId)]);
+    if (!other) return res.status(404).json({ error: 'User not found' });
+
+    const astrology = (other.preferences?.showAstrologyToOthers !== false) ? computeAstrology(me, other) : null;
+    const chat = await Chat.findOne({ participants: { $all: [req.userId, req.params.userId], $size: 2 } });
+    let messages = [];
+    if (chat) messages = await Message.find({ chatId: chat._id, type: 'text', deleted: false }).sort({ createdAt: 1 }).limit(500);
+    const eng = await computeEngagement(req.userId, req.params.userId);
+    const engagement = eng && !eng.insufficient ? eng.overallScore / 100 : null;
+    const [bookMe, bookOther] = await Promise.all([
+      KarmaBook.findOne({ userId: req.userId }), KarmaBook.findOne({ userId: req.params.userId })
+    ]);
+    const criticalFlag = bookOther?.score != null && bookOther.score < 20;
+
+    const result = intelligence.pairIntelligence(me, other, {
+      messages, karmaScoreMe: bookMe?.score, karmaScoreOther: bookOther?.score,
+      engagement, astrology, criticalFlag
+    });
+    res.json(result);
+  } catch (err) { next(err); }
+});
+
 module.exports = router;

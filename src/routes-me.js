@@ -119,6 +119,18 @@ router.post('/location', requireAuth, async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+// GET /api/me/nakshatra — the requesting user's own nakshatra personality
+// profile (Sambandh Intelligence spec §1.3 / §4.3). Needs birth data.
+const intelligence = require('./services/intelligence');
+router.get('/nakshatra', requireAuth, async (req, res, next) => {
+  try {
+    const user = await User.findById(req.userId).lean();
+    const profile = intelligence.nakshatraProfile(user);
+    if (!profile) return res.json({ profile: null, needsBirthData: true });
+    res.json({ profile });
+  } catch (err) { next(err); }
+});
+
 // POST /api/me/pause — hide profile from discover without deleting
 router.post('/pause', requireAuth, async (req, res, next) => {
   try {
