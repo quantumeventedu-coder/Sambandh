@@ -481,10 +481,14 @@ function computeTrustScore(user, v) {
   const accountAgeDays = (Date.now() - user.createdAt) / 86400000;
   if (accountAgeDays > 30) score += 5;
 
+  // Live-selfie face verification is the real, functional core tier ("Photo
+  // verified"). Government-ID is an optional booster on top (real OCR arrives
+  // with a DigiLocker/Hyperverge partnership).
   let level = 'phone_only';
+  if (v.selfieVerified) level = 'photo_verified';
+  if (v.idVerified) level = 'id_verified';
+  if (v.professionVerified && (v.idVerified || v.selfieVerified)) level = 'profession_verified';
   if (v.idVerified && v.selfieVerified && v.professionVerified) level = 'fully_verified';
-  else if (v.professionVerified) level = 'profession_verified';
-  else if (v.idVerified) level = 'id_verified';
 
   return { score: Math.min(100, score), level };
 }

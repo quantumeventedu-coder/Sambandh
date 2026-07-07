@@ -64,7 +64,7 @@ router.post('/create-order', requireAuth, async (req, res, next) => {
 
     if (purpose === 'base_subscription') {
       // Monthly base membership, priced by verified gender. Renewals stack +30 days.
-      if (!user.verification.idVerified) return res.status(403).json({ error: 'Verify ID before subscribing' });
+      // Registration is by payment (before verification), so no verification gate here.
       amount = computeBaseFee(user.profile.gender);
     } else if (PURPOSE_PRICES[purpose]) {
       amount = PURPOSE_PRICES[purpose];

@@ -39,7 +39,7 @@ const UserSchema = new mongoose.Schema({
     mangalDosha: Boolean, computedAt: Date
   },
   verification: {
-    level: { type: String, enum: ['phone_only', 'id_verified', 'profession_verified', 'fully_verified'], default: 'phone_only' },
+    level: { type: String, enum: ['phone_only', 'photo_verified', 'id_verified', 'profession_verified', 'fully_verified'], default: 'phone_only' },
     idVerified: { type: Boolean, default: false }, idType: String, idVerifiedAt: Date,
     selfieVerified: { type: Boolean, default: false },
     professionVerified: { type: Boolean, default: false },

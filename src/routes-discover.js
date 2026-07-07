@@ -61,7 +61,7 @@ router.get('/', requireAuth, async (req, res, next) => {
       'status.banned': { $ne: true },
       'profile.firstName': { $exists: true, $ne: null },
       'membership.joinFeePaid': true,
-      'verification.idVerified': true,
+      'verification.selfieVerified': true,      // real face verification is the gate
       blockedUsers: { $ne: me._id },            // they blocked me
       incognitoBlockList: { $ne: me._id }       // incognito: hidden from me specifically
     };

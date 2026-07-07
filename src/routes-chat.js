@@ -127,8 +127,8 @@ router.post('/start', requireAuth, async (req, res, next) => {
         (them.blockedUsers || []).some(b => b.toString() === req.userId)) {
       return res.status(404).json({ error: 'User not found' });
     }
-    if (!me.verification.idVerified || !them.verification.idVerified) {
-      return res.status(403).json({ error: 'Both users must be ID-verified' });
+    if (!me.verification.selfieVerified || !them.verification.selfieVerified) {
+      return res.status(403).json({ error: 'Both users must complete photo verification first' });
     }
     if (!me.membership.joinFeePaid) {
       return res.status(403).json({ error: 'An active membership is required to chat (from CHF 1/month)' });

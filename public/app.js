@@ -257,9 +257,9 @@ function renderFeatures() {
     <p class="sub center" style="font-style:italic">how it actually works</p>
 
     ${section('shieldCheck', 'Everyone is verified',
-      `Government ID first — DigiLocker takes about 30 seconds — then a selfie check that becomes your
-       first photo. The face you see is the face on the ID. Doctors, lawyers, CAs and architects can add
-       a registry-checked badge. We never store Aadhaar numbers.`)}
+      `A live face check — our own tech, right in your browser — verifies every member is a real, unique
+       person, and becomes their first photo. Add a government ID or a registry-checked profession
+       (doctors, lawyers, CAs, architects) for extra trust badges. We never store Aadhaar numbers.`)}
 
     ${section('card', 'Nothing is free',
       `Membership is monthly — <b>CHF 1 men · CHF 5 women · CHF 3 non-binary</b> — and that's what
@@ -470,19 +470,21 @@ function captureLocation({ prompt = false } = {}) {
 // Order per build reference: profile → ID → selfie → profession → pay → intent → astrology → photos
 // Registration-by-payment first (low friction), then verification, then the rest.
 // Profession + astrology are optional and come last so we don't lose users.
-const OB_STEPS = ['profile', 'pay', 'id', 'selfie', 'intent', 'photos', 'profession', 'astrology'];
+// Live-selfie face verification is the real, required gate. Government-ID,
+// profession and astrology are optional boosters at the end (all skippable).
+const OB_STEPS = ['profile', 'pay', 'selfie', 'intent', 'photos', 'id', 'profession', 'astrology'];
 
 function onboardingStep() {
   const u = S.user;
   if (!u) return 'profile';
   if (!u.profile?.firstName) return 'profile';
-  if (!u.membership?.joinFeePaid) return 'pay';            // register by payment first
-  if (!u.verification?.idVerified) return 'id';
-  if (!u.verification?.selfieVerified) return 'selfie';
+  if (!u.membership?.joinFeePaid) return 'pay';                 // register by payment first
+  if (!u.verification?.selfieVerified) return 'selfie';         // real face verification = required
   if (!(u.intent || []).length) return 'intent';
   if (!(u.profile?.photos || []).length) return 'photos';
-  if (!u.claims?.profession?.verified && !u._skippedProfession) return 'profession';
-  if (!u.astrology?.birthDate && !u._skippedAstro) return 'astrology';
+  if (!u.verification?.idVerified && !u._skippedId) return 'id';                          // optional
+  if (!u.claims?.profession?.verified && !u._skippedProfession) return 'profession';      // optional
+  if (!u.astrology?.birthDate && !u._skippedAstro) return 'astrology';                    // optional
   return 'done';
 }
 
@@ -557,13 +559,14 @@ async function obSaveProfile() {
 
 function obId() {
   return `<div class="section-pad">
-    <h1>Verify your ID</h1>
-    <p class="sub">Required before you can chat. Fully automated — no waiting, no human review.</p>
+    <h1>Add a government-ID badge <span class="hint">(optional)</span></h1>
+    <p class="sub">You're already photo-verified. Add a government ID for an extra trust badge on your profile. Fully automated — no waiting, no human review.</p>
     <div class="card mt">
       <div class="field"><label>ID type</label><select id="ob-idtype">
         <option value="aadhaar">Aadhaar</option><option value="pan">PAN</option><option value="driving_licence">Driving Licence</option></select></div>
       <div class="field"><label>Photo of your ID</label><input id="ob-idfile" type="file" accept="image/*"/></div>
-      <button class="btn" onclick="obUploadId()">Submit ID</button>
+      <button class="btn" onclick="obUploadId()">Add ID badge</button>
+      <button class="btn ghost" onclick="S.user._skippedId=true;renderOnboarding()">Skip for now</button>
       <div id="ob-id-area"></div>
     </div>
     <div class="notice forest ic-row" style="display:flex">${ic('lock')} <span>We store only your name and date of birth. Your ID document is auto-deleted after 30 days. Aadhaar numbers are never stored.</span></div>
@@ -583,8 +586,8 @@ async function obUploadId() {
 
 function obSelfie() {
   return `<div class="section-pad">
-    <h1>Face check</h1>
-    <p class="sub">Our own face verification runs entirely in your browser — a live camera capture, no third party, no upload of your face to anyone. It becomes your first profile photo.</p>
+    <h1>Verify it's really you</h1>
+    <p class="sub">This is your Sambandh verification — a quick live camera check. Our own face verification runs entirely in your browser: no third party, no upload of your face to anyone. It also becomes your first profile photo, and blocks anyone from reusing your face on a fake account.</p>
     <div id="face-stage">
       <button class="btn" onclick="startFaceVerification()">${ic('camera')} Verify with camera</button>
       <div id="face-live" style="display:none;margin-top:12px">
@@ -1024,8 +1027,8 @@ function openFilters() {
       <div class="field"><label>Max age</label><input id="f-max" type="number" min="18" max="60" value="${f.maxAge}"/></div>
     </div>
     <div class="field"><label>Verification level</label><select id="f-ver">
-      <option value="any" ${f.verification === 'any' ? 'selected' : ''}>Any</option>
-      <option value="id" ${f.verification === 'id' ? 'selected' : ''}>ID verified</option>
+      <option value="any" ${f.verification === 'any' ? 'selected' : ''}>Photo-verified (all)</option>
+      <option value="id" ${f.verification === 'id' ? 'selected' : ''}>Government-ID verified</option>
       <option value="profession" ${f.verification === 'profession' ? 'selected' : ''}>Profession verified</option>
       <option value="fully_verified" ${f.verification === 'fully_verified' ? 'selected' : ''}>Fully verified</option></select></div>
     <div class="field"><label>Minimum Karma grade</label><select id="f-karma">
@@ -1112,8 +1115,9 @@ async function renderProfile(userId) {
 function verLabel(v) {
   if (!v) return '';
   if (v.level === 'fully_verified') return '✓ Fully verified';
-  if (v.level === 'profession_verified') return '✓ ID + Profession verified';
-  if (v.level === 'id_verified') return '✓ ID verified';
+  if (v.level === 'profession_verified') return '✓ Profession verified';
+  if (v.level === 'id_verified') return '✓ Photo + ID verified';
+  if (v.level === 'photo_verified') return '✓ Photo verified';
   return 'Phone verified only';
 }
 
