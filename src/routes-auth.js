@@ -505,10 +505,10 @@ router.post('/delete-account', requireAuth, async (req, res, next) => {
 const bcrypt = require('bcryptjs');
 const USERNAME_RE = /^[a-zA-Z0-9_]{3,20}$/;
 const registerSchema = z.object({
-  username: z.string().regex(USERNAME_RE),
+  username: z.string().regex(USERNAME_RE).optional(),
   email: z.string().email().max(200).optional(),
   password: z.string().min(8).max(200)
-});
+}).refine(d => d.email || d.username, { message: 'Provide an email or username' });
 const loginSchema = z.object({
   identifier: z.string().min(3).max(200),   // username or email
   password: z.string().min(1).max(200),
@@ -516,18 +516,18 @@ const loginSchema = z.object({
   backupCode: z.string().max(20).optional()
 });
 
-// POST /auth/register — create an account with a username + password
+// POST /auth/register — create an account with email (or username) + password
 router.post('/register', ipLimit, async (req, res, next) => {
   try {
     const parsed = registerSchema.safeParse(req.body);
-    if (!parsed.success) return res.status(400).json({ error: 'Username must be 3–20 letters/numbers, password at least 8 characters.' });
-    const username = parsed.data.username.toLowerCase();
+    if (!parsed.success) return res.status(400).json({ error: 'Enter a valid email and a password of at least 8 characters.' });
+    const username = parsed.data.username ? parsed.data.username.toLowerCase() : undefined;
     const email = parsed.data.email ? parsed.data.email.toLowerCase() : undefined;
-    if (await User.findOne({ username })) return res.status(409).json({ error: 'That username is taken.' });
+    if (username && await User.findOne({ username })) return res.status(409).json({ error: 'That username is taken.' });
     if (email && await User.findOne({ email })) return res.status(409).json({ error: 'That email already has an account — sign in instead.' });
     const passwordHash = await bcrypt.hash(parsed.data.password, 10);
     const user = await User.create({
-      username, ...(email ? { email } : {}), passwordHash, createdAt: new Date(),
+      ...(username ? { username } : {}), ...(email ? { email } : {}), passwordHash, createdAt: new Date(),
       verification: { level: 'phone_only', trustScore: 10 },
       membership: { joinFeePaid: false, tier: 'free' },
       status: { active: true, suspended: false, banned: false }
@@ -536,7 +536,7 @@ router.post('/register', ipLimit, async (req, res, next) => {
     const token = issueToken(res, user);
     res.json({ token, user: { id: user._id, username: user.username, email: user.email, hasProfile: false } });
   } catch (err) {
-    if (err.code === 11000) return res.status(409).json({ error: 'That username or email is already taken.' });
+    if (err.code === 11000) return res.status(409).json({ error: 'That email or username is already taken.' });
     next(err);
   }
 });

@@ -305,62 +305,55 @@ function renderFeatures() {
 }
 
 function renderLogin() {
-  const mode = S._loginMode || 'email';   // email | phone | password | register
-  const link = (m, label) => `<a href="#" onclick="S._loginMode='${m}';renderLogin();return false" style="color:var(--sindoor)">${label}</a>`;
+  const tab = S._authTab || 'signin';   // signin | signup
+  const seg = (t, label) => `<button onclick="S._authTab='${t}';renderLogin()" style="flex:1;padding:11px;border:0;border-radius:10px;font-weight:700;font-size:14px;cursor:pointer;${tab === t ? 'background:var(--sindoor);color:#fff;box-shadow:0 1px 4px rgba(0,0,0,.15)' : 'background:transparent;color:inherit'}">${label}</button>`;
+
   let card;
-  if (mode === 'password') {
+  if (tab === 'signup') {
     card = `
-      <div class="field"><label>Username or email</label><input id="li-id" autocomplete="username" placeholder="your_username"/></div>
-      <div class="field"><label>Password</label><input id="li-pw" type="password" autocomplete="current-password" placeholder="••••••••"/></div>
-      <button class="btn mt" onclick="passwordLogin()">Sign in</button>
-      <div id="otp-area"></div>
-      <p class="hint mt">New here? ${link('register', 'Create an account')} · ${link('email', 'Use email code instead')}</p>`;
-  } else if (mode === 'register') {
-    card = `
-      <div class="field"><label>Choose a username</label><input id="rg-user" autocomplete="username" placeholder="3–20 letters/numbers"/></div>
-      <div class="field"><label>Email <span class="hint">(optional)</span></label><input id="rg-email" type="email" autocomplete="email" placeholder="you@example.com"/></div>
+      <div class="field"><label>Email</label><input id="rg-email" type="email" inputmode="email" autocomplete="email" placeholder="you@example.com"/></div>
       <div class="field"><label>Password</label><input id="rg-pw" type="password" autocomplete="new-password" placeholder="at least 8 characters"/></div>
-      <button class="btn mt" onclick="passwordRegister()">Create account</button>
-      <p class="hint mt">Already have an account? ${link('password', 'Sign in')}</p>`;
-  } else if (mode === 'phone') {
-    card = `
-      <div class="field"><label>Mobile number</label>
-        <div class="row"><input id="cc" value="+91" style="flex:0 0 64px;text-align:center" maxlength="4"/><input id="phone" type="tel" placeholder="98765 43210" maxlength="10" style="flex:1"/></div></div>
-      <button class="btn mt" id="otp-btn" onclick="sendOtp()">Send code</button>
-      <div id="otp-area"></div>
-      <p class="hint mt">${link('email', 'Use email instead')} · ${link('password', 'Use a password')}</p>`;
+      <button class="btn mt" onclick="passwordRegister()">Create account</button>`;
   } else {
     card = `
-      <div class="field"><label>Email address</label><input id="email" type="email" inputmode="email" placeholder="you@example.com" autocomplete="email"/></div>
-      <button class="btn mt" id="otp-btn" onclick="sendOtp()">Email me a code</button>
-      <div id="otp-area"></div>
-      <p class="hint mt">${link('password', 'Use a password')} · ${link('phone', 'Use phone')}</p>`;
+      <div class="field"><label>Email</label><input id="li-id" type="email" inputmode="email" autocomplete="username" placeholder="you@example.com"/></div>
+      <div class="field"><label>Password</label><input id="li-pw" type="password" autocomplete="current-password" placeholder="••••••••"/></div>
+      <button class="btn mt" onclick="passwordLogin()">Sign in</button>
+      <div id="otp-area"></div>`;
   }
+
+  const heading = tab === 'signup' ? 'Create your account' : 'Welcome back';
+  const subline = tab === 'signup' ? 'Join a verified, honesty-first community.' : 'Sign in to continue.';
   screen.innerHTML = `
-  <div class="section-pad" style="padding-top:56px">
+  <div class="section-pad" style="padding-top:52px;max-width:420px;margin:0 auto">
     <div class="wordmark center" style="font-size:34px">sambandh</div>
     <p class="sub center" style="font-style:italic">connections, made meaningful.</p>
-    <div class="card mt">${card}</div>
+    <div class="row" style="gap:5px;background:rgba(0,0,0,.05);padding:5px;border-radius:12px;margin-top:20px">
+      ${seg('signin', 'Sign in')}${seg('signup', 'Sign up')}
+    </div>
+    <div class="card mt">
+      <div class="center" style="font-weight:700;font-size:16px">${heading}</div>
+      <p class="hint center" style="margin-bottom:12px">${subline}</p>
+      ${card}
+    </div>
     <div class="row" style="align-items:center;gap:10px;margin:14px 0"><div style="flex:1;height:1px;background:var(--sand-mid)"></div><span class="hint">or</span><div style="flex:1;height:1px;background:var(--sand-mid)"></div></div>
     <div id="google-btn" style="display:flex;justify-content:center;min-height:0"></div>
-    <button class="btn secondary ic-row" style="justify-content:center;margin-top:10px" onclick="passkeyLogin()">${ic('lock')} Sign in with a passkey</button>
-    <p class="hint center mt">Fingerprint, Face ID or security key — no code needed.</p>
-    <p class="hint center">We never show your email or number to other users.</p>
+    ${tab === 'signin' ? `<button class="btn secondary ic-row" style="justify-content:center;margin-top:10px" onclick="passkeyLogin()">${ic('lock')} Sign in with a passkey</button>` : ''}
+    <p class="hint center mt">We never show your email to other users.</p>
   </div>`;
-  initGoogleButton();
+  initGoogleButton(tab);
 }
 
 async function passwordRegister() {
-  const username = ($('#rg-user').value || '').trim().toLowerCase();
   const email = ($('#rg-email').value || '').trim().toLowerCase();
   const password = $('#rg-pw').value || '';
-  if (!/^[a-z0-9_]{3,20}$/.test(username)) return toast('Username: 3–20 letters, numbers or underscores.');
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return toast('Enter a valid email address.');
   if (password.length < 8) return toast('Password must be at least 8 characters.');
   try {
-    const r = await api('/auth/register', { method: 'POST', body: { username, password, ...(email ? { email } : {}) } });
+    const r = await api('/auth/register', { method: 'POST', body: { email, password } });
     S.token = r.token; localStorage.setItem('sb_token', r.token);
     S.user = (await api('/auth/me')).user;
-    connectSocket(); registerWebPush();
+    connectSocket(); registerWebPush(); captureLocation();
     nav(onboardingStep() === 'done' ? '#/discover' : '#/onboarding');
   } catch (e) { toast(e.message); }
 }
@@ -385,13 +378,14 @@ async function passwordLogin(totp) {
 }
 
 // ---- Google Sign-In (loads Google Identity Services if a client id is configured) ----
-async function initGoogleButton() {
+async function initGoogleButton(tab) {
   try {
     const cfg = await api('/auth/config');
     if (!cfg.googleClientId) { const el = $('#google-btn'); if (el) el.innerHTML = ''; return; }
     await loadScript('https://accounts.google.com/gsi/client');
     google.accounts.id.initialize({ client_id: cfg.googleClientId, callback: onGoogleCredential });
-    const el = $('#google-btn'); if (el) google.accounts.id.renderButton(el, { theme: 'outline', size: 'large', shape: 'pill', text: 'continue_with' });
+    const el = $('#google-btn');
+    if (el) google.accounts.id.renderButton(el, { theme: 'outline', size: 'large', shape: 'pill', text: tab === 'signup' ? 'signup_with' : 'signin_with' });
   } catch { /* Google is optional */ }
 }
 async function onGoogleCredential(resp) {
@@ -401,58 +395,6 @@ async function onGoogleCredential(resp) {
     S.token = r.token; localStorage.setItem('sb_token', r.token);
     S.user = (await api('/auth/me')).user;
     connectSocket(); registerWebPush();
-    nav(onboardingStep() === 'done' ? '#/discover' : '#/onboarding');
-  } catch (e) { toast(e.message); }
-}
-
-async function sendOtp() {
-  let body, ident;
-  if (S._loginMode === 'phone') {
-    const phone = ($('#cc').value + $('#phone').value.replace(/\D/g, ''));
-    if (!/^\+[1-9][0-9]{9,14}$/.test(phone)) return toast('Enter a valid 10-digit mobile number');
-    body = { phone }; ident = { phone };
-  } else {
-    const email = ($('#email').value || '').trim().toLowerCase();
-    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return toast('Enter a valid email address');
-    body = { email }; ident = { email };
-  }
-  $('#otp-btn').disabled = true;
-  try {
-    const r = await api('/auth/request-otp', { method: 'POST', body });
-    $('#otp-area').innerHTML = `
-      <div class="field mt">
-        <label>Enter the 6-digit code</label>
-        <input id="otp" class="otp-boxes" maxlength="6" inputmode="numeric" placeholder="••••••"/>
-        ${r.channel === 'email' && !r.devMode ? `<div class="hint">We emailed a code to <b>${esc(body.email)}</b>. Check your inbox.</div>` : ''}
-        ${r.devMode ? `<div class="hint">Dev mode — your code is <b>${esc(r.devOtp)}</b> (also in the server console${r.channel === 'email' ? ' / dev email log' : ''})</div>` : ''}
-      </div>
-      <button class="btn forest" onclick='verifyOtp(${JSON.stringify(ident)})'>Verify & continue</button>`;
-    $('#otp').focus();
-  } catch (e) { toast(e.message); }
-  $('#otp-btn').disabled = false;
-}
-
-async function verifyOtp(ident, totp) {
-  try {
-    if (!totp) S._pendingOtp = $('#otp').value.trim();       // remember OTP for the 2FA step
-    const body = { ...ident, otp: S._pendingOtp, ...(totp ? { totp } : {}) };
-    const r = await api('/auth/verify-otp', { method: 'POST', body });
-    if (r.twoFactorRequired) {                               // account has an authenticator
-      $('#otp-area').innerHTML = `
-        <div class="field mt"><label>Authenticator code (2FA)</label>
-          <input id="totp" class="otp-boxes" maxlength="6" inputmode="numeric" placeholder="••••••"/>
-          <div class="hint">Enter the 6-digit code from your authenticator app.</div></div>
-        <button class="btn forest" onclick='verifyOtp(${JSON.stringify(ident)}, document.getElementById("totp").value.trim())'>Verify</button>`;
-      document.getElementById('totp')?.focus();
-      return;
-    }
-    S.token = r.token;
-    localStorage.setItem('sb_token', r.token);
-    S._pendingOtp = null;
-    S.user = (await api('/auth/me')).user;
-    connectSocket();
-    registerWebPush();  // ask for browser notifications after sign-in
-    captureLocation();  // precise GPS for accurate matching (mandatory)
     nav(onboardingStep() === 'done' ? '#/discover' : '#/onboarding');
   } catch (e) { toast(e.message); }
 }
