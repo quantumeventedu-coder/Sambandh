@@ -1,0 +1,54 @@
+# Render Blueprint — deploys Sambandh as a PERSISTENT Node web service.
+#
+# Why: Sambandh is a stateful, real-time app. On a persistent host (unlike Vercel
+# serverless) all of this works as built:
+#   · Socket.io real-time chat (live delivery, typing, match/reveal alerts)
+#   · reliable login (OTP + passkey challenge stores live in one process)
+#   · in-process cron jobs (membership expiry, nightly risk/karma, model retrain)
+#   · a shared in-memory rate limiter
+#
+# How: Render dashboard → New → Blueprint → connect this repo. Set the values
+# marked `sync: false` in the dashboard (they are never committed). Then point
+# www.sambandh.online at the Render service (Settings → Custom Domains).
+services:
+  - type: web
+    name: sambandh
+    runtime: node
+    plan: starter                 # bump to standard/pro as traffic grows
+    region: singapore             # nearest to India + the Supabase ap-southeast pooler
+    branch: main
+    buildCommand: npm install
+    startCommand: node src/server.js
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
+      # --- Required ---
+      - key: DATABASE_URL          # Supabase pooler URL (aws-…pooler.supabase.com:5432)
+        sync: false
+      - key: JWT_SECRET
+        sync: false
+      - key: ADMIN_API_KEY
+        sync: false
+      - key: SUPER_ADMIN_KEY
+        sync: false
+      - key: CORS_ORIGINS
+        value: https://www.sambandh.online,https://sambandh.online
+      - key: SEED_DEMO
+        value: "false"             # "true" only if you want demo profiles seeded
+      # --- Optional (set when available; features light up automatically) ---
+      - key: SUPABASE_URL          # Supabase → Settings → API (persistent photo storage)
+        sync: false
+      - key: SUPABASE_SERVICE_KEY
+        sync: false
+      - key: ANTHROPIC_API_KEY     # turns AI (Karma/reputation/intelligence) from rules → full
+        sync: false
+      - key: GOOGLE_CLIENT_ID      # enables the Google sign-in button
+        sync: false
+      - key: RAZORPAY_KEY_ID       # real payments (else simulated)
+        sync: false
+      - key: RAZORPAY_KEY_SECRET
+        sync: false
+      - key: RAZORPAY_WEBHOOK_SECRET
+        sync: false
