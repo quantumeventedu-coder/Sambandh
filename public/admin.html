@@ -72,7 +72,9 @@ fetch('/health').then(r=>r.json()).then(h => {
     <button id="tab-dis" onclick="show('dis')">Karma disputes</button>
     <button id="tab-act" onclick="show('act')">Activity & audit</button>
   </nav>
-  <section id="sec-ver"><h2>Automated verification decisions (oversight — override only for appeals)</h2><div id="ver-list"></div></section>
+  <section id="sec-ver"><h2>Verification — fully automated</h2>
+    <p class="muted" style="margin:-6px 0 12px">Every ID &amp; selfie is decided automatically at submission — <b>staff never approve routine verifications</b>. This is an oversight log; use “Approve on appeal” only when a user contests an automated rejection.</p>
+    <div id="ver-list"></div></section>
   <section id="sec-rep" style="display:none"><h2>User reports (24h SLA — IT Rules 2021)</h2><div id="rep-list"></div></section>
   <section id="sec-dis" style="display:none"><h2>Karma Book disputes (7-day SLA)</h2><div id="dis-list"></div></section>
   <section id="sec-act" style="display:none">
@@ -119,23 +121,30 @@ async function refresh() {
   try {
     const v = await api('/verification/admin/queue');
     document.getElementById('st-ver').textContent = v.verifications.length;
-    document.getElementById('ver-list').innerHTML = v.verifications.length ? v.verifications.map(x=>`
-      <div class="card">
-        <div class="row" style="justify-content:space-between">
+    document.getElementById('ver-list').innerHTML = v.verifications.length ? v.verifications.map(x=>{
+      const approved = x.status === 'approved';
+      const badge = approved
+        ? '<span class="tag" style="background:#e6f5ec;color:#1e7d4f">AUTO-APPROVED ✓</span>'
+        : '<span class="tag" style="background:#fde8e8;color:#b23b3b">AUTO-REJECTED ✗</span>';
+      return `<div class="card">
+        <div class="row" style="justify-content:space-between;align-items:flex-start">
           <div>
-            <span class="tag">${esc(x.type)}</span>
+            <span class="tag">${esc(x.type)}</span> ${badge}
             <b>${esc(x.userId?.profile?.firstName || 'Unknown')}</b>
             <span class="muted">· ${esc(x.userId?.profile?.city||'')} · ${esc(x.userId?.phone||'')}</span>
             <div class="muted" style="margin-top:4px">${esc(JSON.stringify(x.claim||{}))}</div>
+            ${!approved && x.rejectionReason ? `<div class="muted">Reason: ${esc(x.rejectionReason)}</div>` : ''}
             <div class="muted">Docs: ${(x.documents||[]).map(d=>d.url?`<a href="${esc(d.url)}" target="_blank">${esc(d.type)}</a>`:esc(d.type+': '+(d.value||''))).join(' · ')||'none'}</div>
             <div class="muted">Submitted ${new Date(x.submittedAt).toLocaleString()}</div>
           </div>
           <div class="row">
-            <button class="approve" onclick="decide('${x._id}','approve')">Approve ✓</button>
-            <button class="reject" onclick="decide('${x._id}','reject')">Reject</button>
+            ${approved
+              ? '<span class="muted">automatic · no action needed</span>'
+              : `<button class="approve" onclick="decide('${x._id}','approve')">Approve on appeal</button>`}
           </div>
         </div>
-      </div>`).join('') : '<div class="empty">Queue is empty</div>';
+      </div>`;
+    }).join('') : '<div class="empty">No automated decisions yet</div>';
 
     const r = await api('/report/admin/queue');
     document.getElementById('st-rep').textContent = r.reports.length;

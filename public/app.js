@@ -131,6 +131,21 @@ function fileToResizedBase64(file, maxW = 1280) {
   });
 }
 
+// Read any file as base64 (no canvas) — used for PDFs and non-image documents.
+function fileToBase64(file) {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(String(r.result).split(',')[1]);
+    r.onerror = () => reject(new Error('Could not read that file — try another.'));
+    r.readAsDataURL(file);
+  });
+}
+
+// Resize images (smaller upload); read PDFs / other documents as-is.
+function fileToUploadBase64(file) {
+  return (file.type && file.type.startsWith('image/')) ? fileToResizedBase64(file) : fileToBase64(file);
+}
+
 function connectSocket() {
   if (S.socket || !S.token || typeof io === 'undefined') return;
   S.socket = io({ auth: { token: S.token } });
@@ -353,7 +368,7 @@ async function passwordRegister() {
     const r = await api('/auth/register', { method: 'POST', body: { email, password } });
     S.token = r.token; localStorage.setItem('sb_token', r.token);
     S.user = (await api('/auth/me')).user;
-    connectSocket(); registerWebPush(); captureLocation();
+    connectSocket(); captureLocation();
     nav(onboardingStep() === 'done' ? '#/discover' : '#/onboarding');
   } catch (e) { toast(e.message); }
 }
@@ -372,7 +387,7 @@ async function passwordLogin(totp) {
     }
     S.token = r.token; localStorage.setItem('sb_token', r.token); S._pwPass = null;
     S.user = (await api('/auth/me')).user;
-    connectSocket(); registerWebPush();
+    connectSocket();
     nav(onboardingStep() === 'done' ? '#/discover' : '#/onboarding');
   } catch (e) { toast(e.message); }
 }
@@ -394,7 +409,7 @@ async function onGoogleCredential(resp) {
     if (r.twoFactorRequired) return toast('This account has 2FA — sign in with your password or email code.');
     S.token = r.token; localStorage.setItem('sb_token', r.token);
     S.user = (await api('/auth/me')).user;
-    connectSocket(); registerWebPush();
+    connectSocket();
     nav(onboardingStep() === 'done' ? '#/discover' : '#/onboarding');
   } catch (e) { toast(e.message); }
 }
@@ -453,19 +468,21 @@ function captureLocation({ prompt = false } = {}) {
 
 // ---------------- Onboarding ----------------
 // Order per build reference: profile → ID → selfie → profession → pay → intent → astrology → photos
-const OB_STEPS = ['profile', 'id', 'selfie', 'profession', 'pay', 'intent', 'astrology', 'photos'];
+// Registration-by-payment first (low friction), then verification, then the rest.
+// Profession + astrology are optional and come last so we don't lose users.
+const OB_STEPS = ['profile', 'pay', 'id', 'selfie', 'intent', 'photos', 'profession', 'astrology'];
 
 function onboardingStep() {
   const u = S.user;
   if (!u) return 'profile';
   if (!u.profile?.firstName) return 'profile';
+  if (!u.membership?.joinFeePaid) return 'pay';            // register by payment first
   if (!u.verification?.idVerified) return 'id';
   if (!u.verification?.selfieVerified) return 'selfie';
-  if (!u.claims?.profession?.verified) return 'profession';
-  if (!u.membership?.joinFeePaid) return 'pay';
   if (!(u.intent || []).length) return 'intent';
-  if (!u.astrology?.birthDate && !u._skippedAstro) return 'astrology';
   if (!(u.profile?.photos || []).length) return 'photos';
+  if (!u.claims?.profession?.verified && !u._skippedProfession) return 'profession';
+  if (!u.astrology?.birthDate && !u._skippedAstro) return 'astrology';
   return 'done';
 }
 
@@ -541,35 +558,15 @@ async function obSaveProfile() {
 function obId() {
   return `<div class="section-pad">
     <h1>Verify your ID</h1>
-    <p class="sub">Required before you can chat. Takes about 60 seconds.</p>
-    <div class="tile" style="background:var(--forest);border-color:var(--forest);color:white" onclick="obDigilocker()">
-      <div class="t ic-row">${ic('zap')} DigiLocker (fastest)</div>
-      <div class="d" style="color:rgba(255,255,255,0.75)">Government-backed · ~30 seconds</div>
+    <p class="sub">Required before you can chat. Fully automated — no waiting, no human review.</p>
+    <div class="card mt">
+      <div class="field"><label>ID type</label><select id="ob-idtype">
+        <option value="aadhaar">Aadhaar</option><option value="pan">PAN</option><option value="driving_licence">Driving Licence</option></select></div>
+      <div class="field"><label>Photo of your ID</label><input id="ob-idfile" type="file" accept="image/*"/></div>
+      <button class="btn" onclick="obUploadId()">Submit ID</button>
+      <div id="ob-id-area"></div>
     </div>
-    <div class="tile" onclick="obUploadIdForm()">
-      <div class="t ic-row">${ic('camera')} Upload ID + Selfie</div>
-      <div class="d">Aadhaar / PAN / Driving Licence · ~2 minutes</div>
-    </div>
-    <div id="ob-id-area"></div>
     <div class="notice forest ic-row" style="display:flex">${ic('lock')} <span>We store only your name and date of birth. Your ID document is auto-deleted after 30 days. Aadhaar numbers are never stored.</span></div>
-  </div>`;
-}
-
-async function obDigilocker() {
-  // Production: real DigiLocker OAuth redirect. Dev: simulated instant approval.
-  try {
-    const r = await api('/verification/id', { method: 'POST', body: { method: 'digilocker', digilockerToken: 'dev_dl_' + Date.now() } });
-    if (r.status === 'approved') { toast('ID verified via DigiLocker ✓'); await refreshUserAndRoute(); }
-    else toast(r.reason || 'Verification failed — try again');
-  } catch (e) { toast(e.message); }
-}
-
-function obUploadIdForm() {
-  $('#ob-id-area').innerHTML = `<div class="card mt">
-    <div class="field"><label>ID type</label><select id="ob-idtype">
-      <option value="aadhaar">Aadhaar</option><option value="pan">PAN</option><option value="driving_licence">Driving Licence</option></select></div>
-    <div class="field"><label>Photo of your ID</label><input id="ob-idfile" type="file" accept="image/*"/></div>
-    <button class="btn" onclick="obUploadId()">Submit ID</button>
   </div>`;
 }
 
@@ -580,7 +577,7 @@ async function obUploadId() {
     const base64 = await fileToResizedBase64(f);
     const r = await api('/verification/id', { method: 'POST', body: { method: 'upload', idType: $('#ob-idtype').value, document: { base64, filename: f.name } } });
     if (r.status === 'approved') { toast('ID verified — all checks passed ✓'); await refreshUserAndRoute(); }
-    else toast('Not verified: ' + (r.reason || 'checks failed') + '. Try again or use DigiLocker.');
+    else toast('Not verified: ' + (r.reason || 'checks failed') + '. Please try again with a clearer photo.');
   } catch (e) { toast(e.message); }
 }
 
@@ -717,6 +714,8 @@ function obProfession() {
     <div id="ob-reg" style="display:none" class="field"><label>Registration number</label><input id="ob-regno" placeholder="e.g. NMC/BCI/ICAI number"/><div class="hint">Checked against the public registry — verifies instantly.</div></div>
     <div id="ob-docs" class="field"><label>Proof document (offer letter / company ID / college ID)</label><input id="ob-doc" type="file" accept="image/*,.pdf"/><div class="hint">Automated document check — instant. The document must name your employer. No human reviews it.</div></div>
     <button class="btn" onclick="obSendProfession()">Verify instantly</button>
+    <button class="btn ghost" onclick="S.user._skippedProfession=true;renderOnboarding()">Skip for now</button>
+    <p class="hint center" style="margin-top:6px">You can add a verified profession later from your profile — it's optional.</p>
   </div>`;
 }
 
@@ -743,7 +742,7 @@ async function obSendProfession() {
     } else {
       const f = $('#ob-doc').files[0];
       if (!f) return toast('Upload a proof document');
-      body.documents = [{ type: 'offer_letter', base64: await fileToResizedBase64(f), filename: f.name }];
+      body.documents = [{ type: 'offer_letter', base64: await fileToUploadBase64(f), filename: f.name }];
     }
     const r = await api('/verification/profession', { method: 'POST', body });
     if (r.status === 'approved') { toast('Profession verified instantly ✓'); await refreshUserAndRoute(); }
@@ -900,6 +899,9 @@ async function renderDiscover() {
     <div id="feed"><div class="empty">Loading profiles…</div></div>`;
   loadNotifCount();
   if (!S._locationGranted) captureLocation({ prompt: true }); // ensure precise distance
+  // Ask for notification permission LAST — only once the user is fully onboarded
+  // (registered + paid + browsing), so we don't add friction and lose signups.
+  if (!S._pushAsked) { S._pushAsked = true; registerWebPush(); }
   try {
     const q = new URLSearchParams({
       intent: S.filters.intent, minAge: S.filters.minAge, maxAge: S.filters.maxAge,
@@ -1596,7 +1598,7 @@ async function passkeyLogin() {
     }});
     S.token = r.token; localStorage.setItem('sb_token', r.token);
     S.user = (await api('/auth/me')).user;
-    connectSocket(); registerWebPush();
+    connectSocket();
     nav(onboardingStep() === 'done' ? '#/discover' : '#/onboarding');
   } catch (e) { toast(e.name === 'NotAllowedError' ? 'Passkey cancelled' : (e.message || 'Passkey sign-in failed')); }
 }
