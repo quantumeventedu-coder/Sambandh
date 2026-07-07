@@ -193,9 +193,13 @@ async function connectDatabase() {
   }
 
   // Serverless (Vercel): there is no local mongod and no binary download —
-  // a working MONGODB_URI is mandatory there.
+  // a real database is mandatory. The intended production DB is Supabase via
+  // DATABASE_URL; MONGODB_URI (Atlas) is the alternative.
   if (process.env.VERCEL) {
-    throw new Error('MongoDB unreachable and in-memory fallback is unavailable on Vercel — check MONGODB_URI and Atlas network access (allow 0.0.0.0/0).');
+    if (!process.env.DATABASE_URL && !process.env.MONGODB_URI) {
+      throw new Error('No database configured on Vercel. Set DATABASE_URL (Supabase Postgres — recommended) in Project Settings → Environment Variables, then redeploy. (Alternative: a reachable MONGODB_URI with Atlas network access set to 0.0.0.0/0.)');
+    }
+    throw new Error('Database unreachable on Vercel. If using DATABASE_URL (Supabase), use the session-pooler host (…pooler.supabase.com), not db.<ref> which is IPv6-only. If using MONGODB_URI (Atlas), allow network access from 0.0.0.0/0.');
   }
 
   // Local in-memory MongoDB (data resets on restart — dev only)
