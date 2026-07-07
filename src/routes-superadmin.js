@@ -274,4 +274,58 @@ router.post('/llm/test', async (req, res, next) => {
   }
 });
 
+// ---- Reusable AI API keys ---------------------------------------------------
+const ApiKey = require('./models/ApiKey');
+
+router.get('/ai-keys', async (req, res, next) => {
+  try {
+    const keys = await ApiKey.find().sort({ createdAt: -1 }).lean();
+    res.json({
+      keys: keys.map(k => ({
+        id: k._id, name: k.name, prefix: k.prefix, disabled: !!k.disabled,
+        calls: k.calls || 0, inputTokens: k.inputTokens || 0, outputTokens: k.outputTokens || 0,
+        rateLimitPerMin: k.rateLimitPerMin || 60,
+        lastUsedAt: k.lastUsedAt, createdAt: k.createdAt
+      }))
+    });
+  } catch (err) { next(err); }
+});
+
+router.post('/ai-keys', async (req, res, next) => {
+  try {
+    const name = String(req.body?.name || '').trim().slice(0, 60);
+    if (!name) return res.status(400).json({ error: 'A name is required' });
+    const { generateKey } = require('./routes-ai');
+    const { plaintext, prefix, keyHash } = generateKey();
+    const doc = await ApiKey.create({
+      name, prefix, keyHash,
+      rateLimitPerMin: Math.min(Math.max(parseInt(req.body?.rateLimitPerMin) || 60, 1), 6000)
+    });
+    await audit('ai_key_created', 'ApiKey', doc._id, `name: ${name}`);
+    // Plaintext is returned ONCE and never stored.
+    res.json({ id: doc._id, name, prefix, key: plaintext });
+  } catch (err) { next(err); }
+});
+
+router.post('/ai-keys/:id/toggle', async (req, res, next) => {
+  try {
+    if (!oid(req.params.id)) return res.status(400).json({ error: 'Bad id' });
+    const doc = await ApiKey.findById(req.params.id);
+    if (!doc) return res.status(404).json({ error: 'Not found' });
+    doc.disabled = !doc.disabled;
+    await doc.save();
+    await audit('ai_key_toggled', 'ApiKey', doc._id, doc.disabled ? 'disabled' : 'enabled');
+    res.json({ ok: true, disabled: doc.disabled });
+  } catch (err) { next(err); }
+});
+
+router.delete('/ai-keys/:id', async (req, res, next) => {
+  try {
+    if (!oid(req.params.id)) return res.status(400).json({ error: 'Bad id' });
+    await ApiKey.deleteOne({ _id: req.params.id });
+    await audit('ai_key_revoked', 'ApiKey', req.params.id, '');
+    res.json({ ok: true });
+  } catch (err) { next(err); }
+});
+
 module.exports = router;

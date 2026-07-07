@@ -69,9 +69,10 @@ function getClient(apiKey) {
 // The one place any LLM completion happens. Returns the response text (string).
 // Records usage (best-effort). Throws on disabled/error so callers keep their
 // existing try/catch → rule-engine fallback.
-// Callers pass `feature` (karma|reputation|api) for readability; usage is
-// currently metered globally, so it isn't destructured here.
-async function complete({ system, messages, prompt, maxTokens, temperature, model } = {}) {
+// Full completion → { text, usage:{inputTokens,outputTokens}, model }. Callers
+// pass `feature` for readability; global usage is metered here. Throws on
+// disabled/error so callers keep their rule-engine fallback.
+async function completeDetailed({ system, messages, prompt, maxTokens, temperature, model } = {}) {
   const c = await getConfig();
   if (!c.enabled || !c.apiKey) {
     const e = new Error('LLM is disabled or has no API key configured');
@@ -91,16 +92,20 @@ async function complete({ system, messages, prompt, maxTokens, temperature, mode
   try {
     const resp = await client.messages.create(req);
     const text = (resp.content || []).map(b => b.text || '').join('');
-    await recordUsage({
-      calls: 1,
+    const usage = {
       inputTokens: resp.usage?.input_tokens || 0,
       outputTokens: resp.usage?.output_tokens || 0
-    });
-    return text;
+    };
+    await recordUsage({ calls: 1, ...usage });
+    return { text, usage, model: req.model };
   } catch (err) {
     await recordUsage({ errors: 1 });
     throw err;
   }
+}
+
+async function complete(opts) {
+  return (await completeDetailed(opts)).text;
 }
 
 async function recordUsage({ calls = 0, inputTokens = 0, outputTokens = 0, errors = 0 }) {
@@ -184,6 +189,6 @@ async function test() {
 }
 
 module.exports = {
-  isEnabled, complete, status, updateConfig, test,
+  isEnabled, complete, completeDetailed, status, updateConfig, test,
   getConfig, clearCache, estimateCostCHF
 };

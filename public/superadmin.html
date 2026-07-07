@@ -245,6 +245,7 @@ async function openChat(chatId) {
 
 async function renderLLM() {
   const s = await api('/llm');
+  const { keys } = await api('/ai-keys');
   const num = n => (n || 0).toLocaleString();
   const feat = (k, label) => `
     <label style="display:flex;align-items:center;gap:8px;font-size:13px">
@@ -311,7 +312,62 @@ async function renderLLM() {
         <div class="notice" style="margin-top:12px">Cost is an estimate at Haiku-class pricing, for guidance only — not billing.
           Turning the engine off (or removing the key) instantly reverts every AI feature to the always-on rule engines, so the app never breaks.</div>
       </div>
+    </div>
+
+    <div class="card">
+      <h3 style="font-family:Georgia,serif;margin-bottom:4px">Reusable AI API keys</h3>
+      <div class="sub">Give your other apps a key to call this engine at
+        <b>POST /api/ai/complete</b> with header <b>X-AI-Key</b>. Keys are shown once; only a hash is stored.</div>
+      <div class="bar" style="margin:10px 0 4px">
+        <input id="ak-name" placeholder="App name (e.g. EdurankAI)" style="flex:1;max-width:280px"/>
+        <input id="ak-rate" type="number" min="1" max="6000" value="60" title="Requests / minute" style="width:120px"/>
+        <button class="gold" onclick="createAiKey()">Create key</button>
+      </div>
+      <div id="ak-new"></div>
+      <table style="margin-top:10px">
+        <tr><th>App</th><th>Key</th><th>Calls</th><th>Tokens (in/out)</th><th>Rate</th><th>Last used</th><th></th></tr>
+        ${keys.length ? keys.map(k => `<tr>
+          <td><b>${esc(k.name)}</b></td>
+          <td><code>${esc(k.prefix)}…</code></td>
+          <td>${num(k.calls)}</td>
+          <td>${num(k.inputTokens)} / ${num(k.outputTokens)}</td>
+          <td>${k.rateLimitPerMin}/min</td>
+          <td>${k.lastUsedAt ? new Date(k.lastUsedAt).toLocaleString() : '—'}</td>
+          <td style="white-space:nowrap">
+            <button class="ghost" onclick="toggleAiKey('${k.id}')">${k.disabled ? 'Enable' : 'Disable'}</button>
+            <button class="red" onclick="revokeAiKey('${k.id}')">Revoke</button>
+            ${k.disabled ? ' <span class="pill r">disabled</span>' : ''}
+          </td>
+        </tr>`).join('') : '<tr><td colspan="7">No API keys yet.</td></tr>'}
+      </table>
     </div>`;
+}
+
+async function createAiKey() {
+  const name = $('#ak-name').value.trim();
+  if (!name) return toast('Enter an app name');
+  const rateLimitPerMin = parseInt($('#ak-rate').value) || 60;
+  try {
+    const r = await apiPost('/ai-keys', { name, rateLimitPerMin });
+    $('#ak-new').innerHTML = `<div class="notice" style="margin-top:8px">New key for <b>${esc(r.name)}</b> — copy it now, it won't be shown again:
+      <div style="margin-top:6px"><code style="user-select:all;word-break:break-all;color:var(--gold)">${esc(r.key)}</code></div></div>`;
+    $('#ak-name').value = '';
+    // re-render the table but preserve the just-shown key notice
+    const notice = $('#ak-new').innerHTML;
+    await renderLLM();
+    $('#ak-new').innerHTML = notice;
+  } catch (e) { toast(e.message); }
+}
+async function toggleAiKey(id) {
+  try { await apiPost('/ai-keys/' + id + '/toggle', {}); renderLLM(); } catch (e) { toast(e.message); }
+}
+async function revokeAiKey(id) {
+  if (!confirm('Revoke this key permanently? Apps using it will stop working immediately.')) return;
+  try {
+    const r = await fetch('/api/superadmin/ai-keys/' + id, { method:'DELETE', headers:{ 'X-Super-Key': KEY } });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    toast('Key revoked'); renderLLM();
+  } catch (e) { toast(e.message); }
 }
 
 async function saveLLM() {

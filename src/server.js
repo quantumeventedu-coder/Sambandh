@@ -91,6 +91,7 @@ app.use('/api/compat', compatRoutes);
 app.use('/api/report', reportRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/me', meRoutes);
+app.use('/api/ai', require('./routes-ai')); // reusable AI API (per-app X-AI-Key)
 app.use('/api/superadmin', require('./routes-superadmin')); // owner-only, SUPER_ADMIN_KEY
 
 // Analytics summary for the admin panel (event counts, last 7 days)
