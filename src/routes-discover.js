@@ -84,7 +84,7 @@ router.get('/', requireAuth, async (req, res, next) => {
 
     // Passed profiles are hidden for 7 days (Pass docs TTL out automatically)
     const passed = await Pass.find({ from: me._id }).select('to').lean();
-    const passedIds = passed.map(p => p.to.toString());
+    const passedIds = new Set(passed.map(p => p.to.toString()));
 
     const candidates = await User.find(filter).limit(400);
 
@@ -113,7 +113,7 @@ router.get('/', requireAuth, async (req, res, next) => {
     const ranked = [];
     for (const u of candidates) {
       const uid = u._id.toString();
-      if (passedIds.includes(uid)) continue;
+      if (passedIds.has(uid)) continue;
 
       // Suspended users are hidden while suspension is in force
       if (u.status?.suspended && (!u.suspension?.endsAt || u.suspension.endsAt > new Date())) continue;

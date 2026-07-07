@@ -37,10 +37,17 @@ const server = http.createServer(app);
 // ---- Middleware ----
 
 app.use(helmet({ contentSecurityPolicy: false })); // CSP off so the local web app can load Socket.io + inline styles
-app.use(cors({
-  origin: process.env.FRONTEND_URL || true,
-  credentials: true
-}));
+
+// CORS: allow an explicit list of origins (CORS_ORIGINS, comma-separated, or
+// FRONTEND_URL). The SPA is served same-origin so it never needs CORS; only
+// external callers do. With nothing configured we reflect in development but
+// disallow cross-origin in production instead of echoing every origin back.
+const corsAllowlist = (process.env.CORS_ORIGINS || process.env.FRONTEND_URL || '')
+  .split(',').map(s => s.trim()).filter(Boolean);
+const corsOrigin = corsAllowlist.length
+  ? corsAllowlist
+  : (process.env.NODE_ENV === 'production' ? false : true);
+app.use(cors({ origin: corsOrigin, credentials: true }));
 
 // Razorpay webhook needs the RAW body for signature verification — mount before json
 app.use('/api/payment/webhook', express.raw({ type: 'application/json' }));
@@ -60,7 +67,7 @@ app.get('/health', (req, res) => res.json({
   ok: true,
   time: new Date(),
   db: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected',
-  devMode: process.env.DEV_MODE === 'true' || !process.env.FIREBASE_PROJECT_ID
+  devMode: process.env.DEV_MODE === 'true'
 }));
 
 // City autocomplete (public, static dataset)
@@ -222,6 +229,9 @@ let readyPromise = null;
 function ready() {
   if (!readyPromise) {
     readyPromise = (async () => {
+      if (!process.env.JWT_SECRET) {
+        throw new Error('JWT_SECRET is not set — configure it in the environment before the app can issue logins.');
+      }
       await connectDatabase();
       if (process.env.SEED_DEMO === 'true') {
         const { seedDemo } = require('./seed-demo');

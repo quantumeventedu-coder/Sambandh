@@ -43,7 +43,6 @@ const requestOtpSchema = z.object({
 const verifyOtpSchema = z.object({
   email: z.string().email().max(200).optional(),
   phone: z.string().regex(INDIAN_PHONE).optional(),
-  firebaseIdToken: z.string().optional(),
   otp: z.string().regex(/^\d{6}$/).optional(),
   totp: z.string().regex(/^\d{6}$/).optional(),          // 2FA authenticator code
   backupCode: z.string().max(20).optional()              // 2FA recovery code
@@ -223,7 +222,7 @@ router.post('/verify-otp', async (req, res, next) => {
   try {
     const parsed = verifyOtpSchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: 'Invalid request' });
-    const { firebaseIdToken, otp } = parsed.data;
+    const { otp } = parsed.data;
     const email = parsed.data.email ? parsed.data.email.toLowerCase() : null;
     const phone = parsed.data.phone || null;
     const id = email || phone;
@@ -246,11 +245,10 @@ router.post('/verify-otp', async (req, res, next) => {
       // Do NOT consume the OTP yet — if 2FA is required the client re-submits the
       // same OTP with the authenticator code. Deleted after the full check passes.
     } else {
-      // Production phone path via Firebase.
-      if (!firebaseIdToken) return res.status(400).json({ error: 'firebaseIdToken required' });
-      const firebaseAdmin = require('firebase-admin');
-      const decoded = await firebaseAdmin.auth().verifyIdToken(firebaseIdToken);
-      if (decoded.phone_number !== phone) return res.status(401).json({ error: 'Phone mismatch' });
+      // Phone login by SMS is intentionally not offered — email, password,
+      // Google and passkeys cover sign-in, and we don't run an SMS provider.
+      // This path is closed cleanly rather than depending on an unused SDK.
+      return res.status(400).json({ error: 'Phone login isn’t available — please use email, a password, Google, or a passkey.' });
     }
 
     let user = await User.findOne(email ? { email } : { phone });
