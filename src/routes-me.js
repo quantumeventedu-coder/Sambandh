@@ -82,6 +82,42 @@ router.patch('/settings', requireAuth, async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+// POST /api/me/location — save precise device GPS (browser Geolocation).
+// Powers accurate distance in discover. Reverse-geocodes to the nearest known
+// city (offline, from our own dataset — no third-party maps) for display.
+const { CITIES, haversineKm } = require('./data/cities');
+const locationSchema = z.object({
+  lat: z.number().min(-90).max(90),
+  lng: z.number().min(-180).max(180),
+  accuracy: z.number().min(0).max(100000).optional()
+});
+function nearestCity(lat, lng) {
+  let best = null, bestKm = Infinity;
+  for (const [name, state, clat, clng] of CITIES) {
+    const km = haversineKm(lat, lng, clat, clng);
+    if (km !== null && km < bestKm) { bestKm = km; best = { name, state }; }
+  }
+  return best;
+}
+router.post('/location', requireAuth, async (req, res, next) => {
+  try {
+    const parsed = locationSchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: 'Invalid coordinates' });
+    const { lat, lng, accuracy } = parsed.data;
+    const updates = {
+      'profile.location': { lat, lng, accuracy: accuracy ?? null, updatedAt: new Date() }
+    };
+    // Fill city/state from our own dataset only if the user hasn't set them.
+    const me = await User.findById(req.userId).select('profile.city profile.state').lean();
+    if (!me?.profile?.city) {
+      const c = nearestCity(lat, lng);
+      if (c) { updates['profile.city'] = c.name; updates['profile.state'] = c.state; }
+    }
+    const user = await User.findByIdAndUpdate(req.userId, updates, { new: true });
+    res.json({ ok: true, city: user.profile?.city || null, state: user.profile?.state || null });
+  } catch (err) { next(err); }
+});
+
 // POST /api/me/pause — hide profile from discover without deleting
 router.post('/pause', requireAuth, async (req, res, next) => {
   try {

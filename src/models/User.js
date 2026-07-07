@@ -17,6 +17,10 @@ const UserSchema = new mongoose.Schema({
     gender: { type: String, enum: ['male', 'female', 'non_binary', 'other'] },
     dob: String, age: Number, city: String, state: String,
     country: { type: String, default: 'IN' },
+    // Precise device location (browser Geolocation). Powers real distance in
+    // discover/recommender instead of city centroids. City stays as a coarse
+    // fallback + display. lat/lng are never exposed to other users.
+    location: { lat: Number, lng: Number, accuracy: Number, updatedAt: Date },
     languages: [String], bio: String,
     photos: [{ url: String, isPrimary: Boolean, fromSelfie: Boolean, uploadedAt: Date }]
   },

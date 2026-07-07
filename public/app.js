@@ -452,6 +452,7 @@ async function verifyOtp(ident, totp) {
     S.user = (await api('/auth/me')).user;
     connectSocket();
     registerWebPush();  // ask for browser notifications after sign-in
+    captureLocation();  // precise GPS for accurate matching (mandatory)
     nav(onboardingStep() === 'done' ? '#/discover' : '#/onboarding');
   } catch (e) { toast(e.message); }
 }
@@ -479,6 +480,33 @@ function urlBase64ToUint8Array(base64String) {
   const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
   const raw = atob(base64);
   return Uint8Array.from([...raw].map(c => c.charCodeAt(0)));
+}
+
+// Precise device location — powers accurate distance in discover. Uses the
+// browser Geolocation API only (no third-party maps). The server reverse-
+// geocodes to the nearest city from our own offline dataset. Coordinates are
+// never shown to other users.
+function captureLocation({ prompt = false } = {}) {
+  return new Promise(resolve => {
+    if (!('geolocation' in navigator)) return resolve(false);
+    navigator.geolocation.getCurrentPosition(
+      async pos => {
+        try {
+          const { latitude, longitude, accuracy } = pos.coords;
+          const r = await api('/me/location', { method: 'POST', body: { lat: latitude, lng: longitude, accuracy } });
+          S._locationGranted = true;
+          if (S.user?.profile && r.city) { S.user.profile.city = r.city; S.user.profile.state = r.state; }
+          resolve(true);
+        } catch { resolve(false); }
+      },
+      () => {
+        S._locationGranted = false;
+        if (prompt) toast('Location is required for accurate matches — enable it in your browser settings.');
+        resolve(false);
+      },
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 }
+    );
+  });
 }
 
 // ---------------- Onboarding ----------------
@@ -929,6 +957,7 @@ async function renderDiscover() {
     </div>
     <div id="feed"><div class="empty">Loading profiles…</div></div>`;
   loadNotifCount();
+  if (!S._locationGranted) captureLocation({ prompt: true }); // ensure precise distance
   try {
     const q = new URLSearchParams({
       intent: S.filters.intent, minAge: S.filters.minAge, maxAge: S.filters.maxAge,

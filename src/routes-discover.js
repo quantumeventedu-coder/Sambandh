@@ -18,7 +18,7 @@ const Like = require('./models/Like');
 const Pass = require('./models/Pass');
 const { requireAuth } = require('./routes-auth');
 const { computeActivitySignals } = require('./karma-book');
-const { cityDistanceKm } = require('./data/cities');
+const { userDistanceKm } = require('./data/cities');
 const recommender = require('./services/recommender');
 
 const router = express.Router();
@@ -122,7 +122,7 @@ router.get('/', requireAuth, async (req, res, next) => {
       if (karmaScore < 40) continue;           // F grade — hidden entirely
       if (wantGrade !== null && karmaScore < wantGrade) continue;
 
-      const km = cityDistanceKm(me.profile?.city, u.profile?.city);
+      const km = userDistanceKm(me, u);
       if (km !== null && isFinite(maxKm) && km > maxKm) continue;
 
       const intentMatch = (u.intent || []).some(i => myIntents.has(i)) ? 1 : 0;
@@ -291,7 +291,7 @@ router.get('/profile/:userId', requireAuth, async (req, res, next) => {
 
     const karmaScore = book?.score ?? 100;
     const anonymous = !!u.preferences?.anonymousModeEnabled;
-    const km = cityDistanceKm(me.profile?.city, u.profile?.city);
+    const km = userDistanceKm(me, u);
 
     res.json({
       userId: u._id,

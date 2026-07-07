@@ -125,15 +125,32 @@ function findCity(name) {
   return name ? cityMap.get(String(name).trim().toLowerCase()) || null : null;
 }
 
-// Haversine distance in km between two city centroids
-function cityDistanceKm(cityA, cityB) {
-  const a = findCity(cityA), b = findCity(cityB);
-  if (!a || !b) return null;
+// Haversine great-circle distance in km between two lat/lng points.
+function haversineKm(lat1, lng1, lat2, lng2) {
+  if ([lat1, lng1, lat2, lng2].some(v => typeof v !== 'number' || Number.isNaN(v))) return null;
   const R = 6371, rad = d => d * Math.PI / 180;
-  const dLat = rad(b.lat - a.lat), dLng = rad(b.lng - a.lng);
+  const dLat = rad(lat2 - lat1), dLng = rad(lng2 - lng1);
   const h = Math.sin(dLat / 2) ** 2 +
-    Math.cos(rad(a.lat)) * Math.cos(rad(b.lat)) * Math.sin(dLng / 2) ** 2;
+    Math.cos(rad(lat1)) * Math.cos(rad(lat2)) * Math.sin(dLng / 2) ** 2;
   return Math.round(2 * R * Math.asin(Math.sqrt(h)));
 }
 
-module.exports = { CITIES, findCity, cityDistanceKm };
+// Distance between two city centroids (fallback when precise coords are absent).
+function cityDistanceKm(cityA, cityB) {
+  const a = findCity(cityA), b = findCity(cityB);
+  if (!a || !b) return null;
+  return haversineKm(a.lat, a.lng, b.lat, b.lng);
+}
+
+// Distance between two users — prefers their real device GPS location
+// (profile.location) and falls back to city centroids when either lacks coords.
+function userDistanceKm(a, b) {
+  const la = a?.profile?.location, lb = b?.profile?.location;
+  if (la && lb && typeof la.lat === 'number' && typeof lb.lat === 'number') {
+    const d = haversineKm(la.lat, la.lng, lb.lat, lb.lng);
+    if (d !== null) return d;
+  }
+  return cityDistanceKm(a?.profile?.city, b?.profile?.city);
+}
+
+module.exports = { CITIES, findCity, cityDistanceKm, haversineKm, userDistanceKm };
