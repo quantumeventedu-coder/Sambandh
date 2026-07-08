@@ -66,7 +66,8 @@ const INTENTS = [
   { v: 'marriage',  icon: 'rings',  t: 'Marriage',      d: 'Looking for a life partner' },
   { v: 'dating',    icon: 'heart',  t: 'Dating',        d: 'See where it goes' },
   { v: 'casual',    icon: 'flame',  t: 'Casual / NSA',  d: 'No strings — just honest fun' },
-  { v: 'friendship',icon: 'users',  t: 'Friendship',    d: 'New in town, building a circle' }
+  { v: 'friendship',icon: 'users',  t: 'Friendship',    d: 'New in town, building a circle' },
+  { v: 'networking',icon: 'briefcase', t: 'Networking', d: 'Professional connections & collaboration' }
 ];
 
 // ---------------- Helpers ----------------
@@ -186,7 +187,7 @@ function connectSocket() {
 }
 
 // ---------------- Router ----------------
-const TAB_ROUTES = ['discover', 'chats', 'karma', 'settings', 'notifications'];
+const TAB_ROUTES = ['discover', 'community', 'astro', 'chats', 'karma', 'settings', 'notifications'];
 
 window.addEventListener('hashchange', route);
 
@@ -226,6 +227,9 @@ async function route() {
     case 'chats': return renderChats();
     case 'chat': return renderChat(parts[1]);
     case 'karma': return renderKarma();
+    case 'community': return renderCommunity();
+    case 'room': return renderRoom(parts[1]);
+    case 'astro': return renderAstro();
     case 'compat': return renderCompat(parts[1]);
     case 'settings': return renderSettings();
     case 'notifications': return renderNotifications();
@@ -1445,6 +1449,96 @@ async function renderCompat(userId) {
         ` : `<p class="sub">Engagement compatibility unlocks after you exchange at least 10 messages${c.engagementMessages ? ` (currently ${c.engagementMessages})` : ''}. It measures how well you actually talk — balance, rhythm, humor, depth.</p>`}
       </div>`;
   } catch (e) { $('#compat-body').innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+}
+
+// ---------------- Astrology ----------------
+async function renderAstro() {
+  screen.innerHTML = `<div class="section-pad"><h1>Astrology</h1><p class="sub">Your full kundali — computed from real astronomy, read through classical Jyotish.</p><div id="astro-body"><div class="empty">Reading the sky…</div></div></div>`;
+  try {
+    const [c, pan] = await Promise.all([api('/astro/chart'), api('/astro/panchang').catch(() => null)]);
+    const body = $('#astro-body');
+    if (!c.chart) {
+      body.innerHTML = `<div class="card"><b>Add your birth details</b><p class="hint" style="margin:6px 0 10px">Birth date, exact time and city unlock your planets, houses, yogas, doshas and dasha timeline.</p><button class="btn" onclick="openEditProfile()">Add birth details</button></div>`;
+      return;
+    }
+    const ch = c.chart, P = ch.planets;
+    const dign = d => d === 'exalted' ? '<span class="tag forest">exalted</span>' : d === 'debilitated' ? '<span class="tag haldi">debilitated</span>' : d === 'own sign' ? '<span class="tag rose">own</span>' : '';
+    body.innerHTML = `
+      ${pan && pan.panchang ? `<div class="card" style="background:linear-gradient(160deg,var(--rose-soft),#fff)"><b class="ic-row">${ic('star')} Today · Panchang</b><div class="hint" style="margin-top:4px">${esc(pan.panchang.vara)} · ${esc(pan.panchang.paksha)} ${esc(pan.panchang.tithi)} · Nakshatra ${esc(pan.panchang.nakshatra)} · Yoga ${esc(pan.panchang.yoga)} · Karana ${esc(pan.panchang.karana)}</div></div>` : ''}
+      <div class="card"><div class="stat-row">
+        <div class="stat"><b>${esc(ch.lagna ? ch.lagna.signName : '—')}</b><span>Lagna</span></div>
+        <div class="stat"><b>${esc(ch.moonSign)}</b><span>Moon · ${esc(ch.nakshatra)}</span></div>
+        <div class="stat"><b>${esc(ch.sunSign)}</b><span>Sun</span></div>
+      </div>${!ch.hasBirthTime ? '<p class="hint mt">Add your exact birth time + city for the Lagna and houses.</p>' : ''}</div>
+      <div class="card"><b>Planets</b><div style="overflow-x:auto"><table style="width:100%;font-size:12.5px;border-collapse:collapse;margin-top:8px">
+        <tr style="text-align:left;color:var(--ink-soft)"><th>Planet</th><th>Sign</th><th>House</th><th>Nakshatra</th><th></th></tr>
+        ${Object.entries(P).map(([k, v]) => `<tr style="border-top:1px solid var(--sand-mid)"><td style="padding:5px 0"><b>${k}</b>${v.retrograde ? ' <span style="color:var(--haldi-deep)">℞</span>' : ''}${v.combust ? ' 🔥' : ''}</td><td>${esc(v.signName)} ${v.degInSign}°</td><td>${v.house || '—'}</td><td>${esc(v.nakshatra)} ${v.pada}</td><td>${dign(v.dignity)}</td></tr>`).join('')}
+      </table></div></div>
+      ${ch.yogas.length ? `<div class="card"><b class="ic-row">${ic('sparkle')} Yogas</b>${ch.yogas.map(y => `<div style="margin-top:8px"><b style="color:var(--forest)">${esc(y.name)}</b><div class="hint">${esc(y.detail)}</div></div>`).join('')}</div>` : ''}
+      ${ch.doshas.length ? `<div class="card"><b class="ic-row">${ic('alert')} Doshas</b>${ch.doshas.map(d => `<div style="margin-top:8px"><b style="color:var(--haldi-deep)">${esc(d.name)} <span class="hint">(${esc(d.severity)})</span></b><div class="hint">${esc(d.detail)}</div></div>`).join('')}</div>` : ''}
+      ${ch.dasha && ch.dasha.current ? `<div class="card"><b>Dasha timeline</b><p class="hint" style="margin:4px 0 8px">Now: <b>${esc(ch.dasha.current.lord)}</b>${ch.dasha.current.antardasha ? ' / ' + esc(ch.dasha.current.antardasha.lord) : ''} — until ${esc(ch.dasha.current.end)}</p><div style="display:flex;gap:6px;flex-wrap:wrap">${ch.dasha.periods.map(p => `<span class="tag ${p.lord === ch.dasha.current.lord ? 'forest' : 'plain'}">${esc(p.lord)} ${p.start.slice(0, 4)}–${p.end.slice(0, 4)}</span>`).join('')}</div></div>` : ''}
+      ${c.numerology ? `<div class="card"><b>Numerology</b><div class="hint" style="margin-top:4px">Life Path ${c.numerology.lifePath ?? '—'} · Destiny ${c.numerology.destiny ?? '—'} · Soul ${c.numerology.soul ?? '—'} · Personality ${c.numerology.personality ?? '—'}</div></div>` : ''}
+      <div class="card"><b class="ic-row">${ic('sparkle')} Ask your chart</b>
+        <div id="astro-chat" style="margin:8px 0;display:flex;flex-direction:column;gap:8px"></div>
+        <div class="row" style="gap:8px"><input id="astro-q" placeholder="Is this a good year for a new venture?" style="flex:1" onkeydown="if(event.key==='Enter')askAstro()"/><button class="btn" style="width:auto" onclick="askAstro()">Ask</button></div>
+        <p class="hint mt">Traditional interpretation from your computed chart — not professional advice.</p></div>`;
+  } catch (e) { const b = $('#astro-body'); if (b) b.innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+}
+async function askAstro() {
+  const inp = $('#astro-q'); const q = (inp.value || '').trim(); if (!q) return;
+  const box = $('#astro-chat'); inp.value = '';
+  box.insertAdjacentHTML('beforeend', `<div style="align-self:flex-end;background:var(--sindoor);color:#fff;padding:8px 12px;border-radius:14px;max-width:85%">${esc(q)}</div>`);
+  box.insertAdjacentHTML('beforeend', '<div id="astro-thinking" class="hint">reading your chart…</div>');
+  try {
+    const r = await api('/astro/ask', { method: 'POST', body: { question: q } });
+    document.getElementById('astro-thinking')?.remove();
+    box.insertAdjacentHTML('beforeend', `<div style="align-self:flex-start;background:var(--sand);padding:8px 12px;border-radius:14px;max-width:90%">${esc(r.answer)}<div class="hint" style="margin-top:4px">${esc(r.source || '')}</div></div>`);
+  } catch (e) { document.getElementById('astro-thinking')?.remove(); toast(e.message); }
+}
+
+// ---------------- Community (anonymous rooms) ----------------
+async function renderCommunity() {
+  screen.innerHTML = `<div class="section-pad"><h1>Community</h1><p class="sub">Open, anonymous rooms — friends, professionals, everyone. You post under a room nickname; your identity stays private.</p><div id="room-list"><div class="empty">Loading rooms…</div></div></div>`;
+  try {
+    const r = await api('/community/rooms');
+    const el = $('#room-list');
+    if (!r.rooms.length) { el.innerHTML = '<div class="empty">No rooms yet.</div>'; return; }
+    el.innerHTML = r.rooms.map(rm => `<div class="card" style="cursor:pointer" onclick="nav('#/room/${rm.slug}')">
+      <div class="row" style="justify-content:space-between;align-items:flex-start">
+        <div><b style="font-size:16px">${rm.icon || '💬'} ${esc(rm.name)}</b><div class="hint">${esc(rm.description || rm.topic || '')}</div>
+          <div class="hint" style="margin-top:4px">${rm.memberCount} member${rm.memberCount === 1 ? '' : 's'} · ${rm.messageCount} message${rm.messageCount === 1 ? '' : 's'}</div></div>
+        <span class="tag ${rm.joined ? 'forest' : 'plain'}">${rm.joined ? 'joined' : esc(rm.category)}</span>
+      </div></div>`).join('');
+  } catch (e) { const el = $('#room-list'); if (el) el.innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+}
+async function renderRoom(slug) {
+  if (S._room && S._room.timer) clearInterval(S._room.timer);
+  screen.innerHTML = `<div class="app-header"><button class="back" style="background:none;border:none;font-size:22px;cursor:pointer" onclick="nav('#/community')">←</button><div style="flex:1;padding-left:8px"><b id="room-title">Room</b><div class="hint" id="room-sub"></div></div></div>
+    <div id="room-msgs" style="padding:12px 14px 92px;display:flex;flex-direction:column;gap:8px"><div class="empty">Loading…</div></div>
+    <div style="position:fixed;bottom:0;left:0;right:0;background:#fff;border-top:1px solid var(--sand-mid);padding:10px 12px;display:flex;gap:8px;max-width:640px;margin:0 auto">
+      <input id="room-input" placeholder="Say something…" style="flex:1" onkeydown="if(event.key==='Enter')postRoom('${slug}')"/><button class="btn" style="width:auto" onclick="postRoom('${slug}')">Send</button></div>`;
+  S._room = { slug, last: null, timer: null };
+  await loadRoom(slug, true);
+  S._room.timer = setInterval(() => { if (location.hash === '#/room/' + slug) loadRoom(slug, false); else if (S._room) clearInterval(S._room.timer); }, 4000);
+}
+async function loadRoom(slug, initial) {
+  try {
+    const after = (!initial && S._room && S._room.last) ? `?after=${encodeURIComponent(S._room.last)}` : '';
+    const r = await api(`/community/rooms/${slug}/messages${after}`);
+    const box = $('#room-msgs'); if (!box) return;
+    if (initial) { $('#room-title').textContent = r.room.name; $('#room-sub').textContent = `${r.room.memberCount} members · you are ${r.myHandle}`; box.innerHTML = r.messages.length ? '' : '<div class="empty">Be the first to say hi 👋</div>'; }
+    for (const m of r.messages) {
+      const q = box.querySelector('.empty'); if (q) q.remove();
+      box.insertAdjacentHTML('beforeend', `<div style="align-self:${m.mine ? 'flex-end' : 'flex-start'};max-width:85%"><div class="hint" style="margin:0 4px 2px">${esc(m.handle)}</div><div style="background:${m.mine ? 'var(--sindoor)' : 'var(--sand)'};color:${m.mine ? '#fff' : 'inherit'};padding:8px 12px;border-radius:14px">${esc(m.text)}</div></div>`);
+      if (S._room) S._room.last = m.createdAt;
+    }
+    if (r.messages.length) window.scrollTo(0, document.body.scrollHeight);
+  } catch (e) { if (initial) { const b = $('#room-msgs'); if (b) b.innerHTML = `<div class="empty">${esc(e.message)}</div>`; } }
+}
+async function postRoom(slug) {
+  const inp = $('#room-input'); const t = (inp.value || '').trim(); if (!t) return; inp.value = '';
+  try { await api(`/community/rooms/${slug}/messages`, { method: 'POST', body: { text: t } }); await loadRoom(slug, false); }
+  catch (e) { toast(e.message); }
 }
 
 // ---------------- Notifications ----------------
