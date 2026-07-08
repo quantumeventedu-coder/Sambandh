@@ -362,4 +362,52 @@ router.put('/ai/model', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+// ---- System self-test — exercise every subsystem, unrestricted (owner QA) ----
+router.get('/selftest', async (req, res, next) => {
+  try {
+    const checks = [];
+    const run = async (name, group, fn) => {
+      try { const detail = await fn(); checks.push({ name, group, ok: true, detail: detail || 'ok' }); }
+      catch (e) { checks.push({ name, group, ok: false, detail: e.message }); }
+    };
+    const need = (v, msg) => { if (!v) throw new Error(msg || 'failed'); return true; };
+
+    // Data layer
+    await run('Database connection', 'Core', async () => { need(mongoose.connection.readyState === 1, 'not connected'); return 'connected'; });
+    await run('Collections', 'Core', async () => { const Room = require('./models/Room'); const [u, r, p] = await Promise.all([User.countDocuments(), Room.countDocuments(), Payment.countDocuments()]); return `${u} users · ${r} rooms · ${p} payments`; });
+
+    // Astrology
+    const sampleBirth = { birthDate: '1995-08-12', birthTime: '07:15', birthPlace: { city: 'Delhi', lat: 28.7, lng: 77.1 } };
+    await run('Astrology — birth chart', 'Astrology', async () => { const e = require('./services/astro-engine'); const c = e.computeChart(sampleBirth); need(c && c.planets && c.planets.Sun, 'no planets'); return `Lagna ${c.lagna ? c.lagna.signName : '—'}, Moon ${c.moonSign}, ${Object.keys(c.planets).length} bodies, D9/D10 ${c.planets.Sun.navamsa}/${c.planets.Sun.dasamsa}, dasha ${c.dasha.current && c.dasha.current.lord}`; });
+    await run('Astrology — panchang / muhurta / transits', 'Astrology', async () => { const e = require('./services/astro-engine'); const c = e.computeChart(sampleBirth); return `panchang ${e.panchang().tithi} · muhurta(business) ${e.muhurta('business').verdict} · SadeSati ${e.transits(c).sadeSati}`; });
+    await run('Astrology — relationship compat (3 lenses)', 'Astrology', async () => { const e = require('./services/astro-engine'); const a = e.computeChart(sampleBirth); return ['romance', 'friendship', 'business'].map(t => `${t}:${e.relationshipCompat(a, a, t).score}%`).join(' · '); });
+
+    // Intelligence + safety
+    await run('Flag engine — blocks money request', 'Intelligence', async () => { const f = require('./services/flag-engine'); const s = f.scan({ messages: [{ text: 'send me money on upi', createdAt: new Date() }] }); need(s.flags.some(x => x.ruleId === 'MONEY_REQUEST_RULE'), 'did not flag'); return `${f.RED_FLAG_RULES.length} rules · flagged ${s.flags.length}`; });
+    await run('Psychology — attachment/OCEAN/love-language', 'Intelligence', async () => { const p = require('./services/psychology'); const r = p.analyze([{ text: 'hello there', createdAt: new Date(), fromMe: true }]); return `runs (attachment: ${r.attachment.style})`; });
+    await run('Compatibility formula', 'Intelligence', async () => { const c = require('./services/compatibility'); const r = c.computeCompatibility({ karmaGradeA: 'A', karmaGradeB: 'A' }); need(r.score >= 0 && r.score <= 99, 'bad score'); return `score ${r.score} · ${r.components.length} components`; });
+    await run('Nakshatra intelligence', 'Intelligence', async () => { const i = require('./services/intelligence'); const n = i.nakshatraProfile({ astrology: sampleBirth }); return n ? n.headline : 'no chart'; });
+    await run('Lakshan rule engine', 'Intelligence', async () => { require('./karma-book'); return 'loaded'; });
+    await run('Recommender', 'Intelligence', async () => { const r = require('./services/recommender'); need(typeof r.score === 'function', 'no score fn'); return 'loaded'; });
+    await run('Risk engine', 'Intelligence', async () => { const r = require('./services/risk-engine'); const x = r.computeRiskScore({ idVerified: false, accountAgeDays: 0.5, karmaScore: 100, redFlags: {} }); return `sample risk ${x.score}/${x.tier}`; });
+    await run('NSFW moderation', 'Intelligence', async () => { const m = require('./services/moderation'); const d = m.classifyDecision({ porn: 0.9, hentai: 0.1, sexy: 0.2, neutral: 0.1, drawing: 0.1 }); return `explicit → ${d.decision}`; });
+
+    // Auth security engines
+    await run('2FA (TOTP RFC-6238)', 'Auth', async () => { const t = require('./services/twofa'); const code = t.currentTotp ? t.currentTotp('JBSWY3DPEHPK3PXP') : null; return code ? `code ${code}` : 'loaded'; });
+    await run('WebAuthn passkeys', 'Auth', async () => { require('./services/webauthn'); return 'loaded'; });
+    await run('Own face engine', 'Auth', async () => { const f = require('./services/face-engine'); need(typeof f.faceDistance === 'function', 'no faceDistance'); return 'loaded'; });
+
+    // External integrations (report configured vs fallback)
+    await run('AI engine (LLM)', 'Integrations', async () => process.env.ANTHROPIC_API_KEY ? 'server key set (panel key may override)' : 'no key — deterministic rule engines active');
+    await run('Payments (Razorpay)', 'Integrations', async () => process.env.RAZORPAY_KEY_ID ? (process.env.RAZORPAY_KEY_ID.startsWith('rzp_live') ? 'LIVE keys ✓' : 'test/dev keys') : 'not set — simulated');
+    await run('Email (SMTP)', 'Integrations', async () => (process.env.SMTP_HOST || process.env.SMTP_URL) ? 'configured' : 'dev transport — no real send');
+    await run('Photo storage', 'Integrations', async () => (process.env.R2_ACCOUNT_ID || process.env.SUPABASE_URL) ? 'configured' : 'local/tmp — ephemeral on serverless');
+    await run('Google sign-in', 'Integrations', async () => process.env.GOOGLE_CLIENT_ID ? 'configured' : 'not set — button hidden');
+
+    const passed = checks.filter(c => c.ok).length;
+    await audit('selftest_run', 'system', 'selftest', { passed, total: checks.length });
+    res.json({ checks, summary: { passed, total: checks.length, allGreen: passed === checks.length } });
+  } catch (err) { next(err); }
+});
+
 module.exports = router;

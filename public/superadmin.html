@@ -69,6 +69,7 @@
       <button id="tb-users" onclick="show('users')">Users &amp; Chats</button>
       <button id="tb-llm" onclick="show('llm')">AI Engine</button>
       <button id="tb-audit" onclick="show('audit')">Audit trail</button>
+      <button id="tb-test" onclick="show('test')">System Test</button>
     </div>
     <div id="view"></div>
   </div>
@@ -116,11 +117,34 @@ async function connect() {
 }
 
 function show(tab) {
-  ['overview','users','llm','audit'].forEach(t => $('#tb-'+t).classList.toggle('on', t===tab));
+  ['overview','users','llm','audit','test'].forEach(t => $('#tb-'+t).classList.toggle('on', t===tab));
   if (tab==='overview') renderOverview();
   if (tab==='users') renderUsers();
   if (tab==='llm') renderLLM();
   if (tab==='audit') renderAudit();
+  if (tab==='test') renderTest();
+}
+
+async function renderTest() {
+  $('#view').innerHTML = `<div class="card">
+    <h3 style="font-family:Georgia,serif;margin-bottom:4px">System Test — every subsystem, unrestricted</h3>
+    <div class="sub">Runs each engine and integration live and reports pass/fail. This is your rehearsal console — it shows exactly where the app is solid and where quality is low (unconfigured integrations, fallbacks).</div>
+    <div class="bar" style="margin:12px 0"><button class="gold" onclick="runTest()">Run full self-test</button><span id="test-summary" class="sub"></span></div>
+    <div id="test-results"></div></div>`;
+}
+async function runTest() {
+  const box = $('#test-results'); const sum = $('#test-summary');
+  box.innerHTML = '<div class="sub">Running…</div>'; sum.textContent = '';
+  try {
+    const r = await api('/selftest');
+    sum.innerHTML = ` <span class="pill ${r.summary.allGreen?'g':'y'}">${r.summary.passed}/${r.summary.total} passed</span>`;
+    const groups = {};
+    r.checks.forEach(c => { (groups[c.group] = groups[c.group] || []).push(c); });
+    box.innerHTML = Object.entries(groups).map(([g, cs]) => `<div style="margin-top:12px"><b style="font-size:13px;color:var(--mut)">${esc(g)}</b>
+      <table style="margin-top:6px"><tr><th>Feature</th><th>Status</th><th>Detail</th></tr>
+      ${cs.map(c => `<tr><td>${esc(c.name)}</td><td><span class="pill ${c.ok?'g':'r'}">${c.ok?'PASS':'FAIL'}</span></td><td class="sub">${esc(c.detail)}</td></tr>`).join('')}
+      </table></div>`).join('');
+  } catch (e) { box.innerHTML = `<div class="notice">${esc(e.message)}</div>`; }
 }
 
 async function renderOverview() {

@@ -174,4 +174,11 @@ router.get('/compat/:userId', requireAuth, async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
+// GET /astro/muhurta?activity=marriage|business|travel|education|vehicle|property&date=YYYY-MM-DD
+router.get('/muhurta', requireAuth, (req, res) => {
+  const activity = String(req.query.activity || 'general');
+  const date = req.query.date ? new Date(req.query.date) : new Date();
+  res.json({ muhurta: engine.muhurta(activity, isNaN(date) ? new Date() : date), source: 'computed (panchang) + traditional rules' });
+});
+
 module.exports = router;

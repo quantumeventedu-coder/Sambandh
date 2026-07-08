@@ -205,6 +205,43 @@ function detectYogas(chart) {
       }
     }
   }
+  // House lords (from the anchor sign) enable the classic lord-based yogas.
+  const SIGN_LORD = ['Mars', 'Venus', 'Mercury', 'Moon', 'Sun', 'Mercury', 'Venus', 'Mars', 'Jupiter', 'Saturn', 'Saturn', 'Jupiter'];
+  const lordOf = h => SIGN_LORD[(anchor + h - 1) % 12];
+  const hOf = pl => houseFrom(pl);
+  const fromMoon = pl => ((P[pl].sign - P.Moon.sign + 12) % 12) + 1;
+  const KENDRA = [1, 4, 7, 10], DUSTHANA = [6, 8, 12];
+
+  // Raj Yoga — a kendra lord and a trikona (5th/9th) lord occupy the same house.
+  const kLords = new Set(KENDRA.map(lordOf)), tLords = new Set([5, 9].map(lordOf));
+  let rajFound = false;
+  for (const pl of Object.keys(P)) {
+    if (pl === 'Rahu' || pl === 'Ketu' || !kLords.has(pl)) continue;
+    for (const pl2 of Object.keys(P)) {
+      if (pl2 !== pl && tLords.has(pl2) && hOf(pl) === hOf(pl2)) {
+        out.push({ name: 'Raj Yoga', kind: 'raj', detail: `${pl} (a kendra lord) joins ${pl2} (a trikona lord) in house ${hOf(pl)} — a classic combination for status and success.` });
+        rajFound = true; break;
+      }
+    }
+    if (rajFound) break;
+  }
+
+  // Dhana Yoga — the 2nd (wealth) and 11th (gains) lords sit together.
+  if (lordOf(2) !== lordOf(11) && hOf(lordOf(2)) === hOf(lordOf(11))) out.push({ name: 'Dhana Yoga', kind: 'wealth', detail: 'The 2nd (wealth) and 11th (gains) lords are together — supports accumulation of wealth.' });
+
+  // Vipreet Raja Yoga — a dusthana (6/8/12) lord sits in a dusthana.
+  for (const h of DUSTHANA) { if (DUSTHANA.includes(hOf(lordOf(h)))) { out.push({ name: 'Vipreet Raja Yoga', kind: 'raj', detail: `The lord of house ${h} occupies a difficult house — adversity that ultimately turns to advantage.` }); break; } }
+
+  // Adhi Yoga — benefics in the 6th/7th/8th from the Moon.
+  if (['Jupiter', 'Venus', 'Mercury'].every(b => [6, 7, 8].includes(fromMoon(b)))) out.push({ name: 'Adhi Yoga', kind: 'raj', detail: 'Benefics occupy the 6th–8th from the Moon — leadership, prosperity and good health.' });
+
+  // Neecha Bhanga — a debilitated planet whose dispositor is angular (cancellation).
+  for (const pl of Object.keys(P)) {
+    if (P[pl].dignity !== 'debilitated') continue;
+    const disp = SIGN_LORD[P[pl].sign];
+    if (KENDRA.includes(hOf(disp)) || KENDRA.includes(fromMoon(disp))) out.push({ name: `Neecha Bhanga Raja Yoga (${pl})`, kind: 'cancel', detail: `${pl} is debilitated, but its dispositor is angular — the weakness is cancelled and can become a source of strength.` });
+  }
+
   return out;
 }
 
@@ -387,4 +424,30 @@ function panchang(date = new Date()) {
   };
 }
 
-module.exports = { computeChart, numerology, panchang, transits, relationshipCompat, SIGNS, NAK, placement, ascendant, vimshottari };
+// ---- Muhurta (auspicious timing) ----
+const MUHURTA_GOOD_NAK = ['Ashwini', 'Rohini', 'Mrigashira', 'Punarvasu', 'Pushya', 'Hasta', 'Chitra', 'Swati', 'Anuradha', 'Shravana', 'Dhanishta', 'Revati', 'Uttara Phalguni', 'Uttara Ashadha', 'Uttara Bhadrapada'];
+const GOOD_VARA = { marriage: ['Monday', 'Wednesday', 'Thursday', 'Friday'], business: ['Monday', 'Wednesday', 'Thursday', 'Friday'], travel: ['Monday', 'Wednesday', 'Thursday', 'Saturday'], education: ['Wednesday', 'Thursday'], vehicle: ['Monday', 'Wednesday', 'Thursday', 'Friday'], property: ['Monday', 'Wednesday', 'Thursday', 'Friday'], general: ['Monday', 'Wednesday', 'Thursday', 'Friday'] };
+const RAHU_SEG = { Sunday: 7, Monday: 1, Tuesday: 6, Wednesday: 4, Thursday: 5, Friday: 3, Saturday: 2 };
+const hhmm = h => String(Math.floor(h)).padStart(2, '0') + ':' + String(Math.round((h - Math.floor(h)) * 60)).padStart(2, '0');
+function muhurta(activity = 'general', date = new Date()) {
+  const p = panchang(date);
+  const goodNak = MUHURTA_GOOD_NAK.includes(p.nakshatra);
+  const varaOk = (GOOD_VARA[activity] || GOOD_VARA.general).includes(p.vara);
+  const badTithi = ['Amavasya', 'Chaturdashi', 'Chaturthi', 'Ashtami', 'Navami'].includes(p.tithi);
+  let score = 40; const reasons = [];
+  if (goodNak) { score += 25; reasons.push(`${p.nakshatra} nakshatra is favourable`); } else reasons.push(`${p.nakshatra} is neutral for ${activity}`);
+  if (varaOk) { score += 20; reasons.push(`${p.vara} suits ${activity}`); } else reasons.push(`${p.vara} is not ideal for ${activity}`);
+  if (!badTithi) score += 15; else { score -= 15; reasons.push(`${p.tithi} tithi is best avoided`); }
+  const rahuStart = 6 + RAHU_SEG[p.vara] * 1.5;
+  score = Math.max(0, Math.min(100, score));
+  return {
+    activity, date: p.date, vara: p.vara, tithi: p.tithi, nakshatra: p.nakshatra, score,
+    verdict: score >= 75 ? 'Auspicious' : score >= 55 ? 'Acceptable' : 'Better to choose another day',
+    reasons,
+    avoid: { rahuKaal: hhmm(rahuStart) + '–' + hhmm(rahuStart + 1.5) },
+    favourable: { abhijitMuhurta: p.vara === 'Wednesday' ? 'none today (Wed)' : '11:48–12:36 (approx)' },
+    note: 'Windows assume ~6am sunrise — confirm exact sunrise for your city for precise timing.'
+  };
+}
+
+module.exports = { computeChart, numerology, panchang, transits, relationshipCompat, muhurta, SIGNS, NAK, placement, ascendant, vimshottari };
