@@ -91,6 +91,8 @@ app.use('/api/compat', compatRoutes);
 app.use('/api/report', reportRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/me', meRoutes);
+app.use('/api/community', require('./routes-community')); // anonymous topic rooms
+app.use('/api/astro', require('./routes-astro'));         // full astrology / kundali
 app.use('/api/ai', require('./routes-ai')); // reusable AI API (per-app X-AI-Key)
 app.use('/api/superadmin', require('./routes-superadmin')); // owner-only, SUPER_ADMIN_KEY
 
@@ -238,6 +240,8 @@ function ready() {
         const { seedDemo } = require('./seed-demo');
         await seedDemo().catch(e => console.warn('[SEED] failed:', e.message));
       }
+      // Community rooms exist regardless of demo mode (idempotent, count-gated).
+      await require('./routes-community').seedRooms().catch(e => console.warn('[SEED rooms] failed:', e.message));
     })();
     // Allow a retry on the next request instead of caching a failed boot forever
     readyPromise.catch(() => { readyPromise = null; });

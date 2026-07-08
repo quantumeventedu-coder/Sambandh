@@ -24,7 +24,7 @@ const UserSchema = new mongoose.Schema({
     languages: [String], bio: String,
     photos: [{ url: String, isPrimary: Boolean, fromSelfie: Boolean, uploadedAt: Date }]
   },
-  intent: [{ type: String, enum: ['marriage', 'dating', 'casual', 'friendship'] }],
+  intent: [{ type: String, enum: ['marriage', 'dating', 'casual', 'friendship', 'networking'] }],
   claims: {
     profession: { title: String, company: String, verified: { type: Boolean, default: false }, verificationId: mongoose.Schema.Types.ObjectId },
     education: { degree: String, institution: String, year: Number, verified: { type: Boolean, default: false }, verificationId: mongoose.Schema.Types.ObjectId },
