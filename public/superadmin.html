@@ -159,7 +159,7 @@ async function searchUsers(force) {
   const { users } = await api('/users?q=' + encodeURIComponent(q));
   $('#detail').innerHTML = '';
   $('#results').innerHTML = `<div class="card"><table>
-    <tr><th>User</th><th>Phone</th><th>Tier</th><th>Karma</th><th>Status</th><th>Last active</th></tr>
+    <tr><th>User</th><th>Phone</th><th>Tier</th><th>Lakshan</th><th>Status</th><th>Last active</th></tr>
     ${users.map(u => `<tr class="click" onclick="openUser('${u.id}')">
       <td><b>${esc(u.name)}</b> · ${esc(u.gender||'—')}, ${u.age||'—'} · ${esc(u.city||'—')}</td>
       <td>${esc(u.phone)}</td>
@@ -186,7 +186,7 @@ async function openUser(id) {
           ${d.risk ? `<span class="pill" style="background:${d.risk.tier==='critical'?'#c0392b':d.risk.tier==='high'?'#d97706':d.risk.tier==='elevated'?'#8a6a10':'#14683a'};color:#fff">RISK ${d.risk.score} · ${d.risk.tier.toUpperCase()}</span>` : ''}</h3>
         ${d.risk && d.risk.reasons.length ? `<div style="font-size:11.5px;color:#b45309;margin:4px 0 6px">⚠ ${d.risk.reasons.slice(0,3).map(esc).join(' · ')}</div>` : ''}
         <pre>${esc(u.phone || u.email || '—')} · ${esc(u.profile?.gender||'—')}, ${u.profile?.age||'—'} · ${esc(u.profile?.city||'—')}
-Joined ${new Date(u.createdAt).toLocaleDateString()} · Karma ${d.karma?.score ?? 100} · ${d.chatCount} chats
+Joined ${new Date(u.createdAt).toLocaleDateString()} · Lakshan ${d.karma?.score ?? 100} · ${d.chatCount} chats
 ID ${u.verification?.idVerified?'✓':'✗'} · Selfie ${u.verification?.selfieVerified?'✓':'✗'} · Fee ${u.membership?.joinFeePaid?'CHF '+(u.membership?.joinFeeAmountCHF??'?')+' paid':'unpaid'}</pre>
         <div class="bar" style="margin:8px 0 0">
           <button class="ghost" onclick="act('${u._id}','warn')">Warn</button>
@@ -257,7 +257,7 @@ async function renderLLM() {
       <div class="card">
         <h3 style="font-family:Georgia,serif;margin-bottom:4px">AI Engine
           <span class="pill ${s.enabled && s.keyConfigured ? 'g' : 'r'}">${s.enabled ? (s.keyConfigured ? 'ON' : 'NO KEY') : 'OFF'}</span></h3>
-        <div class="sub">Controls the LLM behind the Karma Book, reputation scoring, and the AI API.
+        <div class="sub">Controls the LLM behind the Lakshan Book, reputation scoring, and the AI API.
           Settings here override server env. The key is stored securely and shown masked only.</div>
 
         <label style="display:flex;align-items:center;gap:8px;margin:10px 0 12px;font-size:13.5px">
@@ -286,7 +286,7 @@ async function renderLLM() {
           <div>
             <div class="sub" style="margin-bottom:5px">Features</div>
             <div style="display:flex;flex-direction:column;gap:6px">
-              ${feat('karma','Karma Book (lie / contradiction / manipulation detection)')}
+              ${feat('karma','Lakshan Book (lie / contradiction / manipulation detection)')}
               ${feat('reputation','Reputation scoring (behavioural signals)')}
               ${feat('api','Reusable AI API')}
             </div>

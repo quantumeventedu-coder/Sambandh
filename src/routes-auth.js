@@ -65,7 +65,7 @@ const profileSchema = z.object({
   displayName: z.string().max(50).optional(),
   languages: z.array(z.string()).min(1).optional(),
   city: z.string().optional(),
-  intent: z.array(z.enum(['marriage', 'dating', 'casual', 'friendship'])).min(1).max(2).optional(),
+  intent: z.array(z.enum(['marriage', 'dating', 'casual', 'friendship', 'networking'])).min(1).max(2).optional(),
   interestedInGenders: z.array(z.enum(['male', 'female', 'non_binary', 'other'])).optional(),
   astrology: z.object({
     birthDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),

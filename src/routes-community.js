@@ -45,7 +45,8 @@ router.get('/rooms', requireAuth, requireMember, async (req, res, next) => {
     const mine = await RoomMember.find({ userId: req.userId }).select('roomId');
     const joinedIds = mine.map(m => m.roomId);
     const joined = new Set(joinedIds.map(id => id.toString()));
-    const rooms = await Room.find({ $or: [{ visibility: 'public' }, { _id: { $in: joinedIds } }] }).sort({ lastMessageAt: -1 });
+    // "not private" covers public rooms and older rooms created before the field existed.
+    const rooms = await Room.find({ $or: [{ visibility: { $ne: 'private' } }, { _id: { $in: joinedIds } }] }).sort({ lastMessageAt: -1 });
     res.json({
       rooms: rooms.map(r => ({
         slug: r.slug, name: r.name, topic: r.topic, category: r.category, description: r.description,

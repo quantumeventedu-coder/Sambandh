@@ -69,14 +69,14 @@ fetch('/health').then(r=>r.json()).then(h => {
   <nav class="tabs">
     <button id="tab-ver" class="active" onclick="show('ver')">Verification queue</button>
     <button id="tab-rep" onclick="show('rep')">Reports queue</button>
-    <button id="tab-dis" onclick="show('dis')">Karma disputes</button>
+    <button id="tab-dis" onclick="show('dis')">Lakshan disputes</button>
     <button id="tab-act" onclick="show('act')">Activity & audit</button>
   </nav>
   <section id="sec-ver"><h2>Verification — fully automated</h2>
     <p class="muted" style="margin:-6px 0 12px">Every ID &amp; selfie is decided automatically at submission — <b>staff never approve routine verifications</b>. This is an oversight log; use “Approve on appeal” only when a user contests an automated rejection.</p>
     <div id="ver-list"></div></section>
   <section id="sec-rep" style="display:none"><h2>User reports (24h SLA — IT Rules 2021)</h2><div id="rep-list"></div></section>
-  <section id="sec-dis" style="display:none"><h2>Karma Book disputes (7-day SLA)</h2><div id="dis-list"></div></section>
+  <section id="sec-dis" style="display:none"><h2>Lakshan Book disputes (7-day SLA)</h2><div id="dis-list"></div></section>
   <section id="sec-act" style="display:none">
     <h2>Platform events — last 7 days</h2><div id="events-list"></div>
     <h2>Audit log — moderator actions</h2><div id="audit-list"></div>
