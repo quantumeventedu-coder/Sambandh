@@ -39,19 +39,59 @@ async function requireMember(req, res, next) {
   } catch (e) { next(e); }
 }
 
-// GET /community/rooms — all rooms + whether you've joined each
+// GET /community/rooms — public rooms + private rooms you've joined
 router.get('/rooms', requireAuth, requireMember, async (req, res, next) => {
   try {
-    const rooms = await Room.find({}).sort({ lastMessageAt: -1 });
     const mine = await RoomMember.find({ userId: req.userId }).select('roomId');
-    const joined = new Set(mine.map(m => m.roomId.toString()));
+    const joinedIds = mine.map(m => m.roomId);
+    const joined = new Set(joinedIds.map(id => id.toString()));
+    const rooms = await Room.find({ $or: [{ visibility: 'public' }, { _id: { $in: joinedIds } }] }).sort({ lastMessageAt: -1 });
     res.json({
       rooms: rooms.map(r => ({
         slug: r.slug, name: r.name, topic: r.topic, category: r.category, description: r.description,
-        icon: r.icon, memberCount: r.memberCount, messageCount: r.messageCount,
-        lastMessageAt: r.lastMessageAt, joined: joined.has(r._id.toString())
+        icon: r.icon, memberCount: r.memberCount, messageCount: r.messageCount, lastMessageAt: r.lastMessageAt,
+        visibility: r.visibility || 'public', joined: joined.has(r._id.toString()),
+        mine: r.createdBy && r.createdBy.toString() === req.userId,
+        // only reveal the invite code to members of a private room
+        code: (r.visibility === 'private' && joined.has(r._id.toString())) ? r.code : undefined
       }))
     });
+  } catch (e) { next(e); }
+});
+
+// POST /community/rooms — create a public or private room
+router.post('/rooms', requireAuth, requireMember, async (req, res, next) => {
+  try {
+    const name = String(req.body.name || '').trim().slice(0, 60);
+    if (name.length < 3) return res.status(400).json({ error: 'Room name must be at least 3 characters.' });
+    const visibility = req.body.visibility === 'private' ? 'private' : 'public';
+    const description = String(req.body.description || '').trim().slice(0, 200);
+    const base = (name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40)) || 'room';
+    let slug = base, n = 1;
+    while (await Room.findOne({ slug })) slug = base + '-' + (++n);
+    const code = visibility === 'private' ? require('crypto').randomBytes(4).toString('hex') : undefined;
+    const room = await Room.create({
+      slug, name, description, topic: description, category: 'general', icon: (req.body.icon || '💬').slice(0, 4),
+      visibility, code, createdBy: req.userId, createdAt: new Date(), lastMessageAt: new Date(), memberCount: 1
+    });
+    await RoomMember.create({ roomId: room._id, userId: req.userId, handle: handleFor(req.userId, room._id), joinedAt: new Date() });
+    res.json({ ok: true, slug: room.slug, visibility, code });
+  } catch (e) { next(e); }
+});
+
+// POST /community/join-by-code — join a private room with its invite code
+router.post('/join-by-code', requireAuth, requireMember, async (req, res, next) => {
+  try {
+    const code = String(req.body.code || '').trim().toLowerCase();
+    if (!code) return res.status(400).json({ error: 'Enter an invite code.' });
+    const room = await Room.findOne({ code, visibility: 'private' });
+    if (!room) return res.status(404).json({ error: 'No private room with that code.' });
+    const existing = await RoomMember.findOne({ roomId: room._id, userId: req.userId });
+    if (!existing) {
+      await RoomMember.create({ roomId: room._id, userId: req.userId, handle: handleFor(req.userId, room._id), joinedAt: new Date() });
+      await Room.findByIdAndUpdate(room._id, { $inc: { memberCount: 1 } });
+    }
+    res.json({ ok: true, slug: room.slug, name: room.name });
   } catch (e) { next(e); }
 });
 
@@ -62,6 +102,7 @@ router.post('/rooms/:slug/join', requireAuth, requireMember, async (req, res, ne
     if (!room) return res.status(404).json({ error: 'Room not found' });
     const handle = handleFor(req.userId, room._id);
     const existing = await RoomMember.findOne({ roomId: room._id, userId: req.userId });
+    if (room.visibility === 'private' && !existing) return res.status(403).json({ error: 'This is a private room — join with its invite code.' });
     if (!existing) {
       await RoomMember.create({ roomId: room._id, userId: req.userId, handle, joinedAt: new Date() });
       await Room.findByIdAndUpdate(room._id, { $inc: { memberCount: 1 } });
@@ -75,6 +116,9 @@ router.get('/rooms/:slug/messages', requireAuth, requireMember, async (req, res,
   try {
     const room = await Room.findOne({ slug: req.params.slug });
     if (!room) return res.status(404).json({ error: 'Room not found' });
+    if (room.visibility === 'private' && !(await RoomMember.findOne({ roomId: room._id, userId: req.userId }))) {
+      return res.status(403).json({ error: 'This is a private room — join with its invite code.' });
+    }
     const q = { roomId: room._id };
     if (req.query.after) { const d = new Date(req.query.after); if (!isNaN(d)) q.createdAt = { $gt: d }; }
     const rows = await RoomMessage.find(q).sort({ createdAt: -1 }).limit(60);
@@ -96,6 +140,8 @@ router.post('/rooms/:slug/messages', requireAuth, requireMember, async (req, res
     if (text.length > 1000) return res.status(400).json({ error: 'Message too long (max 1000 characters).' });
     const room = await Room.findOne({ slug: req.params.slug });
     if (!room) return res.status(404).json({ error: 'Room not found' });
+    const alreadyMember = await RoomMember.findOne({ roomId: room._id, userId: req.userId });
+    if (room.visibility === 'private' && !alreadyMember) return res.status(403).json({ error: 'This is a private room — join with its invite code.' });
 
     // Moderation — run the flag engine; block scam / off-platform / controlling messages.
     const scan = flagEngine.scan({ messages: [{ text, createdAt: new Date() }], context: {} });
@@ -111,8 +157,7 @@ router.post('/rooms/:slug/messages', requireAuth, requireMember, async (req, res
     }
 
     const handle = handleFor(req.userId, room._id);
-    const existing = await RoomMember.findOne({ roomId: room._id, userId: req.userId });
-    if (!existing) {
+    if (!alreadyMember) {
       await RoomMember.create({ roomId: room._id, userId: req.userId, handle });
       await Room.findByIdAndUpdate(room._id, { $inc: { memberCount: 1 } });
     }

@@ -177,7 +177,7 @@ function connectSocket() {
       if (t) { t.textContent = 'typing…'; clearTimeout(t._t); t._t = setTimeout(() => t.textContent = '', 2200); }
     }
   });
-  S.socket.on('karma_update', ({ notification }) => toast(notification || 'Your Karma Book was updated'));
+  S.socket.on('karma_update', ({ notification }) => toast(notification || 'Your Lakshan Book was updated'));
   S.socket.on('new_match', ({ chatId }) => toast('New match! Check your chats.'));
   S.socket.on('reveal_request', () => toast('Someone wants to reveal identities'));
   S.socket.on('reveal_accepted', ({ chatId }) => {
@@ -245,7 +245,7 @@ function renderWelcome() {
     <div class="tagline">connections, made meaningful.</div>
     <div class="points">
       ${[['shieldCheck', 'Every member face-verified — a real, unique person'],
-         ['book', 'The Karma Book — honesty, tracked by AI'],
+         ['book', 'The Lakshan Book — honesty, tracked by AI'],
          ['target', 'Say what you want: marriage, dating, casual, friendship'],
          ['ghost', 'Anonymous-first chat with mutual reveal'],
          ['star', 'Real Vedic astrology + engagement compatibility']]
@@ -282,7 +282,7 @@ function renderFeatures() {
        keeps bots out. First payment refundable for 24 hours. Upgrades: <b>Pro, CHF 6/month</b> for
        unlimited messaging; <b>Max, CHF 15/month</b> for the rest — who liked you, advanced filters, priority.`)}
 
-    ${section('book', 'The Karma Book',
+    ${section('book', 'The Lakshan Book',
       `Our AI compares what people say with what they do here. "You're the only one" while running four
        other chats — flagged. "I'm new here" on a 90-day-old account — flagged. Scores run 0–100.
        The first slip is a private warning; repeat patterns show on the profile. Clean behaviour earns
@@ -323,7 +323,7 @@ function renderFeatures() {
       <div class="kv"><span>Base · non-binary</span><b>CHF 3 / month</b></div>
       <div class="kv"><span>Sambandh Pro</span><b>CHF 6 / month</b></div>
       <div class="kv"><span>Sambandh Max</span><b>CHF 15 / month</b></div>
-      <div class="kv"><span>Karma evidence reveal</span><b>CHF 0.50–1</b></div>
+      <div class="kv"><span>Lakshan evidence reveal</span><b>CHF 0.50–1</b></div>
       <div class="kv"><span>Fraud alerts</span><b>Free, always</b></div>
       <p class="hint" style="margin-top:8px">Your base price is set by your verified profile — first payment refundable within 24 hours.</p>
     </div>
@@ -948,7 +948,7 @@ async function renderDiscover() {
           <div class="trow">
             ${p.tagsPositive.map(t => `<span class="wtag">${esc(t)}</span>`).join('')}
             ${p.tagsNegative.map(t => `<span class="wtag" style="color:var(--haldi)">${esc(t)}</span>`).join('')}
-            <span class="karma">Karma: ${p.karma.score} ${p.karma.grade}</span>
+            <span class="karma">Lakshan: ${p.karma.score} ${p.karma.grade}</span>
           </div>
           ${(p.reasons && p.reasons.length) ? `<div class="why">${ic('sparkle')} ${p.reasons.map(r => esc(r)).join(' · ')}</div>` : ''}
         </div>
@@ -1049,7 +1049,7 @@ function openFilters() {
       <option value="id" ${f.verification === 'id' ? 'selected' : ''}>Government-ID verified</option>
       <option value="profession" ${f.verification === 'profession' ? 'selected' : ''}>Profession verified</option>
       <option value="fully_verified" ${f.verification === 'fully_verified' ? 'selected' : ''}>Fully verified</option></select></div>
-    <div class="field"><label>Minimum Karma grade</label><select id="f-karma">
+    <div class="field"><label>Minimum Lakshan grade</label><select id="f-karma">
       ${['any','A+','A','B+','B','C'].map(g => `<option value="${g}" ${f.karmaGrade === g ? 'selected' : ''}>${g === 'any' ? 'Any' : g + ' and above'}</option>`).join('')}</select></div>
     <div class="field"><label>Max distance</label><select id="f-km">
       ${['5','25','50','100','anywhere'].map(k => `<option value="${k}" ${String(f.maxKm) === k ? 'selected' : ''}>${k === 'anywhere' ? 'Anywhere in India' : k + ' km'}</option>`).join('')}</select></div>
@@ -1100,7 +1100,7 @@ async function renderProfile(userId) {
         ${photo ? `<img src="${esc(photo)}" onerror="this.style.display='none'" style="width:100%;border-radius:16px;max-height:380px;object-fit:cover;margin-bottom:14px"/>`
           : p.anonymous ? `<div class="notice anon ic-row" style="display:flex">${ic('ghost')} <span>This person browses anonymously. Chat first — identities reveal by mutual consent.</span></div>` : ''}
         <div class="stat-row">
-          <div class="stat"><b>${karma.score}</b><span>karma score</span></div>
+          <div class="stat"><b>${karma.score}</b><span>Lakshan score</span></div>
           <div class="stat"><b>${karma.grade}</b><span>grade</span></div>
           <div class="stat"><b>${karma.activity?.activeChats ?? 0}</b><span>active chats</span></div>
         </div>
@@ -1265,7 +1265,7 @@ async function renderChat(chatId) {
     }
     const r = await api(`/chat/${chatId}/messages`);
     const msgs = $('#msgs');
-    msgs.innerHTML = `<div class="bubble sys">You're chatting. Your conduct shapes your Karma score.</div>`;
+    msgs.innerHTML = `<div class="bubble sys">You're chatting. Your conduct shapes your Lakshan score.</div>`;
     r.messages.forEach(appendMessage);
     if (S.socket) S.socket.emit('join_chat', { chatId });
   } catch (e) { toast(e.message); }
@@ -1320,7 +1320,7 @@ async function requestReveal(chatId) {
 
 // ---------------- My Karma ----------------
 async function renderKarma() {
-  screen.innerHTML = `${headerBar()}<div class="section-pad"><div class="empty">Loading your Karma Book…</div></div>`;
+  screen.innerHTML = `${headerBar()}<div class="section-pad"><div class="empty">Loading your Lakshan Book…</div></div>`;
   loadNotifCount();
   try {
     const [k, me] = await Promise.all([api('/karma/me'), api('/auth/me')]);
@@ -1328,7 +1328,7 @@ async function renderKarma() {
     const rep = await fetch('/api/discover/profile/' + S.user._id, { headers: { Authorization: 'Bearer ' + S.token } }).then(r => r.json()).catch(() => null);
     const issues = (k.lies?.length || 0) + (k.contradictions?.length || 0) + (k.manipulationFlags?.length || 0);
     screen.querySelector('.section-pad').innerHTML = `
-      <h1>My Karma Book</h1>
+      <h1>My Lakshan Book</h1>
       <p class="sub">What the honesty engine sees. Only repeat patterns become visible to matches.</p>
       <div class="karma-hero ${gradeClass(k.score)}">
         <b>${k.score}</b><span>Grade ${scoreGrade(k.score)} · ${issues === 0 ? 'Clean record' : issues + ' recorded signal' + (issues > 1 ? 's' : '')}</span>
@@ -1393,7 +1393,7 @@ async function renderCompat(userId) {
     const COMP_LABEL = {
       vedic: 'Vedic astrology', yoni: 'Intimate nature (Yoni)', gana: 'Temperament (Gana)',
       attachment: 'Emotional styles', bigfive: 'Personality (OCEAN)', love: 'Love languages',
-      engagement: 'Conversation rhythm', karma: 'Trust & karma'
+      engagement: 'Conversation rhythm', karma: 'Trust & Lakshan'
     };
     const bar = pct => `<div style="height:7px;background:rgba(0,0,0,.07);border-radius:99px;margin:3px 0 9px;overflow:hidden"><i style="display:block;height:100%;width:${pct}%;background:linear-gradient(90deg,var(--sindoor),var(--haldi))"></i></div>`;
     const intelHtml = intel ? `
@@ -1417,6 +1417,14 @@ async function renderCompat(userId) {
     ` : '';
     $('#compat-body').innerHTML = `
       ${intelHtml || (c.overall != null ? `<div class="karma-hero good"><b>${c.overall}%</b><span>Overall compatibility</span></div>` : '')}
+      <div class="card"><b class="ic-row">${ic('star')} Astrological match — by relationship</b>
+        <div class="row" style="gap:6px;margin-top:8px;flex-wrap:wrap">
+          <button class="btn secondary" style="width:auto" onclick="astroLens('${userId}','romance')">Romance</button>
+          <button class="btn secondary" style="width:auto" onclick="astroLens('${userId}','friendship')">Friendship</button>
+          <button class="btn secondary" style="width:auto" onclick="astroLens('${userId}','business')">Business</button>
+        </div>
+        <div id="lens-result" class="hint mt">Pick a lens to see your kundali compatibility for that kind of relationship.</div>
+      </div>
       <div class="card">
         <h2 style="margin-top:0" class="ic-row">${ic('star')} Astrology</h2>
         ${a ? `
@@ -1455,7 +1463,7 @@ async function renderCompat(userId) {
 async function renderAstro() {
   screen.innerHTML = `<div class="section-pad"><h1>Astrology</h1><p class="sub">Your full kundali — computed from real astronomy, read through classical Jyotish.</p><div id="astro-body"><div class="empty">Reading the sky…</div></div></div>`;
   try {
-    const [c, pan] = await Promise.all([api('/astro/chart'), api('/astro/panchang').catch(() => null)]);
+    const [c, pan, tr] = await Promise.all([api('/astro/chart'), api('/astro/panchang').catch(() => null), api('/astro/transits').catch(() => null)]);
     const body = $('#astro-body');
     if (!c.chart) {
       body.innerHTML = `<div class="card"><b>Add your birth details</b><p class="hint" style="margin:6px 0 10px">Birth date, exact time and city unlock your planets, houses, yogas, doshas and dasha timeline.</p><button class="btn" onclick="openEditProfile()">Add birth details</button></div>`;
@@ -1470,10 +1478,13 @@ async function renderAstro() {
         <div class="stat"><b>${esc(ch.moonSign)}</b><span>Moon · ${esc(ch.nakshatra)}</span></div>
         <div class="stat"><b>${esc(ch.sunSign)}</b><span>Sun</span></div>
       </div>${!ch.hasBirthTime ? '<p class="hint mt">Add your exact birth time + city for the Lagna and houses.</p>' : ''}</div>
-      <div class="card"><b>Planets</b><div style="overflow-x:auto"><table style="width:100%;font-size:12.5px;border-collapse:collapse;margin-top:8px">
-        <tr style="text-align:left;color:var(--ink-soft)"><th>Planet</th><th>Sign</th><th>House</th><th>Nakshatra</th><th></th></tr>
-        ${Object.entries(P).map(([k, v]) => `<tr style="border-top:1px solid var(--sand-mid)"><td style="padding:5px 0"><b>${k}</b>${v.retrograde ? ' <span style="color:var(--haldi-deep)">℞</span>' : ''}${v.combust ? ' 🔥' : ''}</td><td>${esc(v.signName)} ${v.degInSign}°</td><td>${v.house || '—'}</td><td>${esc(v.nakshatra)} ${v.pada}</td><td>${dign(v.dignity)}</td></tr>`).join('')}
-      </table></div></div>
+      <div class="card"><b>Planets</b><div style="overflow-x:auto"><table style="width:100%;font-size:12px;border-collapse:collapse;margin-top:8px">
+        <tr style="text-align:left;color:var(--ink-soft)"><th>Planet</th><th>Sign</th><th>Ho.</th><th>D9</th><th>D10</th><th>Nakshatra</th><th></th></tr>
+        ${Object.entries(P).map(([k, v]) => `<tr style="border-top:1px solid var(--sand-mid)"><td style="padding:5px 0"><b>${k}</b>${v.retrograde ? ' <span style="color:var(--haldi-deep)">℞</span>' : ''}${v.combust ? ' 🔥' : ''}</td><td>${esc(v.signName)} ${v.degInSign}°</td><td>${v.house || '—'}</td><td>${esc(v.navamsa || '—')}</td><td>${esc(v.dasamsa || '—')}</td><td>${esc(v.nakshatra)} ${v.pada}</td><td>${dign(v.dignity)}</td></tr>`).join('')}
+      </table></div><p class="hint" style="margin-top:6px">D9 = Navamsa (marriage/dharma) · D10 = Dasamsa (career).</p></div>
+      ${tr && tr.transits ? `<div class="card"><b class="ic-row">${ic('star')} Transits today (Gochar)</b>
+        <p class="hint" style="margin:4px 0 8px">${esc(tr.transits.sadeSatiNote)}</p>
+        <div style="display:flex;gap:6px;flex-wrap:wrap">${Object.entries(tr.transits.positions).map(([n, p]) => `<span class="tag plain">${n} in ${esc(p.signName)} · ${p.houseFromMoon}H from Moon</span>`).join('')}</div></div>` : ''}
       ${ch.yogas.length ? `<div class="card"><b class="ic-row">${ic('sparkle')} Yogas</b>${ch.yogas.map(y => `<div style="margin-top:8px"><b style="color:var(--forest)">${esc(y.name)}</b><div class="hint">${esc(y.detail)}</div></div>`).join('')}</div>` : ''}
       ${ch.doshas.length ? `<div class="card"><b class="ic-row">${ic('alert')} Doshas</b>${ch.doshas.map(d => `<div style="margin-top:8px"><b style="color:var(--haldi-deep)">${esc(d.name)} <span class="hint">(${esc(d.severity)})</span></b><div class="hint">${esc(d.detail)}</div></div>`).join('')}</div>` : ''}
       ${ch.dasha && ch.dasha.current ? `<div class="card"><b>Dasha timeline</b><p class="hint" style="margin:4px 0 8px">Now: <b>${esc(ch.dasha.current.lord)}</b>${ch.dasha.current.antardasha ? ' / ' + esc(ch.dasha.current.antardasha.lord) : ''} — until ${esc(ch.dasha.current.end)}</p><div style="display:flex;gap:6px;flex-wrap:wrap">${ch.dasha.periods.map(p => `<span class="tag ${p.lord === ch.dasha.current.lord ? 'forest' : 'plain'}">${esc(p.lord)} ${p.start.slice(0, 4)}–${p.end.slice(0, 4)}</span>`).join('')}</div></div>` : ''}
@@ -1495,21 +1506,59 @@ async function askAstro() {
     box.insertAdjacentHTML('beforeend', `<div style="align-self:flex-start;background:var(--sand);padding:8px 12px;border-radius:14px;max-width:90%">${esc(r.answer)}<div class="hint" style="margin-top:4px">${esc(r.source || '')}</div></div>`);
   } catch (e) { document.getElementById('astro-thinking')?.remove(); toast(e.message); }
 }
+async function astroLens(userId, type) {
+  const el = document.getElementById('lens-result'); if (el) el.innerHTML = 'Reading both charts…';
+  try {
+    const r = await api(`/astro/compat/${userId}?type=${type}`);
+    if (!r.compat) { if (el) el.innerHTML = 'Both of you need birth details (date, time, city) for this.'; return; }
+    const c = r.compat;
+    el.innerHTML = `<div style="font-family:Georgia,serif;font-size:22px;color:var(--sindoor-deep);margin-bottom:6px">${c.score}% · ${esc(c.verdict)} <span class="hint" style="font-size:12px">for ${esc(type)}</span></div>
+      ${c.factors.map(f => `<div class="kv"><span>${esc(f.note)} <i class="hint">(${f.weight}%)</i></span><b>${f.score}%</b></div>`).join('')}`;
+  } catch (e) { if (el) el.innerHTML = esc(e.message); }
+}
 
 // ---------------- Community (anonymous rooms) ----------------
 async function renderCommunity() {
-  screen.innerHTML = `<div class="section-pad"><h1>Community</h1><p class="sub">Open, anonymous rooms — friends, professionals, everyone. You post under a room nickname; your identity stays private.</p><div id="room-list"><div class="empty">Loading rooms…</div></div></div>`;
+  screen.innerHTML = `<div class="section-pad"><h1>Community</h1>
+    <p class="sub">Open, anonymous rooms — friends, professionals, everyone. You post under a room nickname; your identity stays private.</p>
+    <div class="row" style="gap:8px;margin-bottom:12px"><button class="btn" style="width:auto" onclick="toggleRoomForm()">+ Create room</button><button class="btn secondary" style="width:auto" onclick="promptJoinCode()">Join by code</button></div>
+    <div id="room-form"></div>
+    <div id="room-list"><div class="empty">Loading rooms…</div></div></div>`;
   try {
     const r = await api('/community/rooms');
     const el = $('#room-list');
-    if (!r.rooms.length) { el.innerHTML = '<div class="empty">No rooms yet.</div>'; return; }
+    if (!r.rooms.length) { el.innerHTML = '<div class="empty">No rooms yet — create the first one.</div>'; return; }
     el.innerHTML = r.rooms.map(rm => `<div class="card" style="cursor:pointer" onclick="nav('#/room/${rm.slug}')">
       <div class="row" style="justify-content:space-between;align-items:flex-start">
-        <div><b style="font-size:16px">${rm.icon || '💬'} ${esc(rm.name)}</b><div class="hint">${esc(rm.description || rm.topic || '')}</div>
-          <div class="hint" style="margin-top:4px">${rm.memberCount} member${rm.memberCount === 1 ? '' : 's'} · ${rm.messageCount} message${rm.messageCount === 1 ? '' : 's'}</div></div>
-        <span class="tag ${rm.joined ? 'forest' : 'plain'}">${rm.joined ? 'joined' : esc(rm.category)}</span>
+        <div><b style="font-size:16px">${rm.visibility === 'private' ? '🔒 ' : ''}${rm.icon || '💬'} ${esc(rm.name)}</b><div class="hint">${esc(rm.description || rm.topic || '')}</div>
+          <div class="hint" style="margin-top:4px">${rm.memberCount} member${rm.memberCount === 1 ? '' : 's'} · ${rm.messageCount} message${rm.messageCount === 1 ? '' : 's'}${rm.code ? ' · code: <b>' + esc(rm.code) + '</b>' : ''}</div></div>
+        <span class="tag ${rm.joined ? 'forest' : 'plain'}">${rm.joined ? 'joined' : esc(rm.visibility === 'private' ? 'private' : rm.category)}</span>
       </div></div>`).join('');
   } catch (e) { const el = $('#room-list'); if (el) el.innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+}
+function toggleRoomForm() {
+  const el = $('#room-form'); if (!el) return;
+  if (el.innerHTML) { el.innerHTML = ''; return; }
+  el.innerHTML = `<div class="card">
+    <div class="field"><label>Room name</label><input id="nr-name" placeholder="e.g. Delhi Foodies" maxlength="60"/></div>
+    <div class="field"><label>Description</label><input id="nr-desc" placeholder="What's it about?" maxlength="200"/></div>
+    <div class="field"><label>Visibility</label><select id="nr-vis"><option value="public">Public — anyone can find &amp; join</option><option value="private">Private — invite code only</option></select></div>
+    <button class="btn" onclick="createRoom()">Create room</button></div>`;
+}
+async function createRoom() {
+  const name = ($('#nr-name').value || '').trim();
+  if (name.length < 3) return toast('Room name must be at least 3 characters.');
+  try {
+    const r = await api('/community/rooms', { method: 'POST', body: { name, description: ($('#nr-desc').value || '').trim(), visibility: $('#nr-vis').value } });
+    toast(r.visibility === 'private' ? 'Private room created — invite code: ' + r.code : 'Room created ✓');
+    nav('#/room/' + r.slug);
+  } catch (e) { toast(e.message); }
+}
+async function promptJoinCode() {
+  const code = prompt('Enter the private room invite code:');
+  if (!code) return;
+  try { const r = await api('/community/join-by-code', { method: 'POST', body: { code: code.trim() } }); toast('Joined ' + r.name + ' ✓'); nav('#/room/' + r.slug); }
+  catch (e) { toast(e.message); }
 }
 async function renderRoom(slug) {
   if (S._room && S._room.timer) clearInterval(S._room.timer);
@@ -1609,7 +1658,7 @@ async function renderSettings() {
         ${notifPrefRow('message_while_away', 'Message while away', p.notificationPrefs?.message_while_away)}
         ${notifPrefRow('verification', 'Verification updates', p.notificationPrefs?.verification)}
         ${notifPrefRow('system', 'System alerts', p.notificationPrefs?.system)}
-        <div class="setting-row"><span>Karma Book updates</span><span class="tag forest">always on</span></div>
+        <div class="setting-row"><span>Lakshan Book updates</span><span class="tag forest">always on</span></div>
       </div>
 
       <h2>Account</h2>
@@ -1806,7 +1855,7 @@ function tierCards(u) {
     'Nothing is free — every member subscribes (men CHF 1 · women CHF 5 · non-binary CHF 3 per month)',
     'Fully verified community: ID + selfie + profession',
     'Daily allowance: 10 msgs men · 20 msgs women, non-binary & others',
-    'Full Karma Book, compatibility & discover'
+    'Full Lakshan Book, compatibility & discover'
   ], 'base_subscription')
   + card('pro', 'Sambandh Pro', 'CHF 6/month', [
     'Unlimited messages & new chats',
@@ -1816,7 +1865,7 @@ function tierCards(u) {
   + card('max', 'Sambandh Max', 'CHF 15/month', [
     'Everything in Pro (unlimited messaging)',
     'See exactly who liked you',
-    'Advanced filters (karma grade)',
+    'Advanced filters (Lakshan grade)',
     'Priority verification & support'
   ], 'max_subscription');
 }
