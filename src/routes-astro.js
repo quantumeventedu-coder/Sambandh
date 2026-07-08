@@ -150,4 +150,28 @@ router.post('/ask', requireAuth, async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
+// GET /astro/transits — current planetary transits (gochar) over the natal chart
+router.get('/transits', requireAuth, async (req, res, next) => {
+  try {
+    const user = await User.findById(req.userId).lean();
+    if (!user?.astrology?.birthDate) return res.json({ transits: null, needsBirthData: true });
+    const chart = engine.computeChart(user.astrology);
+    res.json({ transits: engine.transits(chart), source: 'computed (astronomy)' });
+  } catch (e) { next(e); }
+});
+
+// GET /astro/compat/:userId?type=romance|friendship|business — relationship-lens
+// astrological compatibility between you and another member.
+router.get('/compat/:userId', requireAuth, async (req, res, next) => {
+  try {
+    const [me, other] = await Promise.all([User.findById(req.userId).lean(), User.findById(req.params.userId).lean()]);
+    if (!other) return res.status(404).json({ error: 'User not found' });
+    if (other.preferences?.showAstrologyToOthers === false) return res.status(403).json({ error: 'This person keeps their astrology private.' });
+    if (!me?.astrology?.birthDate || !other?.astrology?.birthDate) return res.json({ compat: null, needsBirthData: true });
+    const type = ['romance', 'friendship', 'business'].includes(req.query.type) ? req.query.type : 'romance';
+    const a = engine.computeChart(me.astrology), b = engine.computeChart(other.astrology);
+    res.json({ compat: engine.relationshipCompat(a, b, type), type });
+  } catch (e) { next(e); }
+});
+
 module.exports = router;

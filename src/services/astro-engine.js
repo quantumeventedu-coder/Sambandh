@@ -14,6 +14,7 @@ const { NAKSHATRA_ATLAS } = require('../data/nakshatras');
 const DEG = Math.PI / 180;
 const RAD = 180 / Math.PI;
 const norm360 = x => ((x % 360) + 360) % 360;
+const clamp = (v, lo = 0, hi = 1) => Math.max(lo, Math.min(hi, v));
 const SIGNS = ['Aries', 'Taurus', 'Gemini', 'Cancer', 'Leo', 'Virgo', 'Libra', 'Scorpio', 'Sagittarius', 'Capricorn', 'Aquarius', 'Pisces'];
 const SIGNS_VEDIC = ['Mesha', 'Vrishabha', 'Mithuna', 'Karka', 'Simha', 'Kanya', 'Tula', 'Vrischika', 'Dhanu', 'Makara', 'Kumbha', 'Meena'];
 const NAK = NAKSHATRA_ATLAS.map(n => n.name);
@@ -156,7 +157,10 @@ function computeChart(astro) {
     let combust = false;
     if (COMBUST_DEG[name]) { let sep = Math.abs(sid - sunSid); if (sep > 180) sep = 360 - sep; combust = sep < COMBUST_DEG[name]; }
     const house = lagnaSign != null ? ((p.sign - lagnaSign + 12) % 12) + 1 : null;   // whole-sign
-    bodies[name] = { ...p, dignity: dignity(name, p.sign), retrograde: retro, combust, house };
+    bodies[name] = {
+      ...p, dignity: dignity(name, p.sign), retrograde: retro, combust, house,
+      navamsa: SIGNS[navamsaSign(sid)], dasamsa: SIGNS[dasamsaSign(sid)]   // D9 / D10 signs
+    };
   }
 
   const moon = bodies.Moon;
@@ -289,6 +293,75 @@ function numerology(name, dob) {
   return out;
 }
 
+// ---- Divisional charts (Vargas) ----
+// Navamsa (D9): 9 parts of 3°20'. The continuous formula reproduces the classic
+// movable/fixed/dual starting-sign rule.
+function navamsaSign(L) { return Math.floor(L / (30 / 9)) % 12; }
+// Dasamsa (D10): 10 parts of 3°. Odd signs start from the same sign, even signs
+// from the 9th.
+function dasamsaSign(L) { const s = Math.floor(L / 30), div = Math.floor((L % 30) / 3); return s % 2 === 0 ? (s + div) % 12 : (s + 8 + div) % 12; }
+
+// ---- Transits (Gochar) ----
+function currentSidereal(date = new Date()) {
+  const jd = julianDay(new Date(date.toISOString().slice(0, 10) + 'T00:00:00Z'), date.getUTCHours() + date.getUTCMinutes() / 60);
+  const d = jd - 2451543.5, ay = ayanamsa(jd);
+  const pos = { Moon: norm360(moonTropical(jd) - ay) };
+  for (const n of ['Sun', 'Mars', 'Mercury', 'Jupiter', 'Venus', 'Saturn']) pos[n] = norm360(planetTropical(n, d) - ay);
+  const rahu = norm360(rahuTropical(jd) - ay); pos.Rahu = rahu; pos.Ketu = norm360(rahu + 180);
+  return pos;
+}
+function transits(natalChart, date = new Date()) {
+  const cur = currentSidereal(date);
+  const moonSign = natalChart.planets.Moon.sign;
+  const lagnaSign = natalChart.lagna ? natalChart.lagna.sign : null;
+  const positions = {};
+  for (const [n, lon] of Object.entries(cur)) {
+    const sign = Math.floor(lon / 30);
+    positions[n] = { signName: SIGNS[sign], degInSign: +(lon % 30).toFixed(1), houseFromMoon: ((sign - moonSign + 12) % 12) + 1, houseFromLagna: lagnaSign != null ? ((sign - lagnaSign + 12) % 12) + 1 : null };
+  }
+  const satH = positions.Saturn.houseFromMoon;
+  return {
+    date: date.toISOString().slice(0, 10), positions,
+    sadeSati: [12, 1, 2].includes(satH),
+    sadeSatiNote: [12, 1, 2].includes(satH) ? `Saturn transits the ${satH === 12 ? '12th (rising)' : satH === 1 ? '1st (peak)' : '2nd (setting)'} from your Moon — the Sade Sati period, a demanding-but-maturing phase.` : 'Not in Sade Sati.',
+    jupiterHouseFromMoon: positions.Jupiter.houseFromMoon
+  };
+}
+
+// ---- Relationship compatibility by lens (romance / friendship / business) ----
+const ELEM = ['fire', 'earth', 'air', 'water', 'fire', 'earth', 'air', 'water', 'fire', 'earth', 'air', 'water'];
+const ELEM_AFF = { fire: { fire: .8, air: .9, earth: .55, water: .5 }, air: { air: .8, fire: .9, water: .55, earth: .5 }, earth: { earth: .8, water: .9, fire: .55, air: .5 }, water: { water: .8, earth: .9, air: .55, fire: .5 } };
+const RLORD = ['Mars', 'Venus', 'Mercury', 'Moon', 'Sun', 'Mercury', 'Venus', 'Mars', 'Jupiter', 'Saturn', 'Saturn', 'Jupiter'];
+const PFRIEND = { Sun: ['Moon', 'Mars', 'Jupiter'], Moon: ['Sun', 'Mercury'], Mars: ['Sun', 'Moon', 'Jupiter'], Mercury: ['Sun', 'Venus'], Jupiter: ['Sun', 'Moon', 'Mars'], Venus: ['Mercury', 'Saturn'], Saturn: ['Mercury', 'Venus'] };
+function lordFriend(a, b) { if (a === b) return 1; const af = PFRIEND[a]?.includes(b), bf = PFRIEND[b]?.includes(a); if (af && bf) return 1; if (af || bf) return 0.7; return 0.3; }
+function ganaOf(nak) { const e = NAKSHATRA_ATLAS.find(n => n.name === nak); return e ? e.gana : 'Manushya'; }
+
+function relationshipCompat(a, b, type = 'romance') {
+  const ms = a.planets.Moon.sign, os = b.planets.Moon.sign;
+  let yoni = 0.5;
+  try { const { animalForNakshatra, yoniCompatibility } = require('../data/yoni'); const y = yoniCompatibility(animalForNakshatra(a.nakshatra), animalForNakshatra(b.nakshatra)); if (y) yoni = y.score / 4; } catch { /* optional */ }
+  const gA = ganaOf(a.nakshatra), gB = ganaOf(b.nakshatra);
+  const F = {
+    moon: { s: ELEM_AFF[ELEM[ms]][ELEM[os]], note: 'Emotional rhythm (Moon signs)' },
+    sun: { s: ELEM_AFF[ELEM[a.planets.Sun.sign]][ELEM[b.planets.Sun.sign]], note: 'Identity & drive (Sun signs)' },
+    mercury: { s: ELEM_AFF[ELEM[a.planets.Mercury.sign]][ELEM[b.planets.Mercury.sign]], note: 'Communication (Mercury)' },
+    grahaMaitri: { s: lordFriend(RLORD[ms], RLORD[os]), note: 'Mental rapport (Moon lords)' },
+    gana: { s: gA === gB ? 1 : ((gA === 'Deva' && gB === 'Rakshasa') || (gA === 'Rakshasa' && gB === 'Deva')) ? 0.2 : 0.6, note: 'Temperament (Gana)' },
+    yoni: { s: yoni, note: 'Intimate energy (Yoni)' }
+  };
+  const WEIGHTS = {
+    romance: { moon: .28, yoni: .2, gana: .15, grahaMaitri: .15, sun: .12, mercury: .1 },
+    friendship: { gana: .3, moon: .25, grahaMaitri: .2, mercury: .15, sun: .1 },
+    business: { grahaMaitri: .3, mercury: .25, gana: .2, sun: .15, moon: .1 }
+  };
+  const w = WEIGHTS[type] || WEIGHTS.romance;
+  let score = 0, tot = 0; const factors = [];
+  for (const [k, wt] of Object.entries(w)) { score += F[k].s * wt; tot += wt; factors.push({ name: k, score: Math.round(F[k].s * 100), weight: Math.round(wt * 100), note: F[k].note }); }
+  score = Math.round(clamp(score / tot) * 100);
+  factors.sort((x, y) => y.weight - x.weight);
+  return { type, score, verdict: score >= 80 ? 'Excellent' : score >= 65 ? 'Strong' : score >= 50 ? 'Good' : score >= 35 ? 'Mixed' : 'Challenging', factors };
+}
+
 // ---- Panchang (today's Vedic calendar) ----
 const TITHIS = ['Pratipada', 'Dwitiya', 'Tritiya', 'Chaturthi', 'Panchami', 'Shashthi', 'Saptami', 'Ashtami', 'Navami', 'Dashami', 'Ekadashi', 'Dwadashi', 'Trayodashi', 'Chaturdashi', 'Purnima'];
 const YOGAS27 = ['Vishkambha', 'Priti', 'Ayushman', 'Saubhagya', 'Shobhana', 'Atiganda', 'Sukarma', 'Dhriti', 'Shula', 'Ganda', 'Vriddhi', 'Dhruva', 'Vyaghata', 'Harshana', 'Vajra', 'Siddhi', 'Vyatipata', 'Variyana', 'Parigha', 'Shiva', 'Siddha', 'Sadhya', 'Shubha', 'Shukla', 'Brahma', 'Indra', 'Vaidhriti'];
@@ -314,4 +387,4 @@ function panchang(date = new Date()) {
   };
 }
 
-module.exports = { computeChart, numerology, panchang, SIGNS, NAK, placement, ascendant, vimshottari };
+module.exports = { computeChart, numerology, panchang, transits, relationshipCompat, SIGNS, NAK, placement, ascendant, vimshottari };
