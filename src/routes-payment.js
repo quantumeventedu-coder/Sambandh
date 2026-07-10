@@ -93,7 +93,9 @@ router.post('/create-order', requireAuth, async (req, res, next) => {
     const order = await razorpay.orders.create({
       amount: amount.minor,
       currency: CURRENCY,
-      receipt: `${purpose}_${user._id}_${Date.now()}`,
+      // Razorpay caps receipt at 40 chars — keep it short (purpose + timestamp in
+      // base36 + last 6 of the user id). Full context lives in notes below.
+      receipt: `sb_${Date.now().toString(36)}_${String(user._id).slice(-6)}`,
       notes: { userId: user._id.toString(), gender: user.profile.gender, purpose }
     });
 
