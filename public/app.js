@@ -786,6 +786,13 @@ function obPay() {
   </div>`;
 }
 
+// Load Razorpay's checkout script on demand (needed before `new Razorpay(...)`).
+async function ensureRazorpay() {
+  if (window.Razorpay) return;
+  await loadScript('https://checkout.razorpay.com/v1/checkout.js');
+  if (!window.Razorpay) throw new Error('Could not load the payment gateway — check your connection and try again.');
+}
+
 async function obPayNow() {
   try {
     const order = await api('/payment/create-order', { method: 'POST', body: { purpose: 'base_subscription' } });
@@ -795,6 +802,7 @@ async function obPayNow() {
       return refreshUserAndRoute();
     }
     // Production Razorpay Checkout
+    await ensureRazorpay();
     const rzp = new Razorpay({
       key: order.key, amount: order.amount, currency: order.currency, name: 'Sambandh',
       description: 'Base membership (monthly)', order_id: order.orderId, prefill: order.prefill,
@@ -1884,6 +1892,7 @@ async function buyTier(purpose) {
       toast('Subscription active — welcome aboard');
       return renderSettings();
     }
+    await ensureRazorpay();
     const rzp = new Razorpay({
       key: order.key, amount: order.amount, currency: order.currency, name: 'Sambandh',
       description: name, order_id: order.orderId,
