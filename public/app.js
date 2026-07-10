@@ -331,6 +331,7 @@ function renderFeatures() {
     <button class="btn mt" onclick="nav('${S.token ? '#/discover' : '#/login'}')">${S.token ? 'Back to the app' : 'Get started'}</button>
     <button class="btn small mt" style="background:white;color:var(--sindoor-deep);border:1px solid var(--sand-mid)" onclick="history.length > 1 ? history.back() : nav('#/welcome')">Back</button>
     <p class="hint center" style="margin-top:14px">18+ only · Everything on this page is enforced in the product.</p>
+    <p class="hint center" style="opacity:.6;margin-top:6px">A product of AIHuA — Abhityuthanam Institute of Human Advancement.</p>
   </div>`;
   window.scrollTo(0, 0);
 }
@@ -1670,7 +1671,8 @@ async function renderSettings() {
         <div class="setting-row" style="cursor:pointer" onclick="doLogout()"><span class="ic-row">${ic('logout')} Log out</span><span>→</span></div>
       </div>
       <button class="btn danger" onclick="deleteAccount()">Delete account — erased within 30 days</button>
-      <p class="hint center mt">Sambandh · verified, honest dating · Grievances: grievance@sambandh.in</p>`;
+      <p class="hint center mt">Sambandh · verified, honest dating · Grievances: grievance@sambandh.in</p>
+      <p class="hint center" style="opacity:.6;margin-top:4px">A product of AIHuA</p>`;
     load2FA();
     loadMyNakshatra();
   } catch (e) { screen.querySelector('.section-pad').innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
