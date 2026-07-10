@@ -512,6 +512,7 @@ function obProgress(step) {
 
 async function refreshUserAndRoute() {
   S.user = (await api('/auth/me')).user;
+  loadPricing();   // refresh live localized prices (gender/country now known)
   if (onboardingStep() === 'done') { toast('Profile complete — welcome to Sambandh'); nav('#/discover'); }
   else renderOnboarding();
 }
@@ -770,17 +771,25 @@ async function obSendProfession() {
   } catch (e) { toast(e.message); }
 }
 
-// Client mirror of the server pricing, for instant display. The server order is
-// always authoritative (Indian users → INR so UPI/wallets/netbanking show).
+// Instant fallback while the live price loads. The server order is authoritative
+// (Indian users → INR so UPI/wallets/netbanking show; amount is live-converted CHF).
 function localPricing() {
   const country = (S.user && S.user.profile && S.user.profile.country) || 'IN';
   return country === 'IN'
-    ? { sym: '₹', base: { male: 99, female: 499, non_binary: 299 }, pro: 599, max: 1499 }
+    ? { sym: '₹', base: { male: 95, female: 475, non_binary: 285 }, pro: 570, max: 1425 }
     : { sym: 'CHF ', base: { male: 1, female: 5, non_binary: 3 }, pro: 6, max: 15 };
+}
+// Prefer the live, server-computed price (CHF converted at today's rate).
+function pricingView() {
+  const s = S._pricing;
+  return s ? { sym: s.symbol, base: s.base, pro: s.pro, max: s.max } : localPricing();
+}
+async function loadPricing() {
+  try { S._pricing = await api('/payment/pricing'); if (['#/onboarding', '#/settings'].includes(location.hash)) route(); } catch { /* mirror used */ }
 }
 function obPay() {
   const g = S.user.profile.gender;
-  const p = localPricing();
+  const p = pricingView();
   const fee = p.base[g] ?? p.base.non_binary;
   return `<div class="section-pad">
     <h1>Start your membership</h1>
@@ -1869,7 +1878,7 @@ function tierCards(u) {
     </div>`;
 
   const g = u.profile?.gender;
-  const p = localPricing();
+  const p = pricingView();
   const baseFee = `${p.sym}${p.base[g] ?? p.base.non_binary}`;
   return card('base', 'Base membership', `${baseFee}/month`, [
     `Nothing is free — every member subscribes (men ${p.sym}${p.base.male} · women ${p.sym}${p.base.female} · non-binary ${p.sym}${p.base.non_binary} per month)`,
@@ -1891,7 +1900,7 @@ function tierCards(u) {
 }
 
 async function buyTier(purpose) {
-  const p = localPricing();
+  const p = pricingView();
   const name = purpose === 'max_subscription' ? `Sambandh Max (${p.sym}${p.max}/month)`
     : purpose === 'pro_subscription' ? `Sambandh Pro (${p.sym}${p.pro}/month)`
     : 'Base membership (monthly, priced by your profile)';

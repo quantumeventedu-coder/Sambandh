@@ -27,40 +27,34 @@ if (!DEV_PAYMENTS) {
   });
 }
 
-// Localized pricing. Indian users are charged in INR — which is what unlocks UPI,
-// netbanking and wallets in Razorpay and shows the price in ₹; users elsewhere are
-// charged in CHF (international cards). CHF stays the canonical figure stored for
-// reporting. Gender and country come from the DB — NEVER from the request body.
-const PRICING = {
-  INR: {
-    code: 'INR', symbol: '₹',
-    base: { male: 99, female: 499, non_binary: 299, other: 299 },
-    pro_subscription: 599, max_subscription: 1499,
-    karma_escalation: 49, karma_escalation_high: 99, boost: 99
-  },
-  CHF: {
-    code: 'CHF', symbol: 'CHF ',
-    base: { male: 1, female: 5, non_binary: 3, other: 3 },
-    pro_subscription: 6, max_subscription: 15,
-    karma_escalation: 0.5, karma_escalation_high: 1, boost: 1
-  }
+const fx = require('./services/fx');
+
+// CHF is the canonical price. Each user is charged in their LOCAL currency
+// (India → INR, which also unlocks UPI/netbanking/wallets; others → their
+// currency), converted from CHF at the LIVE exchange rate (services/fx.js) so the
+// amount always tracks the CHF price. Gender/country come from the DB, not the request.
+const PRICING_CHF = {
+  base: { male: 1, female: 5, non_binary: 3, other: 3 },
+  pro_subscription: 6, max_subscription: 15,
+  karma_escalation: 0.5, karma_escalation_high: 1, boost: 1
 };
-// Old purpose names (pre-July-2026 clients) map onto the new tiers.
 const LEGACY_PURPOSES = {
   plus_subscription: 'pro_subscription',
   premium_subscription: 'max_subscription',
   join_fee: 'base_subscription'
 };
+const SYMBOLS = { INR: '₹', CHF: 'CHF ', USD: '$', EUR: '€', GBP: '£', AED: 'AED ', SGD: 'S$' };
 
 function currencyForUser(user) { return ((user && user.profile && user.profile.country) || 'IN') === 'IN' ? 'INR' : 'CHF'; }
-// { code, symbol, major, minor (=major×100), chf (canonical CHF for reporting) }
-function priceFor(purpose, user) {
-  const code = currencyForUser(user), t = PRICING[code], c = PRICING.CHF;
+function chfAmount(purpose, gender) { return purpose === 'base_subscription' ? (PRICING_CHF.base[gender] ?? PRICING_CHF.base.other) : (PRICING_CHF[purpose] ?? null); }
+// { code, symbol, major (live-converted, rounded), minor (=major×100), chf (canonical) }
+async function priceFor(purpose, user) {
   const gender = (user && user.profile && user.profile.gender) || 'other';
-  const major = purpose === 'base_subscription' ? (t.base[gender] ?? t.base.other) : (t[purpose] ?? null);
-  if (major == null) return null;
-  const chf = purpose === 'base_subscription' ? (c.base[gender] ?? c.base.other) : (c[purpose] ?? null);
-  return { code, symbol: t.symbol, major, minor: Math.round(major * 100), chf };
+  const chf = chfAmount(purpose, gender);
+  if (chf == null) return null;
+  const code = currencyForUser(user);
+  const major = await fx.convertFromCHF(chf, code);
+  return { code, symbol: SYMBOLS[code] || (code + ' '), major, minor: Math.round(major * 100), chf };
 }
 
 // 1. Create order — join fee by default, or another purpose
@@ -70,9 +64,9 @@ router.post('/create-order', requireAuth, async (req, res, next) => {
     if (!user) return res.status(404).json({ error: 'User not found' });
 
     const purpose = LEGACY_PURPOSES[req.body.purpose] || req.body.purpose || 'base_subscription';
-    // Priced by verified gender + country (INR for India → UPI etc.). Registration
-    // is by payment (before verification), so no verification gate here.
-    const price = priceFor(purpose, user);
+    // Priced by verified gender + country (INR for India → UPI etc.), live-converted
+    // from CHF. Registration is by payment, so no verification gate here.
+    const price = await priceFor(purpose, user);
     if (!price) return res.status(400).json({ error: 'Unknown purpose' });
 
     if (DEV_PAYMENTS) {
@@ -113,18 +107,20 @@ router.post('/create-order', requireAuth, async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
-// GET /payment/pricing — localized prices for display (the server order is authoritative)
+// GET /payment/pricing — live, localized prices for display (server order is authoritative)
 router.get('/pricing', requireAuth, async (req, res, next) => {
   try {
     const user = await User.findById(req.userId);
     if (!user) return res.status(404).json({ error: 'User not found' });
-    const code = currencyForUser(user), t = PRICING[code];
-    res.json({
-      currency: code, symbol: t.symbol,
-      base: { male: t.base.male, female: t.base.female, non_binary: t.base.non_binary, yours: (t.base[user.profile && user.profile.gender] ?? t.base.other) },
-      pro: t.pro_subscription, max: t.max_subscription,
-      escalation: t.karma_escalation, escalationHigh: t.karma_escalation_high, boost: t.boost
-    });
+    const code = currencyForUser(user);
+    const conv = (chf) => fx.convertFromCHF(chf, code);
+    const c = PRICING_CHF, gender = (user.profile && user.profile.gender) || 'other';
+    const [male, female, nb, yours, pro, max, esc, escH, boost] = await Promise.all([
+      conv(c.base.male), conv(c.base.female), conv(c.base.non_binary), conv(c.base[gender] ?? c.base.other),
+      conv(c.pro_subscription), conv(c.max_subscription), conv(c.karma_escalation), conv(c.karma_escalation_high), conv(c.boost)
+    ]);
+    res.json({ currency: code, symbol: SYMBOLS[code] || (code + ' '),
+      base: { male, female, non_binary: nb, yours }, pro, max, escalation: esc, escalationHigh: escH, boost });
   } catch (e) { next(e); }
 });
 
@@ -170,7 +166,7 @@ router.post('/verify', requireAuth, async (req, res, next) => {
 
     const user = await User.findById(req.userId);
     const purpose = LEGACY_PURPOSES[req.body.purpose] || req.body.purpose || 'base_subscription';
-    const price = priceFor(purpose, user) || { chf: 0, code: 'CHF' };
+    const price = (await priceFor(purpose, user)) || { chf: 0, code: 'CHF' };
 
     const payment = await Payment.create({
       userId: req.userId,
