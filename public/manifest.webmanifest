@@ -1,0 +1,17 @@
+{
+  "name": "Sambandh — verified, honesty-first dating",
+  "short_name": "Sambandh",
+  "description": "India's verified, honesty-first dating. Every member is face-verified; an AI Lakshan Book keeps people honest.",
+  "start_url": "/app",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#4B1528",
+  "theme_color": "#993556",
+  "categories": ["social", "lifestyle"],
+  "icons": [
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
