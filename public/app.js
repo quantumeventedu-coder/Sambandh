@@ -770,16 +770,25 @@ async function obSendProfession() {
   } catch (e) { toast(e.message); }
 }
 
+// Client mirror of the server pricing, for instant display. The server order is
+// always authoritative (Indian users → INR so UPI/wallets/netbanking show).
+function localPricing() {
+  const country = (S.user && S.user.profile && S.user.profile.country) || 'IN';
+  return country === 'IN'
+    ? { sym: '₹', base: { male: 99, female: 499, non_binary: 299 }, pro: 599, max: 1499 }
+    : { sym: 'CHF ', base: { male: 1, female: 5, non_binary: 3 }, pro: 6, max: 15 };
+}
 function obPay() {
   const g = S.user.profile.gender;
-  const fee = g === 'male' ? 1 : g === 'female' ? 5 : 3;
+  const p = localPricing();
+  const fee = p.base[g] ?? p.base.non_binary;
   return `<div class="section-pad">
     <h1>Start your membership</h1>
     <p class="sub">Nothing here is free — every member pays monthly. That's what keeps the bots and time-wasters out.</p>
     <div class="card center" style="background:var(--rose-soft);border-color:var(--rose)">
-      <div style="font-size:38px;font-weight:700;color:var(--sindoor-deep);font-family:Georgia,serif">CHF ${fee}<span style="font-size:15px;color:var(--sindoor)"> / month</span></div>
+      <div style="font-size:38px;font-weight:700;color:var(--sindoor-deep);font-family:Georgia,serif">${p.sym}${fee}<span style="font-size:15px;color:var(--sindoor)"> / month</span></div>
       <div style="font-size:12px;color:var(--sindoor)">30 days per payment · renew when it suits you · taxes included</div>
-      <div class="hint">Men CHF 1 · Women CHF 5 · Non-binary CHF 3 per month — your price is set by your verified profile, not by this page.</div>
+      <div class="hint">Men ${p.sym}${p.base.male} · Women ${p.sym}${p.base.female} · Non-binary ${p.sym}${p.base.non_binary} per month — your price is set by your verified profile, not by this page.</div>
     </div>
     <button class="btn" onclick="obPayNow()">Pay with UPI / Card</button>
     <p class="hint center mt">Powered by Razorpay · Secure payment · Full refund within 24 hours, no questions asked</p>
@@ -1860,19 +1869,20 @@ function tierCards(u) {
     </div>`;
 
   const g = u.profile?.gender;
-  const baseFee = g === 'male' ? 'CHF 1' : g === 'female' ? 'CHF 5' : 'CHF 3';
+  const p = localPricing();
+  const baseFee = `${p.sym}${p.base[g] ?? p.base.non_binary}`;
   return card('base', 'Base membership', `${baseFee}/month`, [
-    'Nothing is free — every member subscribes (men CHF 1 · women CHF 5 · non-binary CHF 3 per month)',
-    'Fully verified community: ID + selfie + profession',
+    `Nothing is free — every member subscribes (men ${p.sym}${p.base.male} · women ${p.sym}${p.base.female} · non-binary ${p.sym}${p.base.non_binary} per month)`,
+    'Fully verified, photo-verified community',
     'Daily allowance: 10 msgs men · 20 msgs women, non-binary & others',
     'Full Lakshan Book, compatibility & discover'
   ], 'base_subscription')
-  + card('pro', 'Sambandh Pro', 'CHF 6/month', [
+  + card('pro', 'Sambandh Pro', `${p.sym}${p.pro}/month`, [
     'Unlimited messages & new chats',
     'No daily limits, ever',
     'Includes everything in Base'
   ], 'pro_subscription')
-  + card('max', 'Sambandh Max', 'CHF 15/month', [
+  + card('max', 'Sambandh Max', `${p.sym}${p.max}/month`, [
     'Everything in Pro (unlimited messaging)',
     'See exactly who liked you',
     'Advanced filters (Lakshan grade)',
@@ -1881,8 +1891,9 @@ function tierCards(u) {
 }
 
 async function buyTier(purpose) {
-  const name = purpose === 'max_subscription' ? 'Sambandh Max (CHF 15/month)'
-    : purpose === 'pro_subscription' ? 'Sambandh Pro (CHF 6/month)'
+  const p = localPricing();
+  const name = purpose === 'max_subscription' ? `Sambandh Max (${p.sym}${p.max}/month)`
+    : purpose === 'pro_subscription' ? `Sambandh Pro (${p.sym}${p.pro}/month)`
     : 'Base membership (monthly, priced by your profile)';
   if (!confirm(`Subscribe to ${name}? 30 days from today.`)) return;
   try {

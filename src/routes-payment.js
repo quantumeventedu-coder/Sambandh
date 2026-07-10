@@ -27,31 +27,41 @@ if (!DEV_PAYMENTS) {
   });
 }
 
-// ALL prices in CHF (Swiss francs) — no dollars, no rupees. NOTHING IS FREE:
-// the base membership itself is a monthly subscription, priced by gender.
-// "minor" = rappen (CHF × 100), the smallest currency unit for the gateway.
-// Gender is read from the database — NEVER from the request body.
-function computeBaseFee(gender) {
-  if (gender === 'male') return { chf: 1, minor: 100 };     // CHF 1 / month
-  if (gender === 'female') return { chf: 5, minor: 500 };   // CHF 5 / month
-  return { chf: 3, minor: 300 };                            // CHF 3 / month
-}
-
-const PURPOSE_PRICES = {
-  karma_escalation: { chf: 0.5, minor: 50 },
-  karma_escalation_high: { chf: 1, minor: 100 },
-  boost: { chf: 1, minor: 100 },
-  pro_subscription: { chf: 6, minor: 600 },   // Sambandh Pro — unlimited messaging
-  max_subscription: { chf: 15, minor: 1500 }  // Sambandh Max — Pro + likes list + advanced filters
+// Localized pricing. Indian users are charged in INR — which is what unlocks UPI,
+// netbanking and wallets in Razorpay and shows the price in ₹; users elsewhere are
+// charged in CHF (international cards). CHF stays the canonical figure stored for
+// reporting. Gender and country come from the DB — NEVER from the request body.
+const PRICING = {
+  INR: {
+    code: 'INR', symbol: '₹',
+    base: { male: 99, female: 499, non_binary: 299, other: 299 },
+    pro_subscription: 599, max_subscription: 1499,
+    karma_escalation: 49, karma_escalation_high: 99, boost: 99
+  },
+  CHF: {
+    code: 'CHF', symbol: 'CHF ',
+    base: { male: 1, female: 5, non_binary: 3, other: 3 },
+    pro_subscription: 6, max_subscription: 15,
+    karma_escalation: 0.5, karma_escalation_high: 1, boost: 1
+  }
 };
 // Old purpose names (pre-July-2026 clients) map onto the new tiers.
-// join_fee → base_subscription: the join fee became the monthly base membership.
 const LEGACY_PURPOSES = {
   plus_subscription: 'pro_subscription',
   premium_subscription: 'max_subscription',
   join_fee: 'base_subscription'
 };
-const CURRENCY = 'CHF';
+
+function currencyForUser(user) { return ((user && user.profile && user.profile.country) || 'IN') === 'IN' ? 'INR' : 'CHF'; }
+// { code, symbol, major, minor (=major×100), chf (canonical CHF for reporting) }
+function priceFor(purpose, user) {
+  const code = currencyForUser(user), t = PRICING[code], c = PRICING.CHF;
+  const gender = (user && user.profile && user.profile.gender) || 'other';
+  const major = purpose === 'base_subscription' ? (t.base[gender] ?? t.base.other) : (t[purpose] ?? null);
+  if (major == null) return null;
+  const chf = purpose === 'base_subscription' ? (c.base[gender] ?? c.base.other) : (c[purpose] ?? null);
+  return { code, symbol: t.symbol, major, minor: Math.round(major * 100), chf };
+}
 
 // 1. Create order — join fee by default, or another purpose
 router.post('/create-order', requireAuth, async (req, res, next) => {
@@ -60,54 +70,62 @@ router.post('/create-order', requireAuth, async (req, res, next) => {
     if (!user) return res.status(404).json({ error: 'User not found' });
 
     const purpose = LEGACY_PURPOSES[req.body.purpose] || req.body.purpose || 'base_subscription';
-    let amount;
-
-    if (purpose === 'base_subscription') {
-      // Monthly base membership, priced by verified gender. Renewals stack +30 days.
-      // Registration is by payment (before verification), so no verification gate here.
-      amount = computeBaseFee(user.profile.gender);
-    } else if (PURPOSE_PRICES[purpose]) {
-      amount = PURPOSE_PRICES[purpose];
-    } else {
-      return res.status(400).json({ error: 'Unknown purpose' });
-    }
+    // Priced by verified gender + country (INR for India → UPI etc.). Registration
+    // is by payment (before verification), so no verification gate here.
+    const price = priceFor(purpose, user);
+    if (!price) return res.status(400).json({ error: 'Unknown purpose' });
 
     if (DEV_PAYMENTS) {
       const orderId = 'order_dev_' + crypto.randomBytes(8).toString('hex');
       await Payment.create({
         userId: req.userId,
         purpose: purpose.replace('_high', ''),
-        amountCHF: amount.chf, currency: CURRENCY,
+        amountCHF: price.chf, currency: price.code,
         razorpayOrderId: orderId,
         status: 'created',
         createdAt: new Date(),
-        metadata: { dev: true, gender: user.profile.gender }
+        metadata: { dev: true, gender: user.profile.gender, amountLocal: price.major }
       });
       return res.json({
         devMode: true, orderId,
-        amount: amount.minor, amountCHF: amount.chf,
-        currency: CURRENCY, purpose
+        amount: price.minor, amountMajor: price.major, amountCHF: price.chf,
+        currency: price.code, symbol: price.symbol, purpose
       });
     }
 
     const order = await razorpay.orders.create({
-      amount: amount.minor,
-      currency: CURRENCY,
-      // Razorpay caps receipt at 40 chars — keep it short (purpose + timestamp in
-      // base36 + last 6 of the user id). Full context lives in notes below.
+      amount: price.minor,
+      currency: price.code,
+      // Razorpay caps receipt at 40 chars — keep it short (timestamp in base36 +
+      // last 6 of the user id). Full context lives in notes below.
       receipt: `sb_${Date.now().toString(36)}_${String(user._id).slice(-6)}`,
       notes: { userId: user._id.toString(), gender: user.profile.gender, purpose }
     });
 
     res.json({
       orderId: order.id,
-      amount: amount.minor, amountCHF: amount.chf,
-      currency: CURRENCY,
+      amount: price.minor, amountMajor: price.major, amountCHF: price.chf,
+      currency: price.code, symbol: price.symbol,
       purpose,
       key: process.env.RAZORPAY_KEY_ID,
       prefill: { name: user.profile.firstName, contact: user.phone }
     });
   } catch (err) { next(err); }
+});
+
+// GET /payment/pricing — localized prices for display (the server order is authoritative)
+router.get('/pricing', requireAuth, async (req, res, next) => {
+  try {
+    const user = await User.findById(req.userId);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+    const code = currencyForUser(user), t = PRICING[code];
+    res.json({
+      currency: code, symbol: t.symbol,
+      base: { male: t.base.male, female: t.base.female, non_binary: t.base.non_binary, yours: (t.base[user.profile && user.profile.gender] ?? t.base.other) },
+      pro: t.pro_subscription, max: t.max_subscription,
+      escalation: t.karma_escalation, escalationHigh: t.karma_escalation_high, boost: t.boost
+    });
+  } catch (e) { next(e); }
 });
 
 // 2. Verify payment (frontend calls after Razorpay checkout returns)
@@ -152,15 +170,13 @@ router.post('/verify', requireAuth, async (req, res, next) => {
 
     const user = await User.findById(req.userId);
     const purpose = LEGACY_PURPOSES[req.body.purpose] || req.body.purpose || 'base_subscription';
-    const amount = purpose === 'base_subscription'
-      ? computeBaseFee(user.profile.gender)
-      : PURPOSE_PRICES[purpose] || { chf: 0 };
+    const price = priceFor(purpose, user) || { chf: 0, code: 'CHF' };
 
     const payment = await Payment.create({
       userId: req.userId,
       purpose: purpose.replace('_high', ''),
-      amountCHF: amount.chf,
-      currency: CURRENCY,
+      amountCHF: price.chf,
+      currency: price.code,
       razorpayOrderId: razorpay_order_id,
       razorpayPaymentId: razorpay_payment_id,
       razorpaySignature: razorpay_signature,
