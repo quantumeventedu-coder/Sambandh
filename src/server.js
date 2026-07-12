@@ -4,6 +4,12 @@
 // Serves the API under /api, real-time chat via Socket.io, the web app from
 // /public, and uploaded photos from /uploads (local dev storage).
 
+// Load env FIRST — src/db/odm.js chooses the Postgres vs Mongo engine by reading
+// process.env.DATABASE_URL at import time, so dotenv must run before that require
+// (otherwise a DATABASE_URL that lives only in .env is invisible and the app picks
+// the wrong data engine). On Vercel env vars are already in the environment.
+require('dotenv').config();
+
 const express = require('express');
 const mongoose = require('./db/odm');
 const http = require('http');
@@ -13,7 +19,6 @@ const { Server: SocketServer } = require('socket.io');
 const cors = require('cors');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
-require('dotenv').config();
 
 // Routes
 const authRoutes = require('./routes-auth');

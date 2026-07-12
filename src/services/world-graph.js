@@ -62,7 +62,10 @@ function connectionLabel(ctx) {
 // A user's direct connections = the people they've MATCHED with (a mutual tie,
 // represented by a shared Chat). Likes are one-directional and not counted here.
 async function connectionsOf(userId) {
-  const chats = await Chat.find({ participants: userId }).select('participants').lean();
+  // Capped: this runs on the hot path (every compatibility view). 1000 is far
+  // beyond any real match count, so it bounds the worst case without truncating
+  // realistic users.
+  const chats = await Chat.find({ participants: userId }).select('participants').limit(1000).lean();
   const ids = new Set();
   for (const c of chats) for (const p of (c.participants || [])) if (idStr(p) !== idStr(userId)) ids.add(idStr(p));
   return [...ids];
@@ -101,7 +104,7 @@ async function secondDegree(userId, { limit = 20 } = {}) {
   const first = await connectionsOf(userId);
   if (!first.length) return [];
   const firstSet = new Set(first.map(idStr));
-  const chats = await Chat.find({ participants: { $in: first } }).select('participants').lean();
+  const chats = await Chat.find({ participants: { $in: first } }).select('participants').limit(5000).lean();
   const counts = new Map();                      // candidateId → # of my connections linking to them
   for (const c of chats) {
     const parts = (c.participants || []).map(idStr);
