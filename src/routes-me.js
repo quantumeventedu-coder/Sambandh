@@ -13,6 +13,7 @@ const Notification = require('./models/Notification');
 const { requireAuth } = require('./routes-auth');
 const eventsSvc = require('./services/events');
 const behavior = require('./services/behavior-engine');
+const world = require('./services/world-graph');
 
 const router = express.Router();
 
@@ -22,6 +23,18 @@ router.get('/behavior', requireAuth, async (req, res, next) => {
   try {
     const report = await eventsSvc.behaviorFor(req.userId);
     res.json({ report, insights: behavior.summarize(report) });
+  } catch (err) { next(err); }
+});
+
+// GET /api/me/network — your relationship graph: connection + community counts,
+// and friend-of-friend suggestions (people your matches have matched with).
+router.get('/network', requireAuth, async (req, res, next) => {
+  try {
+    const [ego, second] = await Promise.all([
+      world.egoNetwork(req.userId),
+      world.secondDegree(req.userId, { limit: 12 })
+    ]);
+    res.json({ ...ego, peopleYouMayKnow: second });
   } catch (err) { next(err); }
 });
 

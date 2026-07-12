@@ -12,8 +12,18 @@ const Message = require('./models/Message');
 const Reputation = require('./models/Reputation');
 const Compatibility = require('./models/Compatibility');
 const { requireAuth } = require('./routes-auth');
+const world = require('./services/world-graph');
 
 const router = express.Router();
+
+// GET /api/compat/:userId/connection — how you two are connected in the graph:
+// mutual connections, shared communities, shared language/intent/city + a label.
+router.get('/:userId/connection', requireAuth, async (req, res, next) => {
+  try {
+    if (req.params.userId === req.userId) return res.json({ label: null, mutualConnections: [], sharedCommunities: [] });
+    res.json(await world.between(req.userId, req.params.userId));
+  } catch (err) { next(err); }
+});
 
 // ---------------- Astrology helpers (shared service) ----------------
 

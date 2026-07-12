@@ -374,6 +374,18 @@ router.get('/behavior/:userId', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+// Relationship graph for one user (oversight): connection + community counts.
+const worldGraph = require('./services/world-graph');
+router.get('/graph/:userId', async (req, res, next) => {
+  try {
+    const [ego, second] = await Promise.all([
+      worldGraph.egoNetwork(req.params.userId),
+      worldGraph.secondDegree(req.params.userId, { limit: 15 })
+    ]);
+    res.json({ ...ego, secondDegree: second });
+  } catch (err) { next(err); }
+});
+
 router.put('/ai/model', async (req, res, next) => {
   try {
     if (typeof req.body?.auto === 'boolean') {

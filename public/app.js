@@ -1412,10 +1412,14 @@ async function renderCompat(userId) {
     <button class="btn ghost" style="text-align:left;padding-left:0" onclick="history.back()">← Back</button>
     <h1>Compatibility</h1><div id="compat-body"><div class="empty">Computing…</div></div></div>`;
   try {
-    const [c, intel] = await Promise.all([
+    const [c, intel, conn] = await Promise.all([
       api('/compat/' + userId),
-      api('/compat/' + userId + '/intelligence').catch(() => null)
+      api('/compat/' + userId + '/intelligence').catch(() => null),
+      api('/compat/' + userId + '/connection').catch(() => null)
     ]);
+    const connHtml = (conn && conn.label) ? `<div class="card" style="background:var(--rose-soft);border-color:var(--rose)">
+        <b class="ic-row">${ic('users') || ic('sparkle')} How you're connected</b>
+        <p style="margin:6px 0 0;font-size:13.5px">${esc(conn.label)}.</p></div>` : '';
     const a = c.astrology, e = c.engagement;
     const COMP_LABEL = {
       vedic: 'Vedic astrology', yoni: 'Intimate nature (Yoni)', gana: 'Temperament (Gana)',
@@ -1443,6 +1447,7 @@ async function renderCompat(userId) {
       <p class="hint" style="margin:-4px 0 14px">${intel.signals && intel.signals.psychologyAvailable ? 'Personality &amp; emotional-style signals are read privately from your chat and never shown as labels.' : 'Chat a little to unlock the personality &amp; emotional-style signals.'}</p>
     ` : '';
     $('#compat-body').innerHTML = `
+      ${connHtml}
       ${intelHtml || (c.overall != null ? `<div class="karma-hero good"><b>${c.overall}%</b><span>Overall compatibility</span></div>` : '')}
       <div class="card"><b class="ic-row">${ic('star')} Astrological match — by relationship</b>
         <div class="row" style="gap:6px;margin-top:8px;flex-wrap:wrap">
@@ -1662,6 +1667,7 @@ async function renderSettings() {
 
       <div id="me-nakshatra"></div>
       <div id="me-rhythm"></div>
+      <div id="me-network"></div>
 
       <h2>Membership</h2>
       ${tierCards(u)}
@@ -1703,7 +1709,29 @@ async function renderSettings() {
     load2FA();
     loadMyNakshatra();
     loadRhythm();
+    loadNetwork();
   } catch (e) { screen.querySelector('.section-pad').innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+}
+
+// Your relationship graph — connections, communities, and friend-of-friend
+// suggestions (services/world-graph.js). Quiet until you have a connection.
+async function loadNetwork() {
+  const el = $('#me-network'); if (!el) return;
+  try {
+    const n = await api('/me/network');
+    if (!n || (!n.connections && !(n.communities || []).length)) return;  // nothing to show yet
+    const pymk = (n.peopleYouMayKnow || []).length;
+    el.innerHTML = `
+      <div class="card" style="margin-top:14px">
+        <div class="ic-row" style="color:var(--forest);font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase">${ic('users') || ic('sparkle')} Your network</div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">
+          <span class="wtag" style="background:var(--rose-soft)">${n.connections} connection${n.connections === 1 ? '' : 's'}</span>
+          ${(n.communities || []).length ? `<span class="wtag" style="background:var(--rose-soft)">${n.communities.length} communit${n.communities.length === 1 ? 'y' : 'ies'}</span>` : ''}
+          ${pymk ? `<span class="wtag" style="background:var(--rose-soft)">${pymk} ${pymk === 1 ? 'person' : 'people'} you may know</span>` : ''}
+        </div>
+        ${(n.communities || []).length ? `<p class="hint" style="margin-top:8px">In: ${n.communities.map(c => esc(c.title || c.slug)).join(' · ')}</p>` : ''}
+      </div>`;
+  } catch { /* network card is a nicety — never break settings */ }
 }
 
 // Your behavioural rhythm — activity, drift and habits derived live from your own
