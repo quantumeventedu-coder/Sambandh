@@ -44,4 +44,24 @@ describe('self-learning match model', () => {
   test('predictWith returns null when no model is trained', () => {
     expect(trainer.predictWith(null, viewer, candidate, 5)).toBeNull();
   });
+
+  test('predictWith serves the NEURAL model (kind:"mlp") through the same interface', () => {
+    const { trainMLP } = require('../src/services/nn');
+    // Train a tiny MLP on the exact 8-feature contract, then serve it via predictWith.
+    const rng = require('../src/services/nn').makeRng(9);
+    const X = [], y = [];
+    for (let i = 0; i < 200; i++) {
+      const f = Array.from({ length: trainer.FEATURE_NAMES.length }, () => rng());
+      // like iff shared intent AND close age (an interaction) — index via FEATURE_NAMES
+      const ii = trainer.FEATURE_NAMES.indexOf('sharedIntent');
+      const ai = trainer.FEATURE_NAMES.indexOf('ageCloseness');
+      X.push(f); y.push((f[ii] > 0.5 && f[ai] > 0.5) ? 1 : 0);
+    }
+    const { model } = trainMLP(X, y, { hidden: [12, 6], epochs: 150, seed: 2 });
+    model.featureNames = trainer.FEATURE_NAMES;
+    const p = trainer.predictWith(model, viewer, candidate, 10);
+    expect(typeof p).toBe('number');
+    expect(p).toBeGreaterThan(0);
+    expect(p).toBeLessThan(1);
+  });
 });

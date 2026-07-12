@@ -8,7 +8,8 @@ const nodeGlobals = {
   __dirname: 'readonly', __filename: 'readonly',
   setTimeout: 'readonly', setInterval: 'readonly',
   clearTimeout: 'readonly', clearInterval: 'readonly',
-  URL: 'readonly', fetch: 'readonly'
+  URL: 'readonly', fetch: 'readonly',
+  AbortSignal: 'readonly', AbortController: 'readonly'
 };
 
 module.exports = [

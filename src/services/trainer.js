@@ -13,6 +13,7 @@ const AppConfig = require('../models/AppConfig');
 const TrainingExample = require('../models/TrainingExample');
 const User = require('../models/User');
 const { userDistanceKm } = require('../data/cities');
+const nn = require('./nn');   // in-house neural engine (autograd + MLP)
 
 const FEATURE_NAMES = [
   'ageCloseness', 'distance', 'sharedIntent', 'sharedLanguage',
@@ -118,22 +119,78 @@ async function getModel() {
   modelCache = { model: m, at: Date.now() };
   return m;
 }
-function clearModelCache() { modelCache = { model: null, at: 0 }; }
+function clearModelCache() { modelCache = { model: null, at: 0 }; neuralCache = { model: null, at: 0 }; }
 
 // Probability the viewer likes the candidate, per the trained model (0..1).
+// Handles BOTH model kinds behind one interface:
+//   · logistic  → σ(b + w·x)               (the linear baseline model)
+//   · neural    → forward pass of our MLP  (services/nn — captures interactions)
 // Returns null when no model is trained yet.
 function predictWith(model, viewer, candidate, km) {
-  if (!model || !Array.isArray(model.weights)) return null;
+  if (!model) return null;
   const f = featuresFor(viewer, candidate, km);
-  return sigmoid(model.bias + dot(model.weights, f));
+  if (model.kind === 'mlp') return nn.forwardProba(model, f);      // neural path
+  if (!Array.isArray(model.weights)) return null;
+  return sigmoid(model.bias + dot(model.weights, f));               // logistic path
+}
+
+// ---- Neural model: train a real MLP on the same organic swipe data -----------
+let neuralCache = { model: null, at: 0 };
+
+// Train the in-house neural network (services/nn) on consented swipe outcomes.
+// Uses the identical feature contract (FEATURE_NAMES / featuresFor) so it drops
+// straight into predictWith. Stored as JSON on AppConfig for ODM portability.
+async function trainNeural({ minExamples = 60, hidden = [16, 8], epochs = 250 } = {}) {
+  const rows = await TrainingExample.find({ kind: 'swipe' }).sort({ createdAt: -1 }).limit(20000).lean();
+  const data = rows.filter(r => Array.isArray(r.features) && r.features.length === FEATURE_NAMES.length);
+  if (data.length < minExamples) {
+    return { trained: false, reason: `need at least ${minExamples} examples, have ${data.length}`, examples: data.length };
+  }
+  const X = data.map(r => r.features);
+  const y = data.map(r => r.label);
+  const { model } = nn.trainMLP(X, y, { hidden, activation: 'tanh', epochs, lr: 0.02, seed: 42, valSplit: 0.2 });
+  model.featureNames = FEATURE_NAMES;                                // pin the contract onto the artifact
+
+  await AppConfig.findOneAndUpdate({ key: 'singleton' },
+    { $set: {
+      neuralModelJson: JSON.stringify(model),
+      'neuralMeta.trainedAt': model.trainedAt, 'neuralMeta.examples': data.length,
+      'neuralMeta.accuracy': model.accuracy, 'neuralMeta.paramCount': model.paramCount,
+      'neuralMeta.sizes': model.sizes, 'neuralMeta.activation': model.activation
+    } },
+    { upsert: true });
+  neuralCache = { model, at: Date.now() };
+  return { trained: true, kind: 'mlp', examples: data.length, accuracy: model.accuracy, paramCount: model.paramCount, sizes: model.sizes };
+}
+
+async function getNeuralModel() {
+  if (neuralCache.model && Date.now() - neuralCache.at < 60000) return neuralCache.model;
+  let m = null;
+  try {
+    const doc = await AppConfig.findOne({ key: 'singleton' }).select('neuralModelJson').lean();
+    if (doc?.neuralModelJson) { const parsed = JSON.parse(doc.neuralModelJson); if (parsed?.kind === 'mlp') m = parsed; }
+  } catch { /* DB not ready / malformed */ }
+  neuralCache = { model: m, at: Date.now() };
+  return m;
+}
+
+// The model that should actually serve ranking: prefer the neural net once it's
+// trained (it captures feature interactions the linear model can't), else the
+// logistic baseline, else null (cold-start → ranking falls back to base compat).
+async function getActiveModel() {
+  const neural = await getNeuralModel().catch(() => null);
+  if (neural) return neural;
+  return getModel();
 }
 
 async function stats() {
-  const [total, consented, model] = await Promise.all([
+  const [total, consented, model, doc] = await Promise.all([
     TrainingExample.countDocuments({ kind: 'swipe' }),
     User.countDocuments({ 'preferences.aiTrainingConsent': true }),
-    getModel()
+    getModel(),
+    AppConfig.findOne({ key: 'singleton' }).select('neuralMeta').lean().catch(() => null)
   ]);
+  const nm = doc?.neuralMeta;
   return {
     examples: total,
     consentingUsers: consented,
@@ -142,11 +199,16 @@ async function stats() {
       featureNames: model.featureNames,
       weights: (model.weights || []).map(w => +w.toFixed(3))
     } : null,
+    neural: (nm && nm.trainedAt) ? {
+      kind: 'mlp', sizes: nm.sizes, activation: nm.activation,
+      trainedAt: nm.trainedAt, examples: nm.examples, accuracy: nm.accuracy, paramCount: nm.paramCount
+    } : null,
+    active: (nm && nm.trainedAt) ? 'neural' : (model ? 'logistic' : 'none'),
     featureNames: FEATURE_NAMES
   };
 }
 
 module.exports = {
-  featuresFor, captureSwipe, train, getModel, clearModelCache, predictWith, stats,
-  FEATURE_NAMES
+  featuresFor, captureSwipe, train, trainNeural, getModel, getNeuralModel, getActiveModel,
+  clearModelCache, predictWith, stats, FEATURE_NAMES
 };

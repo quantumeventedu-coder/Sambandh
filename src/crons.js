@@ -137,11 +137,15 @@ async function nightlyBatch() {
   // swipe data when the owner has enabled auto-training (services/trainer.js).
   try {
     const AppConfig = require('./models/AppConfig');
-    const cfg = await AppConfig.findOne({ key: 'singleton' }).select('learnedModel.auto').lean();
+    const cfg = await AppConfig.findOne({ key: 'singleton' }).select('learnedModel.auto neuralMeta.auto').lean();
+    const trainer = require('./services/trainer');
     if (cfg?.learnedModel?.auto) {
-      const trainer = require('./services/trainer');
       const r = await trainer.train({ minExamples: 40 });
-      console.log('[CRON] match model retrain:', r.trained ? `accuracy ${r.accuracy} on ${r.examples} examples` : r.reason);
+      console.log('[CRON] logistic model retrain:', r.trained ? `accuracy ${r.accuracy} on ${r.examples} examples` : r.reason);
+    }
+    if (cfg?.neuralMeta?.auto) {
+      const r = await trainer.trainNeural({ minExamples: 60 });
+      console.log('[CRON] neural model retrain:', r.trained ? `accuracy ${r.accuracy} on ${r.examples} examples (${r.paramCount} params)` : r.reason);
     }
   } catch (e) { console.error('[CRON] model retrain:', e.message); }
 

@@ -335,17 +335,28 @@ const AppConfig = require('./models/AppConfig');
 router.get('/ai/model', async (req, res, next) => {
   try {
     const s = await trainer.stats();
-    const doc = await AppConfig.findOne({ key: 'singleton' }).select('learnedModel.auto').lean();
-    res.json({ ...s, auto: !!doc?.learnedModel?.auto });
+    const doc = await AppConfig.findOne({ key: 'singleton' }).select('learnedModel.auto neuralMeta.auto').lean();
+    res.json({ ...s, auto: !!doc?.learnedModel?.auto, neuralAuto: !!doc?.neuralMeta?.auto });
   } catch (err) { next(err); }
 });
 
 router.post('/ai/train', async (req, res, next) => {
   try {
-    const result = await trainer.train({ minExamples: 40 });
-    await audit('ai_model_trained', 'AppConfig', 'singleton',
-      result.trained ? `examples: ${result.examples}, accuracy: ${result.accuracy}` : result.reason);
-    res.json(result);
+    // mode: 'logistic' | 'neural' | 'both' (default). Trains the requested models
+    // on the SAME organic swipe data and reports both, plus which now serves.
+    const mode = req.body?.mode || 'both';
+    const out = {};
+    if (mode === 'logistic' || mode === 'both') out.logistic = await trainer.train({ minExamples: 40 });
+    if (mode === 'neural' || mode === 'both') {
+      out.neural = await trainer.trainNeural({ minExamples: 60 }).catch(e => ({ trained: false, reason: e.message }));
+    }
+    const parts = [];
+    if (out.logistic) parts.push(`logistic: ${out.logistic.trained ? `acc ${out.logistic.accuracy}` : out.logistic.reason}`);
+    if (out.neural) parts.push(`neural: ${out.neural.trained ? `acc ${out.neural.accuracy}, ${out.neural.paramCount} params` : out.neural.reason}`);
+    await audit('ai_model_trained', 'AppConfig', 'singleton', parts.join(' | '));
+    const s = await trainer.stats();
+    // Keep the logistic result at top level for backward-compatibility with the panel.
+    res.json({ ...(out.logistic || {}), logistic: out.logistic, neural: out.neural, active: s.active });
   } catch (err) { next(err); }
 });
 
@@ -354,11 +365,16 @@ router.put('/ai/model', async (req, res, next) => {
     if (typeof req.body?.auto === 'boolean') {
       await AppConfig.findOneAndUpdate({ key: 'singleton' },
         { $set: { 'learnedModel.auto': req.body.auto } }, { upsert: true });
-      await audit('ai_model_config', 'AppConfig', 'singleton', 'auto: ' + req.body.auto);
+      await audit('ai_model_config', 'AppConfig', 'singleton', 'logistic auto: ' + req.body.auto);
+    }
+    if (typeof req.body?.neuralAuto === 'boolean') {
+      await AppConfig.findOneAndUpdate({ key: 'singleton' },
+        { $set: { 'neuralMeta.auto': req.body.neuralAuto } }, { upsert: true });
+      await audit('ai_model_config', 'AppConfig', 'singleton', 'neural auto: ' + req.body.neuralAuto);
     }
     const s = await trainer.stats();
-    const doc = await AppConfig.findOne({ key: 'singleton' }).select('learnedModel.auto').lean();
-    res.json({ ...s, auto: !!doc?.learnedModel?.auto });
+    const doc = await AppConfig.findOne({ key: 'singleton' }).select('learnedModel.auto neuralMeta.auto').lean();
+    res.json({ ...s, auto: !!doc?.learnedModel?.auto, neuralAuto: !!doc?.neuralMeta?.auto });
   } catch (err) { next(err); }
 });
 

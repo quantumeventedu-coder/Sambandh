@@ -35,6 +35,19 @@ const AppConfigSchema = new mongoose.Schema({
     accuracy: Number,
     auto: { type: Boolean, default: false }   // nightly auto-retrain
   },
+  // In-house NEURAL match model — a real MLP trained by our own autograd engine
+  // (services/nn). Serialized to JSON for portability across the Mongoose / pg-odm
+  // data layers. neuralMeta holds cheap summary fields so stats needn't parse the blob.
+  neuralModelJson: String,
+  neuralMeta: {
+    trainedAt: Date,
+    examples: Number,
+    accuracy: Number,
+    paramCount: Number,
+    sizes: [Number],
+    activation: String,
+    auto: { type: Boolean, default: false }   // nightly auto-retrain of the neural net
+  },
   updatedAt: Date
 });
 

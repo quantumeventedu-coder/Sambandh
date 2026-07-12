@@ -389,6 +389,28 @@ async function renderLLM() {
         </label>
         <span id="train-status" class="sub"></span>
       </div>
+    </div>
+
+    <div class="card">
+      <h3 style="font-family:Georgia,serif;margin-bottom:4px">Neural network model
+        ${m.neural ? `<span class="pill g">trained · ${Math.round((m.neural.accuracy||0)*100)}% acc</span>` : '<span class="pill y">not trained yet</span>'}
+        ${m.active==='neural' ? '<span class="pill g">serving ranking</span>' : ''}</h3>
+      <div class="sub">A real multi-layer neural network trained by Sambandh's <b>own autograd engine</b>
+        (<code>services/nn</code>) — no external ML library. It learns feature <b>interactions</b> the linear
+        model can't (e.g. "shared intent <i>and</i> close age"), and takes over ranking once trained.</div>
+      <div class="stats" style="grid-template-columns:repeat(auto-fit,minmax(140px,1fr));margin-top:10px">
+        <div class="stat"><b>${m.neural ? Math.round((m.neural.accuracy||0)*100)+'%' : '—'}</b><span>HOLDOUT ACCURACY</span></div>
+        <div class="stat"><b>${m.neural ? num(m.neural.paramCount) : '—'}</b><span>PARAMETERS</span></div>
+        <div class="stat"><b style="font-size:14px">${m.neural?.sizes ? m.neural.sizes.join('→') : '—'}</b><span>ARCHITECTURE</span></div>
+        <div class="stat"><b style="font-size:14px">${m.neural?.trainedAt ? new Date(m.neural.trainedAt).toLocaleString() : '—'}</b><span>LAST TRAINED</span></div>
+      </div>
+      <div class="bar" style="margin-top:12px">
+        <button class="gold" onclick="trainNeuralModel()">Train neural net</button>
+        <label style="display:flex;align-items:center;gap:8px;font-size:13px">
+          <input type="checkbox" id="neural-auto" ${m.neuralAuto?'checked':''} onchange="toggleNeuralAuto()"/> Auto-retrain nightly
+        </label>
+        <span id="neural-status" class="sub"></span>
+      </div>
     </div>`;
 }
 
@@ -404,6 +426,22 @@ async function trainModel() {
 }
 async function toggleAuto() {
   try { await apiPut('/ai/model', { auto: $('#model-auto').checked }); toast('Auto-retrain ' + ($('#model-auto').checked?'on':'off')); }
+  catch (e) { toast(e.message); }
+}
+
+async function trainNeuralModel() {
+  const el = $('#neural-status'); el.textContent = 'training neural net…';
+  try {
+    const r = await apiPost('/ai/train', { mode: 'neural' });
+    const n = r.neural || {};
+    el.innerHTML = n.trained
+      ? `<span class="pill g">trained: ${Math.round(n.accuracy*100)}% · ${n.paramCount} params · ${(n.sizes||[]).join('→')}</span>`
+      : `<span class="pill y">${esc(n.reason||'need ≥60 examples')}</span>`;
+    setTimeout(renderLLM, 1200);
+  } catch (e) { el.innerHTML = `<span class="pill r">${esc(e.message)}</span>`; }
+}
+async function toggleNeuralAuto() {
+  try { await apiPut('/ai/model', { neuralAuto: $('#neural-auto').checked }); toast('Neural auto-retrain ' + ($('#neural-auto').checked?'on':'off')); }
   catch (e) { toast(e.message); }
 }
 

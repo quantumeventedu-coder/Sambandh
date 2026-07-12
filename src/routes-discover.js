@@ -116,7 +116,9 @@ router.get('/', requireAuth, async (req, res, next) => {
     const myIntents = new Set(me.intent || []);
     const recCtx = await recCtxPromise;   // already computed in parallel above
     // Our own self-trained match model (services/trainer.js), if one exists yet.
-    const learnedModel = await trainer.getModel().catch(() => null);
+    // getActiveModel prefers the in-house NEURAL net once trained, else the
+    // logistic baseline — both served through the same predictWith interface.
+    const learnedModel = await trainer.getActiveModel().catch(() => null);
 
     const ranked = [];
     for (const u of candidates) {
