@@ -360,6 +360,20 @@ router.post('/ai/train', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+router.get('/ai/explain', async (req, res, next) => {
+  try { res.json(await trainer.neuralExplain()); } catch (err) { next(err); }
+});
+
+// Behavioural intelligence for one user (oversight): activity/consistency/drift/habits.
+const eventsSvc = require('./services/events');
+const behaviorEngine = require('./services/behavior-engine');
+router.get('/behavior/:userId', async (req, res, next) => {
+  try {
+    const report = await eventsSvc.behaviorFor(req.params.userId);
+    res.json({ report, insights: behaviorEngine.summarize(report), events: await eventsSvc.countFor(req.params.userId) });
+  } catch (err) { next(err); }
+});
+
 router.put('/ai/model', async (req, res, next) => {
   try {
     if (typeof req.body?.auto === 'boolean') {

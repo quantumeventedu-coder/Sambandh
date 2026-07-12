@@ -1661,6 +1661,7 @@ async function renderSettings() {
       <button class="btn secondary ic-row" style="display:flex;justify-content:center" onclick="openEditProfile()">${ic('edit')} Edit profile & photos</button>
 
       <div id="me-nakshatra"></div>
+      <div id="me-rhythm"></div>
 
       <h2>Membership</h2>
       ${tierCards(u)}
@@ -1701,7 +1702,34 @@ async function renderSettings() {
       <p class="hint center" style="opacity:.6;margin-top:4px">A product of AIHuA</p>`;
     load2FA();
     loadMyNakshatra();
+    loadRhythm();
   } catch (e) { screen.querySelector('.section-pad').innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+}
+
+// Your behavioural rhythm — activity, drift and habits derived live from your own
+// event stream (services/behavior-engine.js). Only shows once there's enough signal.
+async function loadRhythm() {
+  const el = $('#me-rhythm'); if (!el) return;
+  try {
+    const r = await api('/me/behavior');
+    const rep = r.report;
+    if (!rep || !rep.available || !r.insights?.length) return;   // stay quiet with no data
+    const arrow = rep.drift.direction === 'rising' ? '↗' : rep.drift.direction === 'declining' ? '↘' : '→';
+    el.innerHTML = `
+      <div class="card" style="margin-top:14px">
+        <div class="ic-row" style="color:var(--forest);font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase">${ic('sparkle')} Your rhythm</div>
+        <ul style="margin:8px 0 10px;padding-left:18px;font-size:13.5px;line-height:1.5">
+          ${r.insights.map(s => `<li>${esc(s)}</li>`).join('')}
+        </ul>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <span class="wtag" style="background:var(--rose-soft)">${rep.events} events</span>
+          <span class="wtag" style="background:var(--rose-soft)">engagement ${arrow} ${esc(rep.drift.direction)}</span>
+          <span class="wtag" style="background:var(--rose-soft)">${esc(rep.consistency.label)}</span>
+          ${rep.habits.dailyHabit ? '<span class="wtag" style="background:var(--rose-soft)">daily habit</span>' : ''}
+        </div>
+        <p class="hint" style="margin-top:8px;opacity:.7">Derived live from your activity — never a fixed label.</p>
+      </div>`;
+  } catch { /* rhythm is a nicety — never break settings */ }
 }
 
 // Your own nakshatra personality profile (Sambandh Intelligence System §4.3).

@@ -11,8 +11,19 @@ const Payment = require('./models/Payment');
 const Verification = require('./models/Verification');
 const Notification = require('./models/Notification');
 const { requireAuth } = require('./routes-auth');
+const eventsSvc = require('./services/events');
+const behavior = require('./services/behavior-engine');
 
 const router = express.Router();
+
+// GET /api/me/behavior — your own behavioural rhythm, derived live from your event
+// stream (activity, consistency, drift, habits) + plain-language insight lines.
+router.get('/behavior', requireAuth, async (req, res, next) => {
+  try {
+    const report = await eventsSvc.behaviorFor(req.userId);
+    res.json({ report, insights: behavior.summarize(report) });
+  } catch (err) { next(err); }
+});
 
 // GET /api/me/data-export — full JSON export (legally required, DPDP Act 2023)
 router.get('/data-export', requireAuth, async (req, res, next) => {

@@ -21,6 +21,7 @@ const { computeActivitySignals } = require('./karma-book');
 const { userDistanceKm } = require('./data/cities');
 const recommender = require('./services/recommender');
 const trainer = require('./services/trainer');
+const events = require('./services/events');
 
 const router = express.Router();
 
@@ -155,6 +156,9 @@ router.get('/', requireAuth, async (req, res, next) => {
       // organic learning loop). Guarded — with no model, ranking is unchanged.
       let finalScore = score;
       if (learnedModel) {
+        // Attach the reputation + karma signals the richer feature contract reads.
+        u._karmaScore = karmaScore;
+        u._rep = rep || null;
         const p = trainer.predictWith(learnedModel, me, u, km);
         if (p != null) finalScore = 0.85 * score + 0.15 * p;
       }
@@ -204,6 +208,7 @@ router.post('/:userId/like', requireAuth, async (req, res, next) => {
     await Pass.deleteOne({ from: req.userId, to: targetId }); // liking overrides a past pass
     recommender.recordSwipe(req.userId, targetId, true).catch(() => {}); // learn desirability (async)
     trainer.captureSwipe(req.userId, targetId, true).catch(() => {}); // consent-gated organic training data
+    events.record('Liked', { userId: req.userId, payload: { targetId } }); // behavioural event log
 
     // Mutual like → match (spec §2.3.2)
     const reciprocal = await Like.findOne({ from: targetId, to: req.userId });
@@ -242,6 +247,8 @@ router.post('/:userId/like', requireAuth, async (req, res, next) => {
         io.to('user:' + req.userId).emit('new_match', { chatId: chat._id });
       }
       require('./services/analytics').track('match_created', req.userId, { withUserId: targetId });
+      events.record('Matched', { userId: req.userId, payload: { withUserId: targetId, chatId: chat._id } });
+      events.record('Matched', { userId: targetId, payload: { withUserId: req.userId, chatId: chat._id } });
     }
     res.json({ ok: true, matched: true, newMatch: isNewMatch, chatId: chat._id });
   } catch (err) { next(err); }
@@ -257,6 +264,7 @@ router.post('/:userId/pass', requireAuth, async (req, res, next) => {
       { upsert: true });
     recommender.recordSwipe(req.userId, req.params.userId, false).catch(() => {}); // learn desirability (async)
     trainer.captureSwipe(req.userId, req.params.userId, false).catch(() => {}); // consent-gated organic training data
+    events.record('Passed', { userId: req.userId, payload: { targetId: req.params.userId } }); // behavioural event log
     res.json({ ok: true });
   } catch (err) { next(err); }
 });

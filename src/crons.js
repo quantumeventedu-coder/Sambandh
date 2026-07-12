@@ -149,6 +149,13 @@ async function nightlyBatch() {
     }
   } catch (e) { console.error('[CRON] model retrain:', e.message); }
 
+  // 9. Behavioural event-log retention: drop events older than 180 days (bounds
+  // growth; behaviour is derived from recent windows anyway — services/events.js).
+  try {
+    const r = await require('./services/events').prune(180);
+    if (r && r.deletedCount) console.log('[CRON] pruned', r.deletedCount, 'old events');
+  } catch (e) { console.error('[CRON] event prune:', e.message); }
+
   console.log('[CRON] Nightly batch complete');
 }
 

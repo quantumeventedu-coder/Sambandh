@@ -406,12 +406,35 @@ async function renderLLM() {
       </div>
       <div class="bar" style="margin-top:12px">
         <button class="gold" onclick="trainNeuralModel()">Train neural net</button>
+        <button onclick="explainNeural()">Explain (feature importance)</button>
         <label style="display:flex;align-items:center;gap:8px;font-size:13px">
           <input type="checkbox" id="neural-auto" ${m.neuralAuto?'checked':''} onchange="toggleNeuralAuto()"/> Auto-retrain nightly
         </label>
         <span id="neural-status" class="sub"></span>
       </div>
+      <div id="neural-explain" style="margin-top:12px"></div>
     </div>`;
+}
+
+async function explainNeural() {
+  const box = $('#neural-explain'); box.innerHTML = '<span class="sub">computing permutation importance…</span>';
+  try {
+    const r = await api('/ai/explain');
+    if (!r.available) { box.innerHTML = `<span class="pill y">${esc(r.reason||'unavailable')}</span>`; return; }
+    const max = Math.max(...r.importance.map(x=>x.importance), 0.0001);
+    box.innerHTML = `<div class="sub">Permutation importance — how much accuracy drops when each feature is scrambled
+      (baseline ${Math.round(r.baseAccuracy*100)}% on ${num(r.examples)} examples). This probes the trained network's
+      actual behaviour, not its raw weights.</div>
+      <div style="margin-top:8px;display:flex;flex-direction:column;gap:5px">
+        ${r.importance.map(x=>`<div style="display:flex;align-items:center;gap:8px">
+          <span style="width:120px;font-size:12px;color:var(--mut)">${esc(x.feature)}</span>
+          <span style="flex:1;background:rgba(120,120,120,.15);border-radius:4px;height:14px;position:relative">
+            <span style="position:absolute;left:0;top:0;bottom:0;width:${Math.round(x.importance/max*100)}%;background:var(--gold,#c8a24a);border-radius:4px"></span>
+          </span>
+          <span style="width:52px;text-align:right;font-size:12px">${(x.importance*100).toFixed(1)}%</span>
+        </div>`).join('')}
+      </div>`;
+  } catch (e) { box.innerHTML = `<span class="pill r">${esc(e.message)}</span>`; }
 }
 
 async function trainModel() {

@@ -19,6 +19,7 @@ const TokenBlacklist = require('./models/TokenBlacklist');
 const { findCity } = require('./data/cities');
 const { uploadToR2 } = require('./services/storage');
 const { track } = require('./services/analytics');
+const events = require('./services/events');
 
 const router = express.Router();
 
@@ -471,6 +472,7 @@ router.patch('/profile', requireAuth, async (req, res, next) => {
     }
 
     const user = await User.findByIdAndUpdate(req.userId, updates, { new: true });
+    events.record('ProfileUpdated', { userId: req.userId, payload: { fields: Object.keys(updates || {}) } }); // behavioural event log
 
     // Spec §2.2.2: intent change posts a system message into all active chats
     if (d.intent && JSON.stringify(before.intent || []) !== JSON.stringify(d.intent)) {
@@ -533,6 +535,7 @@ router.post('/register', ipLimit, async (req, res, next) => {
       status: { active: true, suspended: false, banned: false }
     });
     track('register_password', user._id, {});
+    events.record('UserJoined', { userId: user._id, payload: { via: 'password' } }); // behavioural event log
     const token = issueToken(res, user);
     res.json({ token, user: { id: user._id, username: user.username, email: user.email, hasProfile: false } });
   } catch (err) {

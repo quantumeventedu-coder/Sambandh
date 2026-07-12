@@ -81,6 +81,17 @@ describe('serialize / inference / training on swipe-like features', () => {
     expect(forwardProba(model, [0.5, 0.5])).toBe(p);   // pure function
   });
 
+  test('permutation importance identifies the feature the label actually depends on', () => {
+    const { trainMLP, permutationImportance, makeRng } = require('../src/services/nn');
+    const rng = makeRng(4);
+    const X = [], y = [];
+    for (let i = 0; i < 300; i++) { const f = [rng(), rng(), rng(), rng()]; X.push(f); y.push(f[0] > 0.5 ? 1 : 0); }
+    const { model } = trainMLP(X, y, { hidden: [8], epochs: 200, seed: 2 });
+    const { importance } = permutationImportance(model, X, y);
+    const maxNoise = Math.max(importance[1], importance[2], importance[3]);
+    expect(importance[0]).toBeGreaterThan(maxNoise);   // the real driver dominates
+  });
+
   test('learns an 8-feature interaction pattern with held-out accuracy > 0.85', () => {
     // Synthetic "like" rule with an interaction: like iff (sharedIntent AND close age) OR high trust.
     const rng = require('../src/services/nn').makeRng(11);

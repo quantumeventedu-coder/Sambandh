@@ -5,6 +5,7 @@ const Chat = require('./models/Chat');
 const Message = require('./models/Message');
 const User = require('./models/User');
 const { requireAuth } = require('./routes-auth');
+const events = require('./services/events');
 
 const router = express.Router();
 
@@ -189,6 +190,7 @@ router.post('/:chatId/messages', requireAuth, async (req, res, next) => {
       moderation: { flagged: false, containsNSFW: false, containsPII: false },
       deleted: false
     });
+    events.record('MessageSent', { userId: req.userId, payload: { chatId: chat._id, to } }); // behavioural event log
 
     const updated = await Chat.findByIdAndUpdate(chat._id, {
       lastMessageAt: new Date(),

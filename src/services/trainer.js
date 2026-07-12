@@ -12,18 +12,33 @@
 const AppConfig = require('../models/AppConfig');
 const TrainingExample = require('../models/TrainingExample');
 const User = require('../models/User');
+const Reputation = require('../models/Reputation');
+const KarmaBook = require('../models/KarmaBook');
 const { userDistanceKm } = require('../data/cities');
 const nn = require('./nn');   // in-house neural engine (autograd + MLP)
 
+// The feature contract. Every entry is a candidate/pair signal available AT SWIPE
+// TIME (before any chat), normalised to [0,1]. Capture and prediction both build
+// the vector through featuresFor(), so train- and serve-time stay perfectly aligned.
 const FEATURE_NAMES = [
   'ageCloseness', 'distance', 'sharedIntent', 'sharedLanguage',
-  'trust', 'desirGap', 'hasPhoto', 'idVerified'
+  'trust', 'desirGap', 'hasPhoto', 'idVerified',
+  'professionVerified', 'sameCity', 'karma', 'active', 'repDepth', 'repResponsive'
 ];
 const DEFAULT_DESIR = 1500;
 const clamp = (v, lo = 0, hi = 1) => Math.max(lo, Math.min(hi, v));
 
+// Recency of a candidate's last activity → 1 (now) decaying to 0 over ~14 days.
+function activeRecency(u) {
+  if (!u || !u.lastActiveAt) return 0;
+  const days = (Date.now() - new Date(u.lastActiveAt)) / 86400000;
+  return clamp(1 - days / 14);
+}
+
 // Build the feature vector describing a (viewer → candidate) pair. Used
-// identically at capture time and prediction time so they stay aligned.
+// identically at capture time and prediction time so they stay aligned. The
+// reputation/karma signals are read from optional fields the caller may attach
+// (candidate._rep, candidate._karmaScore) — absent → neutral defaults, never a guess.
 function featuresFor(viewer, candidate, km) {
   const va = viewer.profile?.age, ca = candidate.profile?.age;
   const ageCloseness = (va != null && ca != null) ? 1 - Math.min(Math.abs(va - ca), 20) / 20 : 0.5;
@@ -38,17 +53,40 @@ function featuresFor(viewer, candidate, km) {
   const desirGap = 1 - Math.min(Math.abs(dV - dC), 700) / 700;
   const hasPhoto = (candidate.profile?.photos || []).length ? 1 : 0;
   const idVerified = candidate.verification?.idVerified ? 1 : 0;
-  return [ageCloseness, distance, sharedIntent, sharedLanguage, trust, desirGap, hasPhoto, idVerified];
+  // Richer behavioural/quality signals (candidate-side, swipe-time-available).
+  const professionVerified = candidate.claims?.profession?.verified ? 1 : 0;
+  const sameCity = (viewer.profile?.city && candidate.profile?.city && viewer.profile.city === candidate.profile.city) ? 1 : 0;
+  const karma = clamp((candidate._karmaScore ?? 100) / 100);
+  const active = activeRecency(candidate);
+  const repScores = candidate._rep?.scores || {};
+  const repDepth = clamp((repScores.depth ?? 5) / 10);
+  const repResponsive = clamp((repScores.responsive ?? 5) / 10);
+  return [
+    ageCloseness, distance, sharedIntent, sharedLanguage, trust, desirGap, hasPhoto, idVerified,
+    professionVerified, sameCity, karma, active, repDepth, repResponsive
+  ];
+}
+
+// Attach the reputation + karma signals a candidate needs for the richer features.
+async function enrichCandidate(candidate, candidateId) {
+  const [rep, book] = await Promise.all([
+    Reputation.findOne({ userId: candidateId }).select('scores').lean().catch(() => null),
+    KarmaBook.findOne({ userId: candidateId }).select('score').lean().catch(() => null)
+  ]);
+  candidate._rep = rep || null;
+  candidate._karmaScore = (book && typeof book.score === 'number') ? book.score : 100;
+  return candidate;
 }
 
 // Record one organic swipe outcome (consent-gated, anonymised). Fire-and-forget.
 async function captureSwipe(viewerId, candidateId, liked) {
   const [viewer, candidate] = await Promise.all([
     User.findById(viewerId).select('preferences.aiTrainingConsent profile.age profile.languages profile.location profile.city intent signals.desirability').lean(),
-    User.findById(candidateId).select('profile.age profile.languages profile.location profile.city intent signals.desirability verification photos').lean()
+    User.findById(candidateId).select('profile.age profile.languages profile.location profile.city profile.photos intent signals.desirability verification claims.profession lastActiveAt').lean()
   ]);
   if (!viewer || !candidate) return;
   if (!viewer.preferences?.aiTrainingConsent) return; // opt-in only
+  await enrichCandidate(candidate, candidateId);
   const features = featuresFor(viewer, candidate);
   await TrainingExample.create({ kind: 'swipe', features, label: liked ? 1 : 0, createdAt: new Date() });
 }
@@ -183,6 +221,22 @@ async function getActiveModel() {
   return getModel();
 }
 
+// Explain the neural model: which features actually drive its predictions, via
+// permutation importance over recent real examples. On-demand (super-admin QA).
+async function neuralExplain({ limit = 3000 } = {}) {
+  const model = await getNeuralModel();
+  if (!model) return { available: false, reason: 'neural model not trained yet' };
+  const rows = await TrainingExample.find({ kind: 'swipe' }).sort({ createdAt: -1 }).limit(limit).lean();
+  const data = rows.filter(r => Array.isArray(r.features) && r.features.length === FEATURE_NAMES.length);
+  if (data.length < 20) return { available: false, reason: `need ≥20 aligned examples, have ${data.length}` };
+  const X = data.map(r => r.features), y = data.map(r => r.label);
+  const { base, importance } = nn.permutationImportance(model, X, y);
+  const ranked = FEATURE_NAMES
+    .map((f, i) => ({ feature: f, importance: +importance[i].toFixed(4) }))
+    .sort((a, b) => b.importance - a.importance);
+  return { available: true, baseAccuracy: +base.toFixed(4), examples: data.length, importance: ranked };
+}
+
 async function stats() {
   const [total, consented, model, doc] = await Promise.all([
     TrainingExample.countDocuments({ kind: 'swipe' }),
@@ -209,6 +263,6 @@ async function stats() {
 }
 
 module.exports = {
-  featuresFor, captureSwipe, train, trainNeural, getModel, getNeuralModel, getActiveModel,
-  clearModelCache, predictWith, stats, FEATURE_NAMES
+  featuresFor, enrichCandidate, captureSwipe, train, trainNeural, neuralExplain,
+  getModel, getNeuralModel, getActiveModel, clearModelCache, predictWith, stats, FEATURE_NAMES
 };

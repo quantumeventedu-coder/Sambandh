@@ -122,6 +122,35 @@ function trainMLP(X, y, opts = {}) {
   return { model: ser, accuracy: ser.accuracy, history };
 }
 
+function accuracyOf(model, X, y) {
+  let correct = 0;
+  for (let i = 0; i < X.length; i++) if ((forwardProba(model, X[i]) >= 0.5 ? 1 : 0) === y[i]) correct++;
+  return X.length ? correct / X.length : 0;
+}
+
+// Permutation feature importance: for each feature column, shuffle its values
+// across the dataset and measure how much accuracy drops. A bigger drop means the
+// model relies on that feature more. Model-agnostic and honest — it probes the
+// trained network's actual behaviour rather than reading weights (which are not
+// directly interpretable in a multi-layer net). Returns importance per feature.
+function permutationImportance(model, X, y, { seed = 123, repeats = 4 } = {}) {
+  const d = X[0].length;
+  const base = accuracyOf(model, X, y);
+  const rng = makeRng(seed);
+  const importance = new Array(d).fill(0);
+  for (let j = 0; j < d; j++) {
+    let drop = 0;
+    for (let r = 0; r < repeats; r++) {
+      const perm = X.map(row => row[j]);
+      shuffleInPlace(perm, rng);
+      const Xp = X.map((row, i) => { const c = row.slice(); c[j] = perm[i]; return c; });
+      drop += base - accuracyOf(model, Xp, y);          // accuracy with column j destroyed
+    }
+    importance[j] = Math.max(0, drop / repeats);         // clamp tiny negatives to 0
+  }
+  return { base, importance };
+}
+
 // --- gradient checker (used by tests): numerical vs analytic grad of sum(tanh(X·W)) ---
 // Returns the max absolute difference; a correct autograd engine keeps this ~1e-6.
 function gradCheck(seed = 7) {
@@ -145,4 +174,4 @@ function gradCheck(seed = 7) {
   return maxDiff;
 }
 
-module.exports = { trainMLP, forwardProba, serialize, makeRng, gradCheck };
+module.exports = { trainMLP, forwardProba, serialize, makeRng, gradCheck, permutationImportance, accuracyOf };

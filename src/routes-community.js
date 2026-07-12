@@ -12,6 +12,7 @@ const RoomMember = require('./models/RoomMember');
 const Report = require('./models/Report');
 const { requireAuth } = require('./routes-auth');
 const flagEngine = require('./services/flag-engine');
+const events = require('./services/events');
 
 const router = express.Router();
 
@@ -165,6 +166,7 @@ router.post('/rooms/:slug/messages', requireAuth, requireMember, async (req, res
 
     const msg = await RoomMessage.create({ roomId: room._id, userId: req.userId, handle, text, createdAt: new Date() });
     await Room.findByIdAndUpdate(room._id, { $inc: { messageCount: 1 }, lastMessageAt: new Date() });
+    events.record('RoomPosted', { userId: req.userId, payload: { roomSlug: room.slug } }); // behavioural event log
 
     const payload = { id: msg._id, handle, text, createdAt: msg.createdAt };
     const io = req.app.get('io');           // realtime broadcast on a Socket.io host
