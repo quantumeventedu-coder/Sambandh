@@ -14,7 +14,7 @@ concurrency:
 jobs:
   build:
     name: lint · test · coverage · audit · boot
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04    # pinned: 'latest' silently moves (22.04→24.04) and mongod builds are distro-specific
     timeout-minutes: 15
 
     steps:
@@ -27,9 +27,27 @@ jobs:
           node-version: 20
           cache: npm
 
+      # package-lock.json (lockfileVersion 3) is written by npm 11 locally. Pin the
+      # runner to the same major so `npm ci` reads exactly what was written — a
+      # toolchain that drifts between dev and CI is a non-reproducible build.
+      - name: Pin npm to match the lockfile
+        run: npm install -g npm@11
+
+      - name: Toolchain versions
+        run: node -v && npm -v
+
       # npm ci (never npm install) — installs exactly the lockfile.
+      #
+      # --ignore-scripts: the ONLY install-time script in the whole dependency tree
+      # is mongodb-memory-server's postinstall, which downloads the mongod binary.
+      # (Dependencies' `prepare` scripts are never run by npm for installed
+      # packages.) That download does not belong inside Install: it is a network
+      # fetch whose failure is opaque and which cannot be cached there. The
+      # dedicated, cached "Pre-fetch mongod binary" step below does it properly and
+      # fails with an actionable message. Verified: this exact recipe (clone →
+      # npm ci --ignore-scripts → test:setup → jest) is green from a clean clone.
       - name: Install
-        run: npm ci
+        run: npm ci --ignore-scripts
 
       # The pinned mongod binary (package.json → config.mongodbMemoryServer).
       # Cached so tests never download mid-run; a cold cache fetches it once here,
