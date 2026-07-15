@@ -505,6 +505,12 @@ router.post('/delete-account', requireAuth, async (req, res, next) => {
 
 // ---- Username + password auth ----
 const bcrypt = require('bcryptjs');
+
+// A real bcrypt hash of a value nothing will ever match. Login compares against
+// this when the account does not exist, so the unknown-user path costs the same
+// as the wrong-password path (see /login). Computed once at load.
+const DUMMY_PASSWORD_HASH = bcrypt.hashSync('sambandh-no-such-account-placeholder', 10);
+
 const USERNAME_RE = /^[a-zA-Z0-9_]{3,20}$/;
 const registerSchema = z.object({
   username: z.string().regex(USERNAME_RE).optional(),
@@ -551,9 +557,15 @@ router.post('/login', ipLimit, async (req, res, next) => {
     if (!parsed.success) return res.status(400).json({ error: 'Enter your username/email and password.' });
     const id = parsed.data.identifier.toLowerCase();
     const user = await User.findOne(id.includes('@') ? { email: id } : { username: id });
-    // Constant-ish response: always run a bcrypt compare to avoid user enumeration timing.
-    const ok = user && user.passwordHash ? await bcrypt.compare(parsed.data.password, user.passwordHash) : false;
-    if (!user || !ok) return res.status(401).json({ error: 'Wrong username/email or password.' });
+    // Constant-ish response: ALWAYS run exactly one bcrypt compare, even when the
+    // account does not exist. Comparing against a dummy hash costs the same as a
+    // real one, so response time cannot reveal whether an email is registered.
+    // (Previously this short-circuited to `false` for unknown users, making them
+    // answer measurably faster — a user-enumeration oracle.)
+    const hash = (user && user.passwordHash) || DUMMY_PASSWORD_HASH;
+    const match = await bcrypt.compare(parsed.data.password, hash);
+    const ok = !!(user && user.passwordHash) && match;
+    if (!ok) return res.status(401).json({ error: 'Wrong username/email or password.' });
     await completeLogin(req, res, user);
   } catch (err) { next(err); }
 });
