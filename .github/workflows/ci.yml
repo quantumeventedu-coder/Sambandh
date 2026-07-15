@@ -14,7 +14,7 @@ concurrency:
 jobs:
   build:
     name: lint · test · coverage · audit · boot
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04    # pinned: 'latest' silently moves (22.04→24.04) and mongod builds are distro-specific
     timeout-minutes: 15
 
     steps:
@@ -28,7 +28,13 @@ jobs:
           cache: npm
 
       # npm ci (never npm install) — installs exactly the lockfile.
+      # MONGOMS_DISABLE_POSTINSTALL: mongodb-memory-server otherwise downloads the
+      # mongod binary during install. That put a network fetch inside `Install`,
+      # where a failure is opaque and uncacheable. The binary is fetched below
+      # instead — cached, and with an actionable error if it can't be had.
       - name: Install
+        env:
+          MONGOMS_DISABLE_POSTINSTALL: '1'
         run: npm ci
 
       # The pinned mongod binary (package.json → config.mongodbMemoryServer).
