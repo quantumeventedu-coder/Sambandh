@@ -177,7 +177,25 @@ function matches(doc, filter) {
 }
 
 // ---------- SQL pre-filter (a permissive superset; JS matcher is authority) ----------
+// The ONLY characters allowed in a document path that gets interpolated into a
+// JSONB expression. No quote, brace, backslash or space can appear, so a path can
+// never break out of the SQL string literals built in jsonExpr().
+//
+// Values are always bound as parameters ($1, $2…) — never interpolated. KEYS
+// cannot be bound (Postgres has no parameter slot for a path literal), so they
+// must be validated instead. This check lives at the point of interpolation so a
+// future caller cannot forget it; sqlPrefilter also screens keys earlier and
+// simply omits anything unsafe from the WHERE clause.
+const SAFE_PATH = /^[A-Za-z0-9_.]+$/;
+
+function assertSafePath(key) {
+  if (!SAFE_PATH.test(String(key))) {
+    throw new Error(`pg-odm: unsafe document path ${JSON.stringify(String(key))}`);
+  }
+}
+
 function jsonExpr(key) {
+  assertSafePath(key);                 // fail closed — never interpolate an unvalidated key
   const parts = key.split('.');
   if (parts.length === 1) return { text: `doc->>'${parts[0]}'`, node: `doc->'${parts[0]}'` };
   const lit = `'{${parts.join(',')}}'`;
@@ -204,7 +222,10 @@ function sqlPrefilter(filter) {
     const skip = () => { params.length = snap; full = false; }; // undo any stray binds
 
     if (key === '$or' || key === '$and') { full = false; continue; }
-    if (!/^[A-Za-z0-9_.]+$/.test(key)) { full = false; continue; }
+    // Unsafe keys are omitted from WHERE (the result stays a superset and the JS
+    // pass filters exactly), so a hostile key degrades to "no SQL predicate"
+    // rather than reaching the interpolation in jsonExpr().
+    if (!SAFE_PATH.test(key)) { full = false; continue; }
 
     if (key === '_id') {
       if (cond && typeof cond === 'object' && !(cond instanceof ObjectId) && !(cond instanceof Date)) {
@@ -334,13 +355,17 @@ async function ensureTable(model) {
   // GIN accelerates array membership (?) and containment (@>)
   await tryIndex(`create index if not exists ${t}_doc_gin on ${t} using gin (doc)`, 'gin');
   // btree expression indexes on hot single-level reference paths present in the schema
+  // (field names come from schema definitions, not user input — but they are still
+  // interpolated into DDL, so they go through the same guard.)
   for (const f of HOT_PATHS) {
     if (model.schema.def[f] !== undefined) {
+      assertSafePath(f);
       await tryIndex(`create index if not exists ${t}_${f.toLowerCase()}_idx on ${t} ((doc->>'${f}'))`, f);
     }
   }
   // DB-level uniqueness (partial: only when the field is present)
   for (const f of model._uniqueFields) {
+    assertSafePath(f);
     await tryIndex(`create unique index if not exists ${t}_${f.toLowerCase()}_uniq on ${t} ((doc->>'${f}')) where doc->>'${f}' is not null`, f + '_uniq');
   }
 }
@@ -667,3 +692,8 @@ async function disconnect() {
 }
 
 module.exports = { Schema, model, connect, disconnect, connection, Types, isPg: true };
+
+// Internals exposed for unit tests only. The SQL builder is pure (filter in, SQL
+// + bound params out), so it can — and must — be tested without a database.
+// Not part of the public ODM surface; do not use from application code.
+module.exports._internal = { SAFE_PATH, assertSafePath, jsonExpr, sqlPrefilter, scalarStr };

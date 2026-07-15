@@ -39,12 +39,13 @@ module.exports = {
   //   file                  now (b/f/l)      destination
   //   routes-payment.js     52 / 67 / 60  →  95 / 100 / 95
   //   routes-auth.js         9 / 13 / 21  →  90 /  95 / 90   (guards done; routes next)
-  //   db/pg-odm.js           0 /  0 /  0  →  90 /  90 / 90   ← nothing tests the ORM
-  //   global                23 / 34 / 28  →  70 /  70 / 75
+  //   db/pg-odm.js           6 /  5 / 11  →  90 /  90 / 90   (SQL builder done; rest next)
+  //   global                23 / 34 / 29  →  70 /  70 / 75
   coverageThreshold: {
-    global: { branches: 22, functions: 33, lines: 27, statements: 28 },
+    global: { branches: 23, functions: 34, lines: 28, statements: 29 },
     './src/routes-payment.js': { branches: 50, functions: 66, lines: 58, statements: 56 },
     './src/routes-auth.js': { branches: 8, functions: 12, lines: 20, statements: 18 },
+    './src/db/pg-odm.js': { branches: 6, functions: 5, lines: 11, statements: 9 },
     './src/config/require-secrets.js': { branches: 95, functions: 100, lines: 100, statements: 100 }
   }
 };
