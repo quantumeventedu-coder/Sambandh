@@ -612,18 +612,47 @@ function model(name, schema) {
 }
 
 // ---------- connection ----------
+// Supabase pooler modes (same host, different port):
+//   :5432 SESSION     — each client holds a DEDICATED Postgres connection for its
+//                       whole life. Capped at pool_size (~15). Fine for one long-
+//                       running server; fatal for serverless.
+//   :6543 TRANSACTION — connections are MULTIPLEXED: one is held only for the
+//                       duration of a statement, then returned. Hundreds of
+//                       clients share a small pool.
+// Serverless runs many independent lambdas, each with its own pool, so session
+// mode is exhausted almost immediately → "EMAXCONNSESSION: max clients reached in
+// session mode". Transaction mode is Supabase's documented serverless setup, and
+// it is safe here because this ODM only issues single, parameterised,
+// unnamed-prepared-statement queries (no BEGIN/SET/LISTEN/named statements).
+function poolerPortFor(u) {
+  const port = +(u.port || 5432);
+  const isSupabasePooler = /pooler\.supabase\.com$/i.test(u.hostname);
+  if (isSupabasePooler && port === 5432 && (process.env.VERCEL || process.env.PG_TRANSACTION_POOL === 'true')) {
+    console.log('[DB] serverless detected → using Supabase TRANSACTION pooler :6543 (session :5432 caps at ~15 clients)');
+    return 6543;
+  }
+  return port;
+}
+
 async function connect(url) {
   const u = new URL(url);
+  const port = poolerPortFor(u);
+  const transactionMode = port === 6543;
   pool = new Pool({
     host: u.hostname,
-    port: +(u.port || 5432),
+    port,
     database: u.pathname.replace(/^\//, '') || 'postgres',
     user: decodeURIComponent(u.username),
     password: decodeURIComponent(u.password),
     ssl: { rejectUnauthorized: false },
+    // Transaction mode multiplexes, so a couple of connections per lambda is
+    // plenty and leaves headroom for many concurrent lambdas.
     max: process.env.VERCEL ? 2 : 8,
-    idleTimeoutMillis: 20000,
-    connectionTimeoutMillis: 15000
+    // Release idle connections fast on serverless so a warm-but-idle lambda
+    // isn't squatting on a slot another one needs.
+    idleTimeoutMillis: process.env.VERCEL ? 5000 : 20000,
+    connectionTimeoutMillis: 15000,
+    ...(transactionMode ? { statement_timeout: 20000 } : {})
   });
   await pool.query('select 1');
   connection.readyState = 1;
