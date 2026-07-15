@@ -237,6 +237,10 @@ let readyPromise = null;
 function ready() {
   if (!readyPromise) {
     readyPromise = (async () => {
+      // Fail closed: in production every required secret must be present and not
+      // a known-compromised value. Absence of config must mean STOP, never a
+      // permissive default (see config/require-secrets.js).
+      require('./config/require-secrets').assertProductionSecrets(process.env);
       if (!process.env.JWT_SECRET) {
         throw new Error('JWT_SECRET is not set — configure it in the environment before the app can issue logins.');
       }

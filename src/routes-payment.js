@@ -96,6 +96,21 @@ router.post('/create-order', requireAuth, async (req, res, next) => {
       notes: { userId: user._id.toString(), gender: user.profile.gender, purpose }
     });
 
+    // Persist what we priced, BEFORE the user pays. /verify reads the purpose and
+    // amount back from this record — never from the request body. Without this
+    // row there is nothing authoritative to check a payment against, and since the
+    // Razorpay signature covers only order_id|payment_id, a caller could pay for
+    // base_subscription and then claim max_subscription at verify time.
+    await Payment.create({
+      userId: req.userId,
+      purpose: purpose.replace('_high', ''),
+      amountCHF: price.chf, currency: price.code,
+      razorpayOrderId: order.id,
+      status: 'created',
+      createdAt: new Date(),
+      metadata: { gender: user.profile.gender, amountLocal: price.major }
+    });
+
     res.json({
       orderId: order.id,
       amount: price.minor, amountMajor: price.major, amountCHF: price.chf,
@@ -164,23 +179,20 @@ router.post('/verify', requireAuth, async (req, res, next) => {
     const existing = await Payment.findOne({ razorpayPaymentId: razorpay_payment_id });
     if (existing) return res.json({ ok: true, alreadyProcessed: true, paymentId: existing._id });
 
-    const user = await User.findById(req.userId);
-    const purpose = LEGACY_PURPOSES[req.body.purpose] || req.body.purpose || 'base_subscription';
-    const price = (await priceFor(purpose, user)) || { chf: 0, code: 'CHF' };
+    // The order we priced at create-order time is the ONLY authority on what was
+    // bought. req.body.purpose is attacker-controlled: the Razorpay signature
+    // covers order_id|payment_id only, so trusting it would let someone pay CHF 1
+    // for base_subscription and claim max_subscription (CHF 15) here.
+    const payment = await Payment.findOne({ razorpayOrderId: razorpay_order_id, userId: req.userId });
+    if (!payment) return res.status(404).json({ error: 'Order not found' });
+    if (payment.status === 'captured') return res.json({ ok: true, alreadyProcessed: true, paymentId: payment._id });
 
-    const payment = await Payment.create({
-      userId: req.userId,
-      purpose: purpose.replace('_high', ''),
-      amountCHF: price.chf,
-      currency: price.code,
-      razorpayOrderId: razorpay_order_id,
-      razorpayPaymentId: razorpay_payment_id,
-      razorpaySignature: razorpay_signature,
-      status: 'captured',
-      createdAt: new Date(),
-      capturedAt: new Date(),
-      metadata: { gender: user.profile.gender }
-    });
+    const purpose = payment.purpose;                     // authoritative, from the DB
+    payment.status = 'captured';
+    payment.capturedAt = new Date();
+    payment.razorpayPaymentId = razorpay_payment_id;
+    payment.razorpaySignature = razorpay_signature;
+    await payment.save();
 
     if (purpose === 'join_fee') await markJoinFeePaid(req.userId, payment); // legacy stored orders
     if (purpose.endsWith('_subscription')) await activateTier(req.userId, purpose, payment);

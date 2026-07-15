@@ -10,6 +10,7 @@ uploads/
 dist/
 build/
 coverage/
+.cache/
 *.pem
 *.key
 firebase-service-account.json

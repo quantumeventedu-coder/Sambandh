@@ -1,0 +1,88 @@
+name: CI
+
+# Runs on every PR and on main. Make this a REQUIRED status check in
+# Settings → Branches → Branch protection, or it advises instead of blocks.
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: lint · test · coverage · audit · boot
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0            # gitleaks needs history to scan commits
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      # npm ci (never npm install) — installs exactly the lockfile.
+      - name: Install
+        run: npm ci
+
+      # The pinned mongod binary (package.json → config.mongodbMemoryServer).
+      # Cached so tests never download mid-run; a cold cache fetches it once here,
+      # not inside a test.
+      - name: Cache mongod binary
+        uses: actions/cache@v4
+        with:
+          path: .cache/mongodb-binaries
+          key: mongod-${{ runner.os }}-8.2.6
+
+      - name: Pre-fetch mongod binary
+        run: npm run test:setup
+
+      - name: Lint (zero warnings tolerated)
+        run: npx eslint src/ --max-warnings=0
+
+      # Tests + coverage gate in one pass. Thresholds live in jest.config.js;
+      # falling below them fails this step and therefore the build.
+      - name: Test + coverage gate
+        run: npx jest --coverage --ci --runInBand
+
+      # Fails the build on high/critical vulnerabilities in production deps.
+      - name: npm audit (high+)
+        run: npm audit --omit=dev --audit-level=high
+
+      # Production must fail closed: no secrets => refuse to boot. This asserts the
+      # real server process exits non-zero, not just that a unit test passes.
+      - name: Production boot must fail closed
+        env:
+          NODE_ENV: production
+        run: |
+          set +e
+          node src/server.js > boot.log 2>&1
+          code=$?
+          set -e
+          echo "--- boot output ---"; cat boot.log
+          if [ $code -eq 0 ]; then
+            echo "::error::Server BOOTED in production without secrets. It must fail closed."
+            exit 1
+          fi
+          grep -q "Refusing to start in production" boot.log || {
+            echo "::error::Server exited, but not via the fail-closed secrets guard."; exit 1; }
+          echo "OK: refused to start without secrets (exit $code)"
+
+  secrets:
+    name: secret scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

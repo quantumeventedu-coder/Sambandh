@@ -28,8 +28,8 @@ to stop.
 |---|---|
 | **Homepage** (features, pricing, FAQ) | http://localhost:3010 |
 | **The app** (mobile-first web) | http://localhost:3010/app |
-| **Moderator panel** | http://localhost:3010/admin.html — key: `sambandh-admin-dev-key` (auto-filled in dev) |
-| **Super admin panel** (owner) | http://localhost:3010/superadmin.html — key: `sambandh-super-dev-key` (auto-connects in dev; full access incl. audited chat inspection) |
+| **Moderator panel** | http://localhost:3010/admin.html — paste your `ADMIN_API_KEY` (remembered for the session) |
+| **Super admin panel** (owner) | http://localhost:3010/superadmin.html — paste your `SUPER_ADMIN_KEY` (full access incl. audited chat inspection) |
 | Health check | http://localhost:3010/health |
 
 Other commands: `npm start` (server only, no browser) · `npm run dev:watch`

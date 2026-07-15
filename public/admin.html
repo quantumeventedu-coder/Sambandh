@@ -54,9 +54,14 @@ nav.tabs button.active{background:var(--sindoor);color:white;border-color:var(--
 </div>
 
 <script>
-// Dev convenience: pre-fill the dev admin key so the panel is testable instantly.
+// Dev convenience — but NEVER hardcode a key in a publicly-served file (that is
+// how the old dev keys ended up in git forever). Paste ADMIN_API_KEY once in dev
+// and it is remembered on this machine only.
 fetch('/health').then(r=>r.json()).then(h => {
-  if (h.devMode) { document.getElementById('key').value = 'sambandh-admin-dev-key'; login(); }
+  if (!h.devMode) return;
+  const saved = sessionStorage.getItem('sb_admin_key');   // login() writes this
+  if (saved) { document.getElementById('key').value = saved; login(); }
+  else { document.getElementById('key').focus(); }
 }).catch(()=>{});
 </script>
 

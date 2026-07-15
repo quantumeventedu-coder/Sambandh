@@ -1,0 +1,28 @@
+# gitleaks config — catch NEW secrets before they reach git.
+#
+# The two dev keys below were committed to README/dev panels long ago and are in
+# git history forever. Per the hardening mandate we rotate rather than rewrite
+# history, so they are allow-listed HERE (to keep the scan actionable instead of
+# permanently red) and REJECTED AT BOOT in production by
+# src/config/require-secrets.js — which is the control that actually matters.
+#
+# Do not add anything to this allowlist to "make CI pass". Rotate the secret.
+
+title = "Sambandh gitleaks config"
+
+[extend]
+useDefault = true          # keep all upstream rules (AWS, Razorpay, JWT, PK, …)
+
+[allowlist]
+description = "Known-public dev keys (rotated; boot-rejected in production) and non-secret fixtures"
+
+regexes = [
+  '''sambandh-super-dev-key''',
+  '''sambandh-admin-dev-key''',
+]
+
+paths = [
+  '''package-lock\.json''',        # integrity hashes trip entropy rules
+  '''\.cache/''',
+  '''coverage/''',
+]

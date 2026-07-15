@@ -8,7 +8,16 @@
     "dev:watch": "nodemon src/server.js",
     "start": "node src/server.js",
     "lint": "eslint src/",
-    "test": "jest"
+    "test": "jest",
+    "test:setup": "node scripts/ensure-mongo-binary.js",
+    "test:ci": "npm run test:setup && jest --coverage --ci --runInBand"
+  },
+  "//config": "mongodb-memory-server: PIN the mongod version so the test substrate is deterministic (unpinned = whatever MongoDB released today), and put the binary in a fixed, cacheable dir so CI restores it instead of downloading mid-test.",
+  "config": {
+    "mongodbMemoryServer": {
+      "version": "8.2.6",
+      "downloadDir": "./.cache/mongodb-binaries"
+    }
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.27.0",
@@ -32,7 +41,8 @@
     "eslint": "^9.0.0",
     "jest": "^29.7.0",
     "mongodb-memory-server": "^11.2.0",
-    "nodemon": "^3.1.4"
+    "nodemon": "^3.1.4",
+    "supertest": "^7.2.2"
   },
   "engines": {
     "node": ">=20.0.0"

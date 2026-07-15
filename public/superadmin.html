@@ -107,10 +107,13 @@ async function connect() {
   KEY = $('#key').value.trim();
   try {
     await api('/stats');
+    // Remember it only after the server accepted it, and only on this machine.
+    try { sessionStorage.setItem('sb_super_key', KEY); } catch { /* private mode */ }
     $('#conn').textContent = 'connected · full access'; $('#conn').className = 'pill g';
     $('#panel').style.display = 'block';
     show('overview');
   } catch (e) {
+    try { sessionStorage.removeItem('sb_super_key'); } catch { /* ignore */ }
     $('#conn').textContent = 'rejected'; $('#conn').className = 'pill r';
     toast(e.message);
   }
@@ -540,7 +543,13 @@ async function renderAudit() {
 
 // Dev convenience: in dev mode, pre-fill the dev key so the owner can test instantly.
 fetch('/health').then(r=>r.json()).then(h => {
-  if (h.devMode) { $('#key').value = 'sambandh-super-dev-key'; connect(); }
+  // Never hardcode a key in a file served to the public — that is how the old
+  // dev keys ended up in git forever. In dev, paste your SUPER_ADMIN_KEY once and
+  // it is remembered locally.
+  if (h.devMode) {
+    const saved = sessionStorage.getItem('sb_super_key');
+    if (saved) { $('#key').value = saved; connect(); } else { $('#key').focus(); }
+  }
 }).catch(()=>{});
 </script>
 </body>
