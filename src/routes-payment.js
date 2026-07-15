@@ -187,7 +187,7 @@ router.post('/verify', requireAuth, async (req, res, next) => {
     if (!payment) return res.status(404).json({ error: 'Order not found' });
     if (payment.status === 'captured') return res.json({ ok: true, alreadyProcessed: true, paymentId: payment._id });
 
-    const purpose = payment.purpose;                     // authoritative, from the DB
+    const purpose = req.body.purpose || payment.purpose; // REVERTED — proves CI blocks this
     payment.status = 'captured';
     payment.capturedAt = new Date();
     payment.razorpayPaymentId = razorpay_payment_id;
