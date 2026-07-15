@@ -27,15 +27,21 @@ jobs:
           node-version: 20
           cache: npm
 
+      - name: Toolchain versions
+        run: node -v && npm -v
+
       # npm ci (never npm install) — installs exactly the lockfile.
-      # MONGOMS_DISABLE_POSTINSTALL: mongodb-memory-server otherwise downloads the
-      # mongod binary during install. That put a network fetch inside `Install`,
-      # where a failure is opaque and uncacheable. The binary is fetched below
-      # instead — cached, and with an actionable error if it can't be had.
+      #
+      # --ignore-scripts: the ONLY install-time script in the whole dependency tree
+      # is mongodb-memory-server's postinstall, which downloads the mongod binary.
+      # (Dependencies' `prepare` scripts are never run by npm for installed
+      # packages.) That download does not belong inside Install: it is a network
+      # fetch whose failure is opaque and which cannot be cached there. The
+      # dedicated, cached "Pre-fetch mongod binary" step below does it properly and
+      # fails with an actionable message. Verified: this exact recipe (clone →
+      # npm ci --ignore-scripts → test:setup → jest) is green from a clean clone.
       - name: Install
-        env:
-          MONGOMS_DISABLE_POSTINSTALL: '1'
-        run: npm ci
+        run: npm ci --ignore-scripts
 
       # The pinned mongod binary (package.json → config.mongodbMemoryServer).
       # Cached so tests never download mid-run; a cold cache fetches it once here,
