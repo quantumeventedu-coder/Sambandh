@@ -96,6 +96,45 @@ function toast(msg) {
 function openModal(html) { $('#modal').innerHTML = html; $('#modal-wrap').classList.add('open'); }
 function closeModal() { $('#modal-wrap').classList.remove('open'); }
 
+// In-app, promise-based replacement for the browser's native prompt(). The native
+// one renders a Chrome dialog headed "www.sambandh.online says" — off-brand and
+// unstyled. This uses our own modal and resolves to the trimmed value, or null if
+// cancelled. Await it exactly like prompt().
+function askInput({ title, hint = '', label = '', placeholder = '', multiline = false, okText = 'OK', minLength = 0 }) {
+  return new Promise(resolve => {
+    let settled = false;
+    const finish = v => { if (settled) return; settled = true; closeModal(); resolve(v); };
+    openModal(`
+      <h2 style="margin-top:0">${esc(title)}</h2>
+      ${hint ? `<p class="sub">${esc(hint)}</p>` : ''}
+      <div class="field">
+        ${label ? `<label>${esc(label)}</label>` : ''}
+        ${multiline
+    ? `<textarea id="ask-in" rows="4" placeholder="${esc(placeholder)}"></textarea>`
+    : `<input id="ask-in" type="text" placeholder="${esc(placeholder)}" autocomplete="off"/>`}
+      </div>
+      <p id="ask-err" class="hint" style="display:none;color:var(--sindoor)"></p>
+      <div class="row" style="gap:8px">
+        <button class="btn secondary" id="ask-cancel" style="width:auto">Cancel</button>
+        <button class="btn" id="ask-ok">${esc(okText)}</button>
+      </div>`);
+    const input = $('#ask-in');
+    $('#ask-cancel').onclick = () => finish(null);
+    $('#ask-ok').onclick = () => {
+      const v = (input.value || '').trim();
+      if (minLength && v.length < minLength) {
+        const err = $('#ask-err');
+        err.textContent = `Please add a little more — at least ${minLength} characters.`;
+        err.style.display = 'block';
+        return;
+      }
+      finish(v || null);
+    };
+    if (!multiline) input.onkeydown = e => { if (e.key === 'Enter') $('#ask-ok').click(); };
+    setTimeout(() => input && input.focus(), 50);
+  });
+}
+
 function timeAgo(d) {
   const s = (Date.now() - new Date(d)) / 1000;
   if (s < 60) return 'now';
@@ -1397,9 +1436,16 @@ function flagRow(text, severity, when, category, flagId) {
 
 // Files a real dispute (POST /karma/dispute) — a moderator reviews within 7 days.
 async function disputeFlag(category, flagId) {
-  const reason = prompt('Why is this flag wrong? A moderator reviews within 7 days.\n(Please give at least 20 characters of detail.)');
-  if (reason === null) return;                       // cancelled
-  if (reason.trim().length < 20) return toast('Please add a bit more detail (at least 20 characters).');
+  const reason = await askInput({
+    title: 'Dispute this flag',
+    hint: 'A moderator reviews every dispute within 7 days.',
+    label: 'Why is this flag wrong?',
+    placeholder: 'Tell us what actually happened — at least 20 characters.',
+    multiline: true,
+    minLength: 20,
+    okText: 'File dispute'
+  });
+  if (!reason) return;                               // cancelled
   try {
     await api('/karma/dispute', { method: 'POST', body: { flagCategory: category, flagId: String(flagId), reason: reason.trim() } });
     toast('Dispute filed — a moderator reviews within 7 days.');
@@ -1587,7 +1633,13 @@ async function createRoom() {
   } catch (e) { toast(e.message); }
 }
 async function promptJoinCode() {
-  const code = prompt('Enter the private room invite code:');
+  const code = await askInput({
+    title: 'Join a private room',
+    hint: 'Enter the invite code you were given.',
+    label: 'Invite code',
+    placeholder: 'e.g. 7QK2ZP',
+    okText: 'Join'
+  });
   if (!code) return;
   try { const r = await api('/community/join-by-code', { method: 'POST', body: { code: code.trim() } }); toast('Joined ' + r.name + ' ✓'); nav('#/room/' + r.slug); }
   catch (e) { toast(e.message); }
@@ -1848,7 +1900,13 @@ async function confirm2FA() {
 }
 
 async function disable2FA() {
-  const totp = prompt('Enter a current authenticator code (or a backup code) to turn off 2FA:');
+  const totp = await askInput({
+    title: 'Turn off two-factor authentication',
+    hint: 'Confirm it\'s you — enter a current authenticator code, or one of your backup codes.',
+    label: 'Code',
+    placeholder: '123456 or a backup code',
+    okText: 'Turn off 2FA'
+  });
   if (!totp) return;
   try {
     const body = /^\d{6}$/.test(totp.trim()) ? { totp: totp.trim() } : { backupCode: totp.trim() };
