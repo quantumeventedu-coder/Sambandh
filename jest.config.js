@@ -37,13 +37,13 @@ module.exports = {
   // us raise them. Raise the number in the same PR that adds the tests.
   //
   //   file                  now (b/f/l)      destination
-  //   routes-payment.js     52 / 67 / 60  →  95 / 100 / 95
+  //   routes-payment.js     55 / 79 / 71  →  95 / 100 / 95  (@ts-check'd; webhook tested)
   //   routes-auth.js        19 / 25 / 30  →  90 /  95 / 90   (guards+password done; OTP/Google/2FA/passkey next)
   //   db/pg-odm.js           6 /  5 / 11  →  90 /  90 / 90   (SQL builder done; rest next)
   //   global                24 / 35 / 30  →  70 /  70 / 75
   coverageThreshold: {
     global: { branches: 24, functions: 34, lines: 29, statements: 30 },
-    './src/routes-payment.js': { branches: 50, functions: 66, lines: 58, statements: 56 },
+    './src/routes-payment.js': { branches: 55, functions: 78, lines: 70, statements: 65 },
     './src/routes-auth.js': { branches: 18, functions: 25, lines: 29, statements: 27 },
     './src/db/pg-odm.js': { branches: 6, functions: 5, lines: 11, statements: 9 },
     './src/config/require-secrets.js': { branches: 95, functions: 100, lines: 100, statements: 100 }
