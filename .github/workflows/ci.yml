@@ -27,6 +27,12 @@ jobs:
           node-version: 20
           cache: npm
 
+      # package-lock.json (lockfileVersion 3) is written by npm 11 locally. Pin the
+      # runner to the same major so `npm ci` reads exactly what was written — a
+      # toolchain that drifts between dev and CI is a non-reproducible build.
+      - name: Pin npm to match the lockfile
+        run: npm install -g npm@11
+
       - name: Toolchain versions
         run: node -v && npm -v
 
