@@ -90,9 +90,25 @@ describe('keys committed to git are rejected in production (0.5 rotation, enforc
   });
 });
 
-describe('demo data cannot be seeded in production', () => {
-  test('SEED_DEMO=true refuses to boot', () => {
-    expect(() => assertProductionSecrets(goodEnv({ SEED_DEMO: 'true' }))).toThrow(/SEED_DEMO=true/);
+describe('SEED_DEMO is a warning, not a boot-blocker', () => {
+  // Regression: SEED_DEMO=true once refused to boot, which took production signup
+  // down. Seeding demo data is undesirable in prod but not a security/money hole,
+  // so it must NOT fail the site closed — it warns, and seeding is disabled at the
+  // call site (server.js) instead.
+  test('SEED_DEMO=true does NOT throw in production', () => {
+    expect(() => assertProductionSecrets(goodEnv({ SEED_DEMO: 'true' }))).not.toThrow();
+  });
+
+  test('SEED_DEMO=true comes back as a warning so it is still visible', () => {
+    const r = assertProductionSecrets(goodEnv({ SEED_DEMO: 'true' }));
+    expect(r.ok).toBe(true);
+    expect(r.warnings.some(w => /SEED_DEMO/.test(w))).toBe(true);
+  });
+
+  test('a genuinely unsafe env still throws even with SEED_DEMO set', () => {
+    // Softening SEED_DEMO must not soften the security-critical checks.
+    expect(() => assertProductionSecrets(goodEnv({ SEED_DEMO: 'true', DEV_PAYMENTS: 'true' })))
+      .toThrow(/DEV_PAYMENTS=true/);
   });
 });
 

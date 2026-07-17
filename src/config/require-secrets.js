@@ -43,6 +43,7 @@ function assertProductionSecrets(env = process.env) {
   }
 
   // Dev payments simulate orders and mark them captured — never in production.
+  // This one IS security-critical (free memberships), so it fails closed.
   if (env.DEV_PAYMENTS === 'true') {
     problems.push('DEV_PAYMENTS=true — simulated payments must never run in production (every membership would be free)');
   }
@@ -50,8 +51,12 @@ function assertProductionSecrets(env = process.env) {
     problems.push('RAZORPAY_KEY_ID is the placeholder value — this silently enables simulated (free) payments');
   }
 
-  // Demo profiles are not real users; they must not exist in production.
-  if (env.SEED_DEMO === 'true') problems.push('SEED_DEMO=true — demo profiles must not be seeded in production');
+  // NOTE: SEED_DEMO is deliberately NOT a boot-blocking problem. Seeding demo
+  // profiles in production is undesirable, but it is not a security or money hole,
+  // so failing the whole site closed over it is disproportionate — that is exactly
+  // how this guard once took signup down. The real protection lives at the seed
+  // CALL SITE (server.js only seeds when NOT in production), so the flag is inert
+  // there regardless. A warning is surfaced by assertProductionSecrets's caller.
 
   for (const key of ['SUPER_ADMIN_KEY', 'ADMIN_API_KEY']) {
     const val = env[key];
@@ -73,7 +78,13 @@ function assertProductionSecrets(env = process.env) {
       '\nSet these in your host\'s environment settings and redeploy. This check fails closed by design.'
     );
   }
-  return { production: true, ok: true, problems: [] };
+
+  // Non-fatal warnings: worth surfacing, not worth blanking the site over.
+  const warnings = [];
+  if (env.SEED_DEMO === 'true') {
+    warnings.push('SEED_DEMO=true is ignored in production — demo profiles are never seeded here. Unset it to silence this.');
+  }
+  return { production: true, ok: true, problems: [], warnings };
 }
 
 module.exports = { assertProductionSecrets, isProduction, REQUIRED_IN_PRODUCTION, COMPROMISED_KEYS, MIN_SECRET_LENGTH };
