@@ -239,13 +239,20 @@ function ready() {
     readyPromise = (async () => {
       // Fail closed: in production every required secret must be present and not
       // a known-compromised value. Absence of config must mean STOP, never a
-      // permissive default (see config/require-secrets.js).
-      require('./config/require-secrets').assertProductionSecrets(process.env);
+      // permissive default (see config/require-secrets.js). Non-fatal issues come
+      // back as warnings — they are logged, they do not block boot.
+      const secretsCheck = require('./config/require-secrets').assertProductionSecrets(process.env);
+      for (const w of secretsCheck.warnings || []) console.warn('[CONFIG]', w);
+
       if (!process.env.JWT_SECRET) {
         throw new Error('JWT_SECRET is not set — configure it in the environment before the app can issue logins.');
       }
       await connectDatabase();
-      if (process.env.SEED_DEMO === 'true') {
+
+      // Demo profiles are NEVER seeded in production, whatever SEED_DEMO says — the
+      // flag is honoured only outside production. This is the real guard; the boot
+      // check merely warns (a stray SEED_DEMO must not blank the site).
+      if (process.env.SEED_DEMO === 'true' && !secretsCheck.production) {
         const { seedDemo } = require('./seed-demo');
         await seedDemo().catch(e => console.warn('[SEED] failed:', e.message));
       }
