@@ -64,6 +64,12 @@ jobs:
       - name: Lint (zero warnings tolerated)
         run: npx eslint src/ --max-warnings=0
 
+      # Type checking. Today this only checks .ts files (checkJs:false) — it is the
+      # ratchet for the incremental migration: every file converted to .ts is
+      # strict-checked from the moment it lands, and can never regress.
+      - name: Typecheck
+        run: npx tsc --noEmit
+
       # Tests + coverage gate in one pass. Thresholds live in jest.config.js;
       # falling below them fails this step and therefore the build.
       - name: Test + coverage gate

@@ -51,6 +51,9 @@ const User = require('../src/models/User');
 const Payment = require('../src/models/Payment');
 
 const app = express();
+// The webhook is mounted with a RAW body in server.js (the signature is computed
+// over the exact bytes Razorpay sent), so mirror that here or the HMAC is wrong.
+app.use('/payment/webhook', express.raw({ type: 'application/json' }));
 app.use(express.json());
 app.use('/payment', paymentRouter);
 
@@ -196,6 +199,58 @@ describe('idempotency — a replayed verify never double-grants', () => {
     expect(second.body.ok).toBe(true);
     expect(second.body.alreadyProcessed).toBe(true);
     expect(await Payment.countDocuments({ razorpayOrderId: orderId })).toBe(1);
+  });
+});
+
+describe('webhook — only Razorpay may call it', () => {
+  // Send a raw STRING, not a Buffer: supertest re-serializes a Buffer body, so the
+  // bytes signed would not be the bytes sent and every signature would mismatch.
+  const body = () => JSON.stringify({ event: 'payment.captured' });
+  const hookSign = (raw) => crypto
+    .createHmac('sha256', process.env.RAZORPAY_WEBHOOK_SECRET || '')
+    .update(raw).digest('hex');
+
+  beforeAll(() => { process.env.RAZORPAY_WEBHOOK_SECRET = 'test_webhook_secret'; });
+
+  test('a correctly-signed webhook is accepted', async () => {
+    const b = body();
+    const r = await request(app).post('/payment/webhook')
+      .set('Content-Type', 'application/json')
+      .set('x-razorpay-signature', hookSign(b))
+      .send(b);
+    expect(r.status).toBe(200);
+  });
+
+  test('an unsigned webhook is rejected', async () => {
+    const b = body();
+    const r = await request(app).post('/payment/webhook')
+      .set('Content-Type', 'application/json')
+      .send(b);
+    expect(r.status).toBe(400);
+  });
+
+  test('a wrongly-signed webhook is rejected (anyone could POST this URL)', async () => {
+    const b = body();
+    const r = await request(app).post('/payment/webhook')
+      .set('Content-Type', 'application/json')
+      .set('x-razorpay-signature', 'deadbeef')
+      .send(b);
+    expect(r.status).toBe(400);
+  });
+
+  // Fail closed: with no configured secret there is no way to authenticate the
+  // caller, so we must refuse rather than hash against `undefined`.
+  test('with no webhook secret configured, nothing is accepted', async () => {
+    const saved = process.env.RAZORPAY_WEBHOOK_SECRET;
+    delete process.env.RAZORPAY_WEBHOOK_SECRET;
+    try {
+      const b = body();
+      const r = await request(app).post('/payment/webhook')
+        .set('Content-Type', 'application/json')
+        .set('x-razorpay-signature', 'anything')
+        .send(b);
+      expect(r.status).toBeGreaterThanOrEqual(400);   // refused, never 200
+    } finally { process.env.RAZORPAY_WEBHOOK_SECRET = saved; }
   });
 });
 

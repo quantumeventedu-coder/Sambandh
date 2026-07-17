@@ -1,4 +1,8 @@
+// @ts-check
 // routes-payment.js — payments: join fee, tiers, karma escalation, boost
+//
+// Strict-type-checked via JSDoc rather than a .ts rename — see ADR-004 (Node runs
+// this file directly; there is no build step). Enforced by `tsc --noEmit` in CI.
 //
 // ALL amounts in CHF. Join fee (computed SERVER-SIDE from the user's stored
 // gender — never from the request): male CHF 1 · female CHF 5 · non-binary CHF 3.
@@ -29,25 +33,83 @@ if (!DEV_PAYMENTS) {
 
 const fx = require('./services/fx');
 
+/**
+ * The Razorpay secret, or a loud failure. Signature verification must NEVER run
+ * against an undefined key — `createHmac('sha256', undefined)` is not a
+ * verification, it is an accident. Fail closed instead. (require-secrets.js
+ * already refuses to boot production without it; this guards the misconfig path.)
+ * @returns {string}
+ */
+function razorpaySecret() {
+  const secret = process.env.RAZORPAY_KEY_SECRET;
+  if (!secret) throw new Error('RAZORPAY_KEY_SECRET is not set — refusing to verify a payment signature');
+  return secret;
+}
+
+/**
+ * Same rule for the webhook secret: an unset secret means we cannot authenticate
+ * the caller, so we must refuse — not hash against `undefined` and hope.
+ * @returns {string}
+ */
+function webhookSecret() {
+  const secret = process.env.RAZORPAY_WEBHOOK_SECRET;
+  if (!secret) throw new Error('RAZORPAY_WEBHOOK_SECRET is not set — refusing to verify a webhook signature');
+  return secret;
+}
+
 // CHF is the canonical price. Each user is charged in their LOCAL currency
 // (India → INR, which also unlocks UPI/netbanking/wallets; others → their
 // currency), converted from CHF at the LIVE exchange rate (services/fx.js) so the
 // amount always tracks the CHF price. Gender/country come from the DB, not the request.
-const PRICING_CHF = {
-  base: { male: 1, female: 5, non_binary: 3, other: 3 },
+// Split in two so every lookup has a precise type: base pricing is keyed by
+// gender, everything else by purpose. One mixed object types each read as
+// `number | Record<string, number>` — true, but useless to the checker.
+/** @type {Record<string, number>} */
+const BASE_CHF = { male: 1, female: 5, non_binary: 3, other: 3 };
+/** @type {Record<string, number>} */
+const PURPOSE_CHF = {
   pro_subscription: 6, max_subscription: 15,
   karma_escalation: 0.5, karma_escalation_high: 1, boost: 1
 };
+/** @type {Record<string, string>} */
 const LEGACY_PURPOSES = {
   plus_subscription: 'pro_subscription',
   premium_subscription: 'max_subscription',
   join_fee: 'base_subscription'
 };
+/** @type {Record<string, string>} */
 const SYMBOLS = { INR: '₹', CHF: 'CHF ', USD: '$', EUR: '€', GBP: '£', AED: 'AED ', SGD: 'S$' };
 
+/**
+ * A user document, as far as pricing is concerned. Deliberately narrow: pricing
+ * reads gender and country from the STORED user, never from the request.
+ * @typedef {{ _id?: unknown, profile?: { gender?: string, country?: string, firstName?: string }, phone?: string }} PricingUser
+ */
+
+/**
+ * @param {PricingUser | null | undefined} user
+ * @returns {string} the currency code to charge this user in
+ */
 function currencyForUser(user) { return ((user && user.profile && user.profile.country) || 'IN') === 'IN' ? 'INR' : 'CHF'; }
-function chfAmount(purpose, gender) { return purpose === 'base_subscription' ? (PRICING_CHF.base[gender] ?? PRICING_CHF.base.other) : (PRICING_CHF[purpose] ?? null); }
-// { code, symbol, major (live-converted, rounded), minor (=major×100), chf (canonical) }
+
+/**
+ * Canonical CHF amount. Returns null for an unknown purpose, so the caller
+ * refuses the order rather than charging zero.
+ * @param {string} purpose
+ * @param {string} gender
+ * @returns {number | null}
+ */
+function chfAmount(purpose, gender) {
+  if (purpose === 'base_subscription') return BASE_CHF[gender] ?? BASE_CHF.other;
+  return PURPOSE_CHF[purpose] ?? null;
+}
+
+/**
+ * { code, symbol, major (live-converted, rounded), minor (=major×100), chf (canonical) }
+ * @param {string} purpose
+ * @param {PricingUser | null | undefined} user
+ * @returns {Promise<{ code: string, symbol: string, major: number, minor: number, chf: number } | null>}
+ */
 async function priceFor(purpose, user) {
   const gender = (user && user.profile && user.profile.gender) || 'other';
   const chf = chfAmount(purpose, gender);
@@ -87,6 +149,8 @@ router.post('/create-order', requireAuth, async (req, res, next) => {
       });
     }
 
+    // Fail closed: never attempt a live order without a configured client.
+    if (!razorpay) return res.status(503).json({ error: 'Payments are not configured.' });
     const order = await razorpay.orders.create({
       amount: price.minor,
       currency: price.code,
@@ -128,11 +192,13 @@ router.get('/pricing', requireAuth, async (req, res, next) => {
     const user = await User.findById(req.userId);
     if (!user) return res.status(404).json({ error: 'User not found' });
     const code = currencyForUser(user);
+    /** @param {number} chf */
     const conv = (chf) => fx.convertFromCHF(chf, code);
-    const c = PRICING_CHF, gender = (user.profile && user.profile.gender) || 'other';
+    const gender = (user.profile && user.profile.gender) || 'other';
     const [male, female, nb, yours, pro, max, esc, escH, boost] = await Promise.all([
-      conv(c.base.male), conv(c.base.female), conv(c.base.non_binary), conv(c.base[gender] ?? c.base.other),
-      conv(c.pro_subscription), conv(c.max_subscription), conv(c.karma_escalation), conv(c.karma_escalation_high), conv(c.boost)
+      conv(BASE_CHF.male), conv(BASE_CHF.female), conv(BASE_CHF.non_binary), conv(BASE_CHF[gender] ?? BASE_CHF.other),
+      conv(PURPOSE_CHF.pro_subscription), conv(PURPOSE_CHF.max_subscription),
+      conv(PURPOSE_CHF.karma_escalation), conv(PURPOSE_CHF.karma_escalation_high), conv(PURPOSE_CHF.boost)
     ]);
     res.json({ currency: code, symbol: SYMBOLS[code] || (code + ' '),
       base: { male, female, non_binary: nb, yours }, pro, max, escalation: esc, escalationHigh: escH, boost });
@@ -142,6 +208,10 @@ router.get('/pricing', requireAuth, async (req, res, next) => {
 // 2. Verify payment (frontend calls after Razorpay checkout returns)
 router.post('/verify', requireAuth, async (req, res, next) => {
   try {
+    // requireAuth guarantees this, but the type cannot know it. Narrowing once is
+    // honest and keeps the real 401 path visible; asserting non-null would hide it.
+    const userId = req.userId;
+    if (!userId) return res.status(401).json({ error: 'Unauthenticated' });
     const { razorpay_order_id, razorpay_payment_id, razorpay_signature } = req.body;
 
     if (DEV_PAYMENTS && razorpay_order_id?.startsWith('order_dev_')) {
@@ -155,8 +225,8 @@ router.post('/verify', requireAuth, async (req, res, next) => {
       payment.method = 'dev_simulated';
       await payment.save();
 
-      if (payment.purpose === 'join_fee') await markJoinFeePaid(req.userId, payment); // legacy stored orders
-      if (payment.purpose.endsWith('_subscription')) await activateTier(req.userId, payment.purpose, payment);
+      if (payment.purpose === 'join_fee') await markJoinFeePaid(userId, payment); // legacy stored orders
+      if (payment.purpose.endsWith('_subscription')) await activateTier(userId, payment.purpose, payment);
       return res.json({ ok: true, devMode: true, paymentId: payment._id, purpose: payment.purpose });
     }
 
@@ -166,7 +236,7 @@ router.post('/verify', requireAuth, async (req, res, next) => {
 
     // Verify signature server-side — CRITICAL, never skip
     const expected = crypto
-      .createHmac('sha256', process.env.RAZORPAY_KEY_SECRET)
+      .createHmac('sha256', razorpaySecret())
       .update(razorpay_order_id + '|' + razorpay_payment_id)
       .digest('hex');
 
@@ -194,8 +264,8 @@ router.post('/verify', requireAuth, async (req, res, next) => {
     payment.razorpaySignature = razorpay_signature;
     await payment.save();
 
-    if (purpose === 'join_fee') await markJoinFeePaid(req.userId, payment); // legacy stored orders
-    if (purpose.endsWith('_subscription')) await activateTier(req.userId, purpose, payment);
+    if (purpose === 'join_fee') await markJoinFeePaid(userId, payment); // legacy stored orders
+    if (purpose.endsWith('_subscription')) await activateTier(userId, purpose, payment);
 
     res.json({ ok: true, paymentId: payment._id, purpose });
   } catch (err) { next(err); }
@@ -204,6 +274,11 @@ router.post('/verify', requireAuth, async (req, res, next) => {
 // Base / Pro / Max — 30-day subscription per purchase, stacking extends.
 // joinFeePaid doubles as the "membership currently active" flag: set on every
 // activation, cleared by the nightly cron when the tier expires to 'free'.
+/**
+ * @param {string} userId
+ * @param {string} purpose
+ * @param {{ _id: unknown, amountCHF?: number } | null} [payment]
+ */
 async function activateTier(userId, purpose, payment) {
   const tier = purpose === 'max_subscription' ? 'max'
     : purpose === 'pro_subscription' ? 'pro' : 'base';
@@ -221,6 +296,10 @@ async function activateTier(userId, purpose, payment) {
   require('./services/analytics').track('tier_activated', userId, { tier });
 }
 
+/**
+ * @param {string} userId
+ * @param {{ _id: unknown, amountCHF?: number }} payment
+ */
 async function markJoinFeePaid(userId, payment) {
   await User.findByIdAndUpdate(userId, {
     'membership.joinFeePaid': true,
@@ -289,7 +368,7 @@ router.post('/webhook', async (req, res, next) => {
 
     const signature = req.headers['x-razorpay-signature'];
     const expected = crypto
-      .createHmac('sha256', process.env.RAZORPAY_WEBHOOK_SECRET)
+      .createHmac('sha256', webhookSecret())
       .update(req.body)
       .digest('hex');
 

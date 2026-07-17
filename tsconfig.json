@@ -1,0 +1,37 @@
+{
+  // Incremental TypeScript adoption — money and identity first (Phase 1.1).
+  //
+  // allowJs + checkJs:false means the existing 11k lines of JS are compiled but NOT
+  // type-checked. That is deliberate: turning checkJs on today would produce
+  // thousands of errors nobody can act on, and a check that always fails is a check
+  // that gets switched off. Instead, files are converted to .ts one PR at a time —
+  // starting with routes-payment.ts and routes-auth.ts — and each converted file is
+  // fully strict-checked the moment it lands.
+  //
+  // noEmit: tsc is a type checker here, not a build step. Node runs the JS directly.
+  "compilerOptions": {
+    "target": "ES2022",
+    // node16 resolution honours package.json (no "type" field here => CommonJS),
+    // and is the non-deprecated setting under TypeScript 6.
+    "module": "node16",
+    "moduleResolution": "node16",
+    "lib": ["ES2022"],
+
+    "allowJs": true,
+    "checkJs": false,
+    "noEmit": true,
+
+    "strict": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+    "forceConsistentCasingInFileNames": true,
+
+    "esModuleInterop": true,
+    "resolveJsonModule": true,
+    "skipLibCheck": true,
+
+    "types": ["node", "jest"]
+  },
+  "include": ["src/**/*", "tests/**/*"],
+  "exclude": ["node_modules", "coverage", ".cache", "public"]
+}
