@@ -72,8 +72,11 @@ jobs:
 
       # Tests + coverage gate in one pass. Thresholds live in jest.config.js;
       # falling below them fails this step and therefore the build.
+      # --experimental-vm-modules: pglite (the in-process Postgres used by the
+      # pg-odm integration test) is ESM and dynamic-imports its WASM. Invoked via
+      # node so the flag is cross-platform (not NODE_OPTIONS).
       - name: Test + coverage gate
-        run: npx jest --coverage --ci --runInBand
+        run: node --experimental-vm-modules node_modules/jest/bin/jest.js --coverage --ci --runInBand
 
       # Fails the build on high/critical vulnerabilities in production deps.
       - name: npm audit (high+)

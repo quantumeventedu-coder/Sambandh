@@ -8,9 +8,9 @@
     "dev:watch": "nodemon src/server.js",
     "start": "node src/server.js",
     "lint": "eslint src/",
-    "test": "jest",
+    "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js",
     "test:setup": "node scripts/ensure-mongo-binary.js",
-    "test:ci": "npm run test:setup && jest --coverage --ci --runInBand",
+    "test:ci": "npm run test:setup && node --experimental-vm-modules node_modules/jest/bin/jest.js --coverage --ci --runInBand",
     "typecheck": "tsc --noEmit"
   },
   "//config": "mongodb-memory-server: PIN the mongod version so the test substrate is deterministic (unpinned = whatever MongoDB released today), and put the binary in a fixed, cacheable dir so CI restores it instead of downloading mid-test.",
@@ -39,6 +39,7 @@
     "zod": "^3.23.8"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "^0.5.4",
     "@types/bcryptjs": "^2.4.6",
     "@types/express": "^5.0.6",
     "@types/jest": "^30.0.0",

@@ -39,13 +39,13 @@ module.exports = {
   //   file                  now (b/f/l)      destination
   //   routes-payment.js     55 / 79 / 71  →  95 / 100 / 95  (@ts-check'd; webhook tested)
   //   routes-auth.js        19 / 25 / 30  →  90 /  95 / 90   (guards+password done; OTP/Google/2FA/passkey next)
-  //   db/pg-odm.js           6 /  5 / 11  →  90 /  90 / 90   (SQL builder done; rest next)
-  //   global                24 / 35 / 30  →  70 /  70 / 75
+  //   db/pg-odm.js          44 / 61 / 60  →  90 /  90 / 90   (real-Postgres integration test via pglite)
+  //   global                26 / 38 / 30  →  70 /  70 / 75
   coverageThreshold: {
-    global: { branches: 24, functions: 34, lines: 29, statements: 30 },
+    global: { branches: 26, functions: 38, lines: 30, statements: 31 },
     './src/routes-payment.js': { branches: 55, functions: 78, lines: 70, statements: 65 },
     './src/routes-auth.js': { branches: 18, functions: 25, lines: 29, statements: 27 },
-    './src/db/pg-odm.js': { branches: 6, functions: 5, lines: 11, statements: 9 },
+    './src/db/pg-odm.js': { branches: 42, functions: 60, lines: 59, statements: 50 },
     './src/config/require-secrets.js': { branches: 95, functions: 100, lines: 100, statements: 100 }
   }
 };
