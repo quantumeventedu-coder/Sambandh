@@ -309,6 +309,92 @@
   </div>
 </section>
 
+<!-- THE NATURE DIAL — showcase (below the trust story, above pricing). The centre
+     portrait is an EXTERNAL, AI-generated marketing image (public/dial-hero.jpg) in
+     an <img> slot, lazy-loaded on scroll — never base64. The facets are READINGS
+     (never "verified"); only the identity line is a fact. No astrology terms. -->
+<style>
+  #nature-dial{background:radial-gradient(120% 120% at 50% 0%,#2a0b16 0%,#1a0710 55%,#0d0409 100%);color:#f3e9ec;padding:78px 0 64px;overflow:hidden}
+  #nature-dial .eyebrow{color:var(--haldi);font-size:12px;font-weight:800;letter-spacing:.28em;text-transform:uppercase;text-align:center}
+  #nature-dial h2{color:#fff;text-align:center;font-size:clamp(28px,5vw,46px);margin:8px 0 6px}
+  #nature-dial .sub{color:#c9b3bd;text-align:center;max-width:560px;margin:0 auto 8px}
+  #nd-stage{position:relative;max-width:1060px;margin:22px auto 0;min-height:560px;display:flex;align-items:center;justify-content:center}
+  #nd-rings{position:absolute;top:52%;left:50%;width:min(760px,88vw);height:230px;transform:translate(-50%,-50%);pointer-events:none}
+  #nd-rings i{position:absolute;inset:0;border-radius:50%;border:2px solid transparent;
+    border-top-color:rgba(243,193,75,.85);border-bottom-color:rgba(212,83,126,.85);
+    filter:drop-shadow(0 0 14px rgba(243,193,75,.5)) drop-shadow(0 0 20px rgba(212,83,126,.4));
+    transform:rotateX(74deg);animation:ndspin 18s linear infinite}
+  #nd-rings i:nth-child(2){inset:22px 60px;animation-duration:26s;animation-direction:reverse;opacity:.8}
+  @keyframes ndspin{to{transform:rotateX(74deg) rotate(360deg)}}
+  #nd-figure{position:relative;z-index:2;height:520px;width:auto;max-width:46%;object-fit:contain;
+    filter:drop-shadow(0 30px 50px rgba(0,0,0,.6));border-radius:12px}
+  #nd-figure.fallback{width:230px;height:430px;max-width:60%;border-radius:140px 140px 24px 24px;
+    background:radial-gradient(60% 40% at 50% 22%,rgba(243,193,75,.35),rgba(212,83,126,.18) 60%,transparent 72%);
+    border:1px solid rgba(243,193,75,.25)}
+  .nd-card{position:absolute;z-index:3;width:186px;background:rgba(30,12,20,.62);
+    border:1px solid rgba(243,193,75,.28);border-radius:14px;padding:13px 15px;backdrop-filter:blur(6px);
+    box-shadow:0 12px 30px rgba(0,0,0,.45)}
+  .nd-card .lab{color:var(--haldi);font-size:9.5px;font-weight:800;letter-spacing:.14em;text-transform:uppercase}
+  .nd-card h4{font-family:Georgia,serif;color:#fff;font-size:19px;line-height:1.15;margin:4px 0 5px}
+  .nd-card p{color:#c3aab4;font-size:11.5px;line-height:1.45;margin:0}
+  .nd-tl{top:6%;left:2%} .nd-ml{top:34%;left:9%} .nd-bl{bottom:16%;left:3%}
+  .nd-tr{top:12%;right:3%} .nd-mr{top:40%;right:1%} .nd-br{bottom:18%;right:5%}
+  #nd-connect{position:relative;z-index:4;max-width:520px;margin:-6px auto 0;background:rgba(22,8,14,.82);
+    border:1px solid rgba(243,193,75,.22);border-radius:16px;padding:16px 20px;text-align:left}
+  #nd-connect .lab{color:var(--haldi);font-size:10px;font-weight:800;letter-spacing:.14em;text-transform:uppercase}
+  #nd-connect h4{font-family:Georgia,serif;color:#fff;font-size:22px;margin:5px 0 5px}
+  #nd-connect p{color:#cbb4bd;font-size:13.5px;margin:0 0 10px}
+  .nd-badge-read{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:800;color:#e7c04f;
+    background:rgba(243,193,75,.12);border:1px solid rgba(243,193,75,.4);border-radius:99px;padding:3px 11px}
+  .nd-badge-fact{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:800;color:#69d18e;
+    background:rgba(31,122,77,.16);border:1px solid rgba(63,191,114,.45);border-radius:99px;padding:3px 11px}
+  #nd-foot{text-align:center;color:#9c8590;font-size:12.5px;margin-top:20px}
+  #nd-foot .pv{margin-top:8px;display:flex;gap:10px;justify-content:center;flex-wrap:wrap}
+  @media(max-width:860px){
+    #nd-stage{flex-direction:column;min-height:0}
+    #nd-rings,.nd-card{position:static}
+    #nd-figure{max-width:70%;height:auto;margin:0 auto 14px}
+    #nd-cards{display:grid;grid-template-columns:1fr 1fr;gap:10px;width:100%;margin-top:10px}
+    .nd-card{width:auto}
+    #nd-connect{margin-top:16px}
+  }
+  @media(prefers-reduced-motion:reduce){#nd-rings i{animation:none}}
+</style>
+<section id="nature-dial">
+  <div class="wrap">
+    <div class="eyebrow">The Nature Dial</div>
+    <h2 class="serif">Turn the dial. See who they are.</h2>
+    <p class="sub">Each facet unfolds a part of who they are — in plain words, never jargon.</p>
+    <div id="nd-stage">
+      <div id="nd-rings" aria-hidden="true"><i></i><i></i></div>
+      <!-- Drop an AI-generated marketing portrait at public/dial-hero.jpg. Until then,
+           a glowing abstract avatar stands in (matches the in-app "hidden" state). -->
+      <img id="nd-figure" class="fallback" alt="A member on the Nature Dial (illustrative)"
+           width="230" height="430" loading="lazy" decoding="async"
+           src="/dial-hero.jpg" onerror="this.classList.add('fallback');this.removeAttribute('src')"/>
+      <div id="nd-cards">
+        <div class="nd-card nd-tl"><div class="lab">Persona</div><h4>Grounded &amp; calm</h4><p>Stays steady under pressure and brings stability to the people around them.</p></div>
+        <div class="nd-card nd-ml"><div class="lab">Passions</div><h4>Deep thinker</h4><p>Enjoys understanding how things work and why people think the way they do.</p></div>
+        <div class="nd-card nd-bl"><div class="lab">Approach</div><h4>Thoughtful &amp; kind</h4><p>Notices the small things that matter to the people they care about.</p></div>
+        <div class="nd-card nd-tr"><div class="lab">Energy</div><h4>Balanced &amp; steady</h4><p>Brings calm to chaos and helps others feel at ease.</p></div>
+        <div class="nd-card nd-mr"><div class="lab">World</div><h4>Loyal &amp; committed</h4><p>Values trust above everything and stands by their people.</p></div>
+        <div class="nd-card nd-br"><div class="lab">Drive</div><h4>Growth oriented</h4><p>Always learning, always evolving — steady forward motion.</p></div>
+      </div>
+    </div>
+    <div id="nd-connect">
+      <div class="lab">How they connect</div>
+      <h4 class="serif">Grounded &amp; calm</h4>
+      <p>Their match is someone steady who doesn't need constant reassurance — a person who brings the spark while they keep it steady.</p>
+      <span class="nd-badge-read">✦ A reading — an insight, not a verified fact</span>
+    </div>
+    <div id="nd-foot">
+      Inside Sambandh this runs on a real member's photo and reading — this is a preview, not a real person.
+      <div class="pv"><span class="nd-badge-fact">✓ Identity is what we verify (photo + ID)</span>
+        <span class="nd-badge-read">✦ Nature is a reading we offer</span></div>
+    </div>
+  </div>
+</section>
+
 <!-- PRICING -->
 <section class="block" id="pricing">
   <div class="wrap center">
