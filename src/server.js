@@ -19,6 +19,10 @@ const { Server: SocketServer } = require('socket.io');
 const cors = require('cors');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
+const { logger } = require('./lib/logger');
+const { requestLogger } = require('./lib/request-log');
+const { errorHandler } = require('./lib/errors');
+const { mountHealth } = require('./lib/health');
 
 // Routes
 const authRoutes = require('./routes-auth');
@@ -40,6 +44,9 @@ const app = express();
 const server = http.createServer(app);
 
 // ---- Middleware ----
+
+// Trace every request first (assigns req.reqId + req.log, echoes x-request-id).
+app.use(requestLogger());
 
 app.use(helmet({ contentSecurityPolicy: false })); // CSP off so the local web app can load Socket.io + inline styles
 
@@ -68,12 +75,8 @@ app.use('/api', rateLimit({
 
 // ---- Routes ----
 
-app.get('/health', (req, res) => res.json({
-  ok: true,
-  time: new Date(),
-  db: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected',
-  devMode: process.env.DEV_MODE === 'true'
-}));
+// Liveness (/health) + DB-aware readiness (/health/ready).
+mountHealth(app, mongoose);
 
 // City autocomplete (public, static dataset)
 const { CITIES } = require('./data/cities');
@@ -153,13 +156,9 @@ app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, '..', 'public', 'index.html'));
 });
 
-// Error handler — never leak stack traces to the client
-app.use((err, req, res, next) => {
-  console.error('[ERROR]', err);
-  res.status(err.status || 500).json({
-    error: err.message || 'Internal server error'
-  });
-});
+// Typed error handler — maps our error taxonomy to status + stable code, logs
+// server-side (stack for 5xx only), never leaks internals to the client.
+app.use(errorHandler());
 
 // ---- Socket.io for chat ----
 
@@ -290,7 +289,7 @@ if (process.env.VERCEL) {
   module.exports = { app, ready };
 } else {
   start().catch(err => {
-    console.error('[FATAL] Failed to start', err);
+    logger.fatal({ err: { message: err && err.message, stack: err && err.stack } }, 'failed to start');
     process.exit(1);
   });
   module.exports = { app, ready };

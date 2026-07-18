@@ -691,13 +691,26 @@ async function disconnect() {
   ensuredTables.clear();
 }
 
+// Readiness probe: actually round-trips a query to Postgres, so a pool that has
+// silently gone away reports unhealthy (readyState alone can lie). Returns true
+// only if `select 1` succeeds within the timeout.
+async function ping() {
+  if (!pool) return false;
+  try {
+    await pool.query('select 1');
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 // Test-only seam: inject a pre-built pg-compatible executor ({ query, end }) so the
 // ODM can run against an in-process Postgres (pglite) in tests — exercising the
 // REAL SQL/JSONB engine production uses, not a Mongo emulator (see ADR-001). Not
 // used by any production path; production always goes through connect(url).
 function _setPoolForTests(poolLike) { pool = poolLike; connection.readyState = poolLike ? 1 : 0; }
 
-module.exports = { Schema, model, connect, disconnect, connection, Types, isPg: true };
+module.exports = { Schema, model, connect, disconnect, ping, connection, Types, isPg: true };
 
 // Internals exposed for unit tests only. The SQL builder is pure (filter in, SQL
 // + bound params out), so it can — and must — be tested without a database.
