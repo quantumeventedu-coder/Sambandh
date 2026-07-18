@@ -24,6 +24,7 @@ const trainer = require('./services/trainer');
 const events = require('./services/events');
 const reading = require('./services/reading-engine');
 const astroEngine = require('./services/astro-engine');
+const compat = require('./services/compatibility-engine');
 
 const router = express.Router();
 
@@ -152,7 +153,10 @@ router.get('/', requireAuth, async (req, res, next) => {
 
       const intentMatch = (u.intent || []).some(i => myIntents.has(i)) ? 1 : 0;
       const dScore = distanceScore(km, isFinite(maxKm) ? maxKm : 5000);
-      const astro = 0.5; // neutral until pair-level compat is computed on demand
+      // Cheap chart-compatibility signal from STORED astrology (no chart recompute).
+      // One input to the base score — the recommender + learned model still dominate
+      // ordering; this never replaces them (Part G).
+      const astro = compat.rankingSignal(me, u);
 
       // Base compatibility (the original spec formula) is one input; the
       // recommender blends it with learned taste, reciprocity, CF, engagement,

@@ -14,6 +14,7 @@ const express = require('express');
 const User = require('./models/User');
 const engine = require('./services/reading-engine');
 const astro = require('./services/astro-engine');
+const compat = require('./services/compatibility-engine');
 const { requireAuth } = require('./routes-auth');
 
 const router = express.Router();
@@ -46,13 +47,18 @@ router.get('/compat/:userId', requireAuth, async (req, res, next) => {
     ]);
     if (!me || !other) return res.status(404).json({ error: 'User not found' });
 
-    const bothMarriage = (me.intent || []).includes('marriage') && (other.intent || []).includes('marriage');
-    if (!bothMarriage) {
-      // Pre-intent: only a vague hint, nothing deep.
-      return res.json({ unlocked: false, hint: engine.chatHint(inputsFor(other)) });
-    }
-    const r = engine.compatibility(inputsFor(me), inputsFor(other));
-    res.json({ unlocked: true, answer: r.answer, confidence: r.confidence });
+    // The marriage gate now lives in the compatibility engine (a precondition,
+    // not a UI check): hint until BOTH are marriage-intent, then the deep reading.
+    const r = compat.computeCompatibility(me, other, { context: { intentA: me.intent, intentB: other.intent } });
+    if (r.level !== 'full') return res.json({ unlocked: false, hint: r.hint });
+    res.json({
+      unlocked: true,
+      answer: r.reading.how_you_fit,
+      whosYourPerson: r.reading.whos_your_person,
+      confidence: r.confidence,
+      score: r.score,
+      subScores: r.subScores
+    });
   } catch (err) { next(err); }
 });
 
