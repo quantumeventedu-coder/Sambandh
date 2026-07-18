@@ -2,17 +2,16 @@
 // learned taste from swipe history, reciprocity, engagement quality, ELO desirability,
 // collaborative filtering, and the blended score with reasons.
 
-const mongoose = require('mongoose');
-const { MongoMemoryServer } = require('mongodb-memory-server');
+// Runs on pg-odm + pglite (real Postgres). `db` must precede the model requires.
+const db = require('./helpers/pg-db');
 const rec = require('../src/services/recommender');
 const User = require('../src/models/User');
 const Like = require('../src/models/Like');
 const Pass = require('../src/models/Pass');
 
-let mem;
-beforeAll(async () => { mem = await MongoMemoryServer.create(); await mongoose.connect(mem.getUri('rec-test')); });
-afterAll(async () => { await mongoose.disconnect(); await mem.stop(); });
-afterEach(async () => { await Promise.all([User.deleteMany({}), Like.deleteMany({}), Pass.deleteMany({})]); });
+beforeAll(db.start);
+afterAll(db.stop);
+afterEach(db.clear);
 
 const mk = (over = {}) => ({
   phone: '+91' + Math.floor(6000000000 + Math.random() * 3999999999),
@@ -21,7 +20,7 @@ const mk = (over = {}) => ({
   claims: { profession: { verified: false } },
   ...over
 });
-const viewer = () => ({ _id: new mongoose.Types.ObjectId(), profile: { gender: 'male', age: 29, city: 'Mumbai', languages: ['hindi', 'english'] }, intent: ['dating'], signals: { desirability: 1500 } });
+const viewer = () => ({ _id: new db.Types.ObjectId(), profile: { gender: 'male', age: 29, city: 'Mumbai', languages: ['hindi', 'english'] }, intent: ['dating'], signals: { desirability: 1500 } });
 
 describe('featurize', () => {
   test('captures intent/language overlap, profession, age closeness, city', () => {
@@ -75,15 +74,15 @@ describe('reciprocity + score blend', () => {
     const wantsYou = mk({ preferences: { interestedInGenders: ['male'], ageRange: { min: 25, max: 35 } }, signals: { desirability: 1500 } });
     const excludesYou = mk({ preferences: { interestedInGenders: ['female'], ageRange: { min: 18, max: 24 } }, signals: { desirability: 1500 } });
     const ctx = { taste: null, coLike: new Map(), myDesir: 1500, seed: 1 };
-    const a = rec.score(ctx, v, { ...wantsYou, _id: new mongoose.Types.ObjectId() }, { km: 3, rep: null, base: 0.7 });
-    const b = rec.score(ctx, v, { ...excludesYou, _id: new mongoose.Types.ObjectId() }, { km: 3, rep: null, base: 0.7 });
+    const a = rec.score(ctx, v, { ...wantsYou, _id: new db.Types.ObjectId() }, { km: 3, rep: null, base: 0.7 });
+    const b = rec.score(ctx, v, { ...excludesYou, _id: new db.Types.ObjectId() }, { km: 3, rep: null, base: 0.7 });
     expect(a.score).toBeGreaterThan(b.score);
     expect(a.reasons).toContain('Likely to like you back');
   });
 
   test('engagement quality lifts responsive users and sinks ghosters', () => {
     const v = viewer();
-    const cand = { ...mk({ signals: { desirability: 1500 } }), _id: new mongoose.Types.ObjectId() };
+    const cand = { ...mk({ signals: { desirability: 1500 } }), _id: new db.Types.ObjectId() };
     const ctx = { taste: null, coLike: new Map(), myDesir: 1500, seed: 1 };
     const good = rec.score(ctx, v, cand, { km: 3, base: 0.6, rep: { scores: { responsive: 9, depth: 9, respect: 9 }, redFlags: {} } });
     const bad = rec.score(ctx, v, cand, { km: 3, base: 0.6, rep: { scores: { responsive: 3, depth: 3, respect: 3 }, redFlags: { ghostingIncidents: 3, blockedByOthers: 2, reportsAgainst: 1 } } });
@@ -92,7 +91,7 @@ describe('reciprocity + score blend', () => {
 
   test('collaborative-filtering boost raises a co-liked candidate', () => {
     const v = viewer();
-    const cand = { ...mk({ signals: { desirability: 1500 } }), _id: new mongoose.Types.ObjectId() };
+    const cand = { ...mk({ signals: { desirability: 1500 } }), _id: new db.Types.ObjectId() };
     const base = { km: 3, base: 0.6, rep: null };
     const cold = rec.score({ taste: null, coLike: new Map(), myDesir: 1500, seed: 1 }, v, cand, base);
     const warm = rec.score({ taste: null, coLike: new Map([[String(cand._id), 1]]), myDesir: 1500, seed: 1 }, v, cand, base);
