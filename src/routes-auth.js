@@ -1,3 +1,4 @@
+// @ts-check
 // routes-auth.js — phone OTP auth, JWT (HttpOnly cookie + Bearer), profile
 //
 // Spec §2.1: Indian numbers only (+91[6-9]XXXXXXXXX) · OTP 6 digits, 60s validity,
@@ -10,7 +11,7 @@
 const express = require('express');
 const crypto = require('crypto');
 const jwt = require('jsonwebtoken');
-const rateLimit = require('express-rate-limit');
+const { rateLimit } = require('express-rate-limit');
 const { z } = require('zod');
 const User = require('./models/User');
 const Chat = require('./models/Chat');
@@ -86,10 +87,14 @@ const profileSchema = z.object({
 
 // ---- Token helpers ----
 
+/**
+ * @param {import('express').Response} res
+ * @param {any} user
+ */
 function issueToken(res, user) {
   const token = jwt.sign(
     { userId: user._id.toString(), phone: user.phone, role: user.role || 'user' },
-    process.env.JWT_SECRET,
+    jwtSecret(),
     { expiresIn: '30d' }
   );
   res.cookie(COOKIE_NAME, token, {
@@ -104,6 +109,12 @@ function issueToken(res, user) {
 // Shared login finisher for password / Google logins: runs the account gates
 // (banned / deleted / suspended), enforces 2FA, and issues the token. Returns
 // true if it wrote a response (caller should stop), false if not applicable.
+/**
+ * @param {import('express').Request} req
+ * @param {import('express').Response} res
+ * @param {any} user
+ * @returns {Promise<boolean>}
+ */
 async function completeLogin(req, res, user) {
   if (user.status?.banned) { res.status(403).json({ error: 'This account is not eligible for Sambandh.' }); return true; }
   if (user.status?.deletedAt) {
@@ -148,6 +159,7 @@ async function completeLogin(req, res, user) {
   return true;
 }
 
+/** @param {import('express').Request} req */
 function readToken(req) {
   const auth = req.headers.authorization;
   if (auth?.startsWith('Bearer ')) return auth.slice(7);
@@ -160,7 +172,27 @@ function readToken(req) {
   return null;
 }
 
+/** @param {string} s */
 const sha256 = s => crypto.createHash('sha256').update(s).digest('hex');
+
+/**
+ * Message from an unknown thrown value. Under strict, a catch binding is
+ * `unknown`; this narrows it without reaching for `any`.
+ * @param {unknown} e
+ * @returns {string}
+ */
+const errMsg = e => (e instanceof Error ? e.message : String(e));
+
+/**
+ * The JWT secret, or a loud failure — never sign/verify against undefined.
+ * (require-secrets.js already refuses to boot production without it.)
+ * @returns {string}
+ */
+function jwtSecret() {
+  const s = process.env.JWT_SECRET;
+  if (!s) throw new Error('JWT_SECRET is not set');
+  return s;
+}
 
 // ---- Routes ----
 
@@ -182,7 +214,7 @@ router.post('/request-otp', ipLimit, async (req, res, next) => {
       const mins = Math.ceil((entry.lockedUntil - now) / 60000);
       return res.status(429).json({ error: `Too many attempts. Try again in ${mins} minutes.` });
     }
-    entry.requests = entry.requests.filter(t => now - t < 3600 * 1000);
+    entry.requests = entry.requests.filter((/** @type {number} */ t) => now - t < 3600 * 1000);
     if (entry.requests.length >= OTP_MAX_PER_HOUR) {
       return res.status(429).json({ error: 'Too many attempts. Try again in 60 minutes.' });
     }
@@ -340,10 +372,13 @@ router.post('/verify-otp', async (req, res, next) => {
 router.post('/logout', requireAuth, async (req, res, next) => {
   try {
     const token = readToken(req);
+    if (!token) return res.status(401).json({ error: 'Missing token' });
     const decoded = jwt.decode(token);
+    const exp = (decoded && typeof decoded === 'object' && typeof decoded.exp === 'number')
+      ? decoded.exp : Math.floor(Date.now() / 1000) + 60;
     await TokenBlacklist.create({
       tokenHash: sha256(token),
-      expiresAt: new Date((decoded?.exp || Math.floor(Date.now() / 1000) + 60) * 1000)
+      expiresAt: new Date(exp * 1000)
     }).catch(() => {}); // duplicate = already logged out
     res.clearCookie(COOKIE_NAME);
     res.json({ ok: true });
@@ -360,7 +395,7 @@ router.post('/complete-signup', requireAuth, async (req, res, next) => {
     if (!city) return res.status(400).json({ error: 'Please pick a city from the list' });
 
     const dob = new Date(parsed.data.dob);
-    const age = Math.floor((Date.now() - dob) / (365.25 * 24 * 60 * 60 * 1000));
+    const age = Math.floor((Date.now() - dob.getTime()) / (365.25 * 24 * 60 * 60 * 1000));
     if (age < 18) return res.status(400).json({ error: 'You must be 18 or older to use Sambandh' });
 
     const user = await User.findByIdAndUpdate(req.userId, {
@@ -397,6 +432,9 @@ router.patch('/profile', requireAuth, async (req, res, next) => {
     const d = parsed.data;
 
     const before = await User.findById(req.userId);
+    // A dotted-path $set map. Without the annotation TS infers a narrow literal
+    // type from the first assignments and rejects every later key.
+    /** @type {Record<string, unknown>} */
     const updates = {};
     if (d.bio !== undefined) updates['profile.bio'] = d.bio;
     if (d.displayName) updates['profile.displayName'] = d.displayName;
@@ -435,7 +473,8 @@ router.patch('/profile', requireAuth, async (req, res, next) => {
       const { photoBytesHash } = require('./services/risk-engine');
       const { classifyDecision } = require('./services/moderation');
       // The verified selfie always stays pinned as the first (primary) photo
-      const selfiePhoto = (before.profile?.photos || []).find(p => p.fromSelfie);
+      const selfiePhoto = (before.profile?.photos || []).find((/** @type {any} */ p) => p.fromSelfie);
+      /** @type {Array<Record<string, unknown>>} */
       const stored = selfiePhoto
         ? [{ url: selfiePhoto.url, isPrimary: true, fromSelfie: true, uploadedAt: selfiePhoto.uploadedAt }]
         : [];
@@ -453,6 +492,7 @@ router.patch('/profile', requireAuth, async (req, res, next) => {
         const ext = (p.filename.split('.').pop() || 'jpg').toLowerCase().replace(/[^a-z0-9]/g, '');
         const key = `users/${req.userId}/photos/${Date.now()}_${i}.${ext}`;
         const url = await uploadToR2(key, buffer, ext === 'png' ? 'image/png' : 'image/jpeg');
+        /** @type {Record<string, unknown>} */
         const photo = { url, isPrimary: stored.length === 0, uploadedAt: new Date() };
         if (mod && mod.decision === 'review') { photo.moderation = { nsfwScore: mod.nsfwScore, decision: 'review' }; flaggedForReview.push(mod.nsfwScore); }
         stored.push(photo);
@@ -479,7 +519,7 @@ router.patch('/profile', requireAuth, async (req, res, next) => {
       const chats = await Chat.find({ participants: req.userId, status: 'active' });
       const name = before.profile?.displayName || before.profile?.firstName || 'This user';
       for (const chat of chats) {
-        const to = chat.participants.find(p => p.toString() !== req.userId);
+        const to = chat.participants.find((/** @type {any} */ p) => p.toString() !== req.userId);
         await Message.create({
           chatId: chat._id, from: req.userId, to,
           text: `${name} has updated their intent to: ${d.intent.join(', ')}`,
@@ -545,7 +585,7 @@ router.post('/register', ipLimit, async (req, res, next) => {
     const token = issueToken(res, user);
     res.json({ token, user: { id: user._id, username: user.username, email: user.email, hasProfile: false } });
   } catch (err) {
-    if (err.code === 11000) return res.status(409).json({ error: 'That email or username is already taken.' });
+    if (err && typeof err === 'object' && 'code' in err && err.code === 11000) return res.status(409).json({ error: 'That email or username is already taken.' });
     next(err);
   }
 });
@@ -586,7 +626,7 @@ router.post('/google', ipLimit, async (req, res, next) => {
     const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
     const ticket = await client.verifyIdToken({ idToken: credential, audience: process.env.GOOGLE_CLIENT_ID });
     const payload = ticket.getPayload();
-    if (!payload?.email_verified) return res.status(401).json({ error: 'Google email not verified' });
+    if (!payload?.email_verified || !payload.email) return res.status(401).json({ error: 'Google email not verified' });
     const email = payload.email.toLowerCase();
     let user = await User.findOne({ googleId: payload.sub }) || await User.findOne({ email });
     if (!user) {
@@ -603,7 +643,7 @@ router.post('/google', ipLimit, async (req, res, next) => {
     track('login_google', user._id, {});
     await completeLogin(req, res, user);
   } catch (err) {
-    if (/audience|Invalid token|Wrong number/i.test(err.message)) return res.status(401).json({ error: 'Invalid Google credential' });
+    if (/audience|Invalid token|Wrong number/i.test(errMsg(err))) return res.status(401).json({ error: 'Invalid Google credential' });
     next(err);
   }
 });
@@ -666,7 +706,9 @@ router.post('/2fa/disable', (req, res, next) => requireAuth(req, res, async () =
 
 // Short-lived challenge store (5 min). reg:<userId> for enrolment, login:<challenge> for sign-in.
 const challengeStore = new Map();
+/** @param {string} key @param {object} data */
 function putChallenge(key, data) { challengeStore.set(key, { ...data, expiresAt: Date.now() + 5 * 60 * 1000 }); }
+/** @param {string} key */
 function takeChallenge(key) {
   const c = challengeStore.get(key);
   if (!c || c.expiresAt < Date.now()) { challengeStore.delete(key); return null; }
@@ -694,7 +736,7 @@ router.post('/passkey/register-verify', (req, res, next) => requireAuth(req, res
     if (!exp) return res.status(400).json({ error: 'Challenge expired — try again' });
     const result = await wa.verifyRegistration(req.userId, req.body, exp);
     res.json({ ok: true, credentialId: result.credentialId });
-  } catch (err) { res.status(400).json({ error: err.message }); }
+  } catch (err) { res.status(400).json({ error: errMsg(err) }); }
 }));
 
 // Passwordless / step-up sign-in with a passkey
@@ -725,7 +767,7 @@ router.post('/passkey/login-verify', async (req, res, next) => {
     const token = issueToken(res, user);
     track('passkey_login', user._id, {});
     res.json({ ok: true, token, user: { id: user._id, email: user.email, phone: user.phone, hasProfile: !!user.profile?.firstName } });
-  } catch (err) { res.status(400).json({ error: err.message }); }
+  } catch (err) { res.status(400).json({ error: errMsg(err) }); }
 });
 
 router.get('/passkey/list', (req, res, next) => requireAuth(req, res, async () => {
@@ -739,11 +781,12 @@ router.delete('/passkey/:id', (req, res, next) => requireAuth(req, res, async ()
 
 // ---- Middleware ----
 
+/** @type {import('express').RequestHandler} */
 async function requireAuth(req, res, next) {
   const token = readToken(req);
   if (!token) return res.status(401).json({ error: 'Missing token' });
   try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const decoded = /** @type {import('jsonwebtoken').JwtPayload} */ (jwt.verify(token, jwtSecret()));
 
     // Logout blacklist check
     const black = await TokenBlacklist.findOne({ tokenHash: sha256(token) }).lean();
@@ -754,7 +797,7 @@ async function requireAuth(req, res, next) {
     req.role = decoded.role || 'user';
 
     // Auto-refresh when within 7 days of expiry (spec §2.1.2)
-    if (decoded.exp * 1000 - Date.now() < 7 * 24 * 3600 * 1000) {
+    if ((decoded.exp || 0) * 1000 - Date.now() < 7 * 24 * 3600 * 1000) {
       req.refreshedToken = issueToken(res, { _id: decoded.userId, phone: decoded.phone, role: decoded.role });
     }
     next();
@@ -765,6 +808,7 @@ async function requireAuth(req, res, next) {
 
 // Super admin: SUPER_ADMIN_KEY header only (the platform owner). Full access,
 // including audited chat inspection. Admins/moderators can NEVER pass this.
+/** @type {import('express').RequestHandler} */
 function requireSuperAdmin(req, res, next) {
   const key = req.headers['x-super-key'];
   if (key && process.env.SUPER_ADMIN_KEY && key === process.env.SUPER_ADMIN_KEY) {
@@ -778,6 +822,7 @@ function requireSuperAdmin(req, res, next) {
 // Admin: moderator/admin user token, or ADMIN_API_KEY header (admin panel).
 // The super admin key also passes (full access includes everything admins can do);
 // the reverse is never true — the admin key does not open super admin routes.
+/** @type {import('express').RequestHandler} */
 function requireAdmin(req, res, next) {
   const superKey = req.headers['x-super-key'];
   if (superKey && process.env.SUPER_ADMIN_KEY && superKey === process.env.SUPER_ADMIN_KEY) {
@@ -797,7 +842,4 @@ function requireAdmin(req, res, next) {
   });
 }
 
-router.requireAuth = requireAuth;
-router.requireAdmin = requireAdmin;
-router.requireSuperAdmin = requireSuperAdmin;
-module.exports = router;
+module.exports = Object.assign(router, { requireAuth, requireAdmin, requireSuperAdmin, completeLogin });

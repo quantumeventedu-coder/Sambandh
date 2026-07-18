@@ -14,6 +14,10 @@ const TYPES = new Set([
 ]);
 
 // Record one event. Fire-and-forget; swallows all errors.
+/**
+ * @param {string} type
+ * @param {{ userId?: unknown, payload?: Record<string, unknown>, context?: Record<string, unknown> }} [opts]
+ */
 function record(type, { userId, payload = {}, context = {} } = {}) {
   if (!type || !userId) return;
   Event.create({ userId, type, payload, context, createdAt: new Date() })
