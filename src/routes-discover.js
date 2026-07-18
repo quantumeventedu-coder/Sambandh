@@ -22,8 +22,22 @@ const { userDistanceKm } = require('./data/cities');
 const recommender = require('./services/recommender');
 const trainer = require('./services/trainer');
 const events = require('./services/events');
+const reading = require('./services/reading-engine');
+const astroEngine = require('./services/astro-engine');
 
 const router = express.Router();
+
+// One plain-language nature line for a discover card (Reading ④). Jargon-free by
+// construction (reading-engine → voice → guards). Returns null when there's no
+// chart and no self-declared features, so a card simply shows no line.
+function natureLineFor(u) {
+  try {
+    const chart = u && u.astrology && u.astrology.birthDate ? astroEngine.computeChart(u.astrology) : null;
+    const features = (u && u.features) || null;
+    if (!chart && !(features && Object.keys(features).length)) return null;
+    return reading.discoverLine({ chart, features }) || null;
+  } catch { return null; }
+}
 
 const GRADE_MIN = { 'A+': 95, 'A': 90, 'A-': 85, 'B+': 80, 'B': 70, 'C': 60 };
 
@@ -189,7 +203,14 @@ router.get('/', requireAuth, async (req, res, next) => {
 
     ranked.sort((a, b) => b._score - a._score);
     const start = (page - 1) * pageSize;
-    res.json({ page, pageSize, total: ranked.length, profiles: ranked.slice(start, start + pageSize) });
+    // Reading ④: attach ONE plain-language nature line, computed ONLY for the
+    // returned page (not all ~400 candidates), so the hot feed stays cheap. The
+    // line is jargon-free by construction (reading-engine → voice → guards).
+    const byId = Object.fromEntries(candidates.map(c => [c._id.toString(), c]));
+    const pageProfiles = ranked.slice(start, start + pageSize).map(card => ({
+      ...card, natureLine: natureLineFor(byId[card.userId.toString()])
+    }));
+    res.json({ page, pageSize, total: ranked.length, profiles: pageProfiles });
   } catch (err) { next(err); }
 });
 

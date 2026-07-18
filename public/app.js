@@ -974,6 +974,23 @@ async function obSavePhotos() {
 }
 
 // ---------------- Discover ----------------
+// Reading ④ shared bits. The server already guarantees jargon-free reading text;
+// this client guard is defense-in-depth on the NEW render paths (discover card +
+// other users' profiles) — a line containing any astrology term is dropped.
+const READING_JARGON_RE = /\b(sun|moon|mars|mercury|jupiter|venus|saturn|rahu|ketu|aries|taurus|gemini|cancer|leo|virgo|libra|scorpio|sagittarius|capricorn|aquarius|pisces|nakshatra|dosha|dasha|guna|lagna|mangal|rashi|ascendant|kundli|kundali|graha|navamsa|dasamsa|exalted|debilitated|ayanamsa|vimshottari)\b/i;
+function plainOnly(s) { return (typeof s === 'string' && s && !READING_JARGON_RE.test(s)) ? s : ''; }
+
+// The ONE reading-cards renderer, reused by the Me tab and other users' profiles.
+// Every card is labelled a READING (never verified) and jargon-guarded.
+function readingCardsHtml(pairs, { note = 'Your reading — an insight, not a verified fact' } = {}) {
+  const safe = pairs.filter(([, a]) => plainOnly(a));
+  if (!safe.length) return '';
+  return `<div style="margin:6px 0">${SBBadge.badgeHtml('reading', note)}</div>` +
+    safe.map(([title, a]) => `<div class="card" style="margin-bottom:8px;background:rgba(138,92,192,.05)">
+      <div class="hint" style="font-weight:700">${esc(title)}</div>
+      <div style="margin-top:3px">${esc(plainOnly(a))}</div></div>`).join('');
+}
+
 async function renderDiscover() {
   screen.innerHTML = `
     ${headerBar()}
@@ -1017,6 +1034,7 @@ async function renderDiscover() {
             <span class="karma">Lakshan: ${p.karma.score} ${p.karma.grade}</span>
           </div>
           ${(p.reasons && p.reasons.length) ? `<div class="why">${ic('sparkle')} ${p.reasons.map(r => esc(r)).join(' · ')}</div>` : ''}
+          ${plainOnly(p.natureLine) ? `<div class="nature-line" style="margin-top:5px;display:flex;align-items:center;gap:6px;flex-wrap:wrap">${SBBadge.badgeHtml('reading', 'Reading')}<span style="font-size:12.5px;color:var(--plum,#8a5cc0)">${esc(plainOnly(p.natureLine))}</span></div>` : ''}
         </div>
       </div>
       <div class="pcard-actions" id="pa-${p.userId}">
@@ -1150,10 +1168,16 @@ async function startChat(userId, anonymous) {
 async function renderProfile(userId) {
   screen.innerHTML = `<div class="section-pad"><div class="empty">Loading profile…</div></div>`;
   try {
-    const [p, karma] = await Promise.all([
+    const [p, karma, rdg] = await Promise.all([
       api('/discover/profile/' + userId),
-      api('/karma/profile/' + userId)
+      api('/karma/profile/' + userId),
+      api('/reading/' + userId).catch(() => null)   // reading is a nicety — never break the profile
     ]);
+    // Full plain-language reading for the viewed user (READING badge, jargon-guarded).
+    const readingBlock = rdg ? readingCardsHtml([
+      ['Their nature', rdg.line],
+      ['Who they are', rdg.who]
+    ], { note: 'Their reading — an insight, not a verified fact' }) : '';
     const photo = p.photos?.find(x => x.isPrimary)?.url || p.photos?.[0]?.url;
     screen.innerHTML = `
       <div class="app-header">
@@ -1177,6 +1201,7 @@ async function renderProfile(userId) {
           ${(p.tagsNegative || []).map(t => `<span class="tag haldi">${esc(t)}</span>`).join('')}
         </div>
         ${p.profession?.title ? `<div class="card ic-row" style="padding:12px 14px;font-size:13.5px;display:flex">${ic('briefcase')} <span>${esc(p.profession.title)}${p.profession.company ? ' · ' + esc(p.profession.company) : ''}</span> ${p.profession.verified ? '<span class="tag forest">verified</span>' : '<span class="tag plain">unverified</span>'}</div>` : ''}
+        ${readingBlock}
         ${renderKarmaFlags(karma, p.userId)}
         ${karma.activity ? `<div class="card" style="font-size:13px">
           <b style="font-size:11px;color:var(--ink-soft);text-transform:uppercase;letter-spacing:.05em">Activity — transparency</b>
@@ -1811,18 +1836,13 @@ async function renderNatureReading() {
   try {
     const r = await api('/reading/me');
     const rd = r.reading || {};
-    const cards = [
-      ['Who you are', rd.who_you_are], ['Your pattern', rd.your_pattern],
-      ['Your person', rd.your_person], ['Your timing', rd.your_timing]
-    ].filter(([, v]) => v && v.answer);
-    if (!cards.length) { box.innerHTML = ''; return; }
-    box.innerHTML = `
-      <div style="margin-bottom:8px">${SBBadge.badgeHtml('reading', 'Your reading — an insight, not a verified fact')}</div>
-      ${cards.map(([title, v]) => `
-        <div class="card" style="margin-bottom:8px;background:rgba(138,92,192,.05)">
-          <div class="hint" style="font-weight:700">${esc(title)}</div>
-          <div style="margin-top:3px">${esc(v.answer)}</div>
-        </div>`).join('')}`;
+    // Same shared reading-cards renderer used on other users' profiles.
+    box.innerHTML = readingCardsHtml([
+      ['Who you are', rd.who_you_are && rd.who_you_are.answer],
+      ['Your pattern', rd.your_pattern && rd.your_pattern.answer],
+      ['Your person', rd.your_person && rd.your_person.answer],
+      ['Your timing', rd.your_timing && rd.your_timing.answer]
+    ]);
   } catch { box.innerHTML = ''; }
 }
 
