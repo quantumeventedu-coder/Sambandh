@@ -1,23 +1,16 @@
 // Tests for the reputation engine's scoring and the AI red-flag → moderation
 // report pipeline (system Reports need no reporterId and dedupe per user+chat).
 
-const mongoose = require('mongoose');
-const { MongoMemoryServer } = require('mongodb-memory-server');
+// Runs against pg-odm + pglite (real Postgres — the production engine), not
+// Mongoose. `db` MUST be required before the models so odm.js selects pg-odm.
+const db = require('./helpers/pg-db');
 const { updateReputation, scoresToGrades } = require('../src/reputation-engine');
 const Reputation = require('../src/models/Reputation');
 const Report = require('../src/models/Report');
 
-let mem;
-
-beforeAll(async () => {
-  mem = await MongoMemoryServer.create();
-  await mongoose.connect(mem.getUri('sambandh-test'));
-});
-
-afterAll(async () => {
-  await mongoose.disconnect();
-  await mem.stop();
-});
+beforeAll(db.start);
+afterAll(db.stop);
+afterEach(db.clear);
 
 const analysis = (overrides = {}) => ({
   respect: 8, responsive: 7, depth: 6, humor: 5, directness: 9,
@@ -43,7 +36,7 @@ describe('scoresToGrades', () => {
 
 describe('updateReputation', () => {
   test('creates a reputation document on first analysis', async () => {
-    const uid = new mongoose.Types.ObjectId().toString();
+    const uid = new db.Types.ObjectId().toString();
     await updateReputation(uid, analysis(), 12);
 
     const rep = await Reputation.findOne({ userId: uid });
@@ -55,7 +48,7 @@ describe('updateReputation', () => {
   });
 
   test('blends scores as a rolling average on later analyses', async () => {
-    const uid = new mongoose.Types.ObjectId().toString();
+    const uid = new db.Types.ObjectId().toString();
     await updateReputation(uid, analysis({ respect: 8 }), 10);
     await updateReputation(uid, analysis({ respect: 4 }), 10);
 
@@ -65,8 +58,8 @@ describe('updateReputation', () => {
   });
 
   test('red flags increment the counter and auto-file a system report', async () => {
-    const uid = new mongoose.Types.ObjectId().toString();
-    const chatId = new mongoose.Types.ObjectId();
+    const uid = new db.Types.ObjectId().toString();
+    const chatId = new db.Types.ObjectId();
     await updateReputation(uid, analysis({ red_flags: ['harassment: repeated threats'] }), 10, chatId);
 
     const rep = await Reputation.findOne({ userId: uid });
@@ -82,8 +75,8 @@ describe('updateReputation', () => {
   });
 
   test('re-analysis updates the open system report instead of filing a duplicate', async () => {
-    const uid = new mongoose.Types.ObjectId().toString();
-    const chatId = new mongoose.Types.ObjectId();
+    const uid = new db.Types.ObjectId().toString();
+    const chatId = new db.Types.ObjectId();
     await updateReputation(uid, analysis({ red_flags: ['coercion'] }), 10, chatId);
     await updateReputation(uid, analysis({ red_flags: ['coercion', 'doxxing attempt'] }), 10, chatId);
 
@@ -96,8 +89,8 @@ describe('updateReputation', () => {
   });
 
   test('a resolved system report does not block a new one', async () => {
-    const uid = new mongoose.Types.ObjectId().toString();
-    const chatId = new mongoose.Types.ObjectId();
+    const uid = new db.Types.ObjectId().toString();
+    const chatId = new db.Types.ObjectId();
     await updateReputation(uid, analysis({ red_flags: ['manipulation'] }), 10, chatId);
     await Report.updateMany({ reportedUserId: uid }, { status: 'resolved' });
 
@@ -106,8 +99,8 @@ describe('updateReputation', () => {
   });
 
   test('non-severe flags file under the "other" category', async () => {
-    const uid = new mongoose.Types.ObjectId().toString();
-    await updateReputation(uid, analysis({ red_flags: ['manipulation'] }), 10, new mongoose.Types.ObjectId());
+    const uid = new db.Types.ObjectId().toString();
+    await updateReputation(uid, analysis({ red_flags: ['manipulation'] }), 10, new db.Types.ObjectId());
     const report = await Report.findOne({ reportedUserId: uid });
     expect(report.category).toBe('other');
   });
@@ -115,7 +108,7 @@ describe('updateReputation', () => {
 
 describe('Report model', () => {
   test('requires reporterId for user reports but not system reports', async () => {
-    const target = new mongoose.Types.ObjectId();
+    const target = new db.Types.ObjectId();
     await expect(Report.create({
       source: 'user', reportedUserId: target, category: 'other', description: 'no reporter given'
     })).rejects.toThrow(/reporterId/);
