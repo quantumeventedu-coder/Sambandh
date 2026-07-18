@@ -13,8 +13,8 @@ process.env.JWT_SECRET = 'test-jwt-secret-value-long-enough';
 const express = require('express');
 const request = require('supertest');
 const bcrypt = require('bcryptjs');
-const mongoose = require('mongoose');
-const { MongoMemoryServer } = require('mongodb-memory-server');
+// Real Postgres via pg-odm + pglite. Must precede the routes-auth/model requires.
+const db = require('./helpers/pg-db');
 
 // Analytics/events must not touch a real store during auth tests.
 jest.mock('../src/services/analytics', () => ({ track: jest.fn() }));
@@ -28,10 +28,9 @@ app.use(express.json());
 app.use('/auth', authRouter);
 app.get('/whoami', authRouter.requireAuth, (req, res) => res.json({ userId: req.userId }));
 
-let mem;
-beforeAll(async () => { mem = await MongoMemoryServer.create(); await mongoose.connect(mem.getUri('authpw-test')); });
-afterAll(async () => { await mongoose.disconnect(); await mem.stop(); });
-afterEach(async () => { await User.deleteMany({}); jest.clearAllMocks(); });
+beforeAll(db.start);
+afterAll(db.stop);
+afterEach(async () => { await db.clear(); jest.clearAllMocks(); });
 
 const reg = (over = {}) => request(app).post('/auth/register')
   .send({ email: 'a@example.com', password: 'correct-horse-battery', ...over });

@@ -17,8 +17,8 @@ const express = require('express');
 const request = require('supertest');
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
-const mongoose = require('mongoose');
-const { MongoMemoryServer } = require('mongodb-memory-server');
+// Real Postgres via pg-odm + pglite. Must precede the routes-auth/model requires.
+const db = require('./helpers/pg-db');
 
 const authRouter = require('../src/routes-auth');
 const { requireAuth, requireAdmin, requireSuperAdmin } = authRouter;
@@ -37,10 +37,9 @@ const sign = (over = {}, opts = {}) => jwt.sign(
 );
 const bearer = t => ['Authorization', 'Bearer ' + t];
 
-let mem;
-beforeAll(async () => { mem = await MongoMemoryServer.create(); await mongoose.connect(mem.getUri('auth-test')); });
-afterAll(async () => { await mongoose.disconnect(); await mem.stop(); });
-afterEach(async () => { await TokenBlacklist.deleteMany({}); });
+beforeAll(db.start);
+afterAll(db.stop);
+afterEach(db.clear);
 
 describe('requireAuth', () => {
   test('a valid token is accepted and identifies the user', async () => {

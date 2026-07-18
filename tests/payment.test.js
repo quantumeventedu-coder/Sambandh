@@ -14,8 +14,8 @@
 const express = require('express');
 const request = require('supertest');
 const crypto = require('crypto');
-const mongoose = require('mongoose');
-const { MongoMemoryServer } = require('mongodb-memory-server');
+// Real Postgres via pg-odm + pglite. Must precede the routes-payment/model requires.
+const db = require('./helpers/pg-db');
 
 // Must be the SAME id the auth mock injects, or every lookup silently misses.
 const { ID: TEST_USER_ID } = require('./payment.helpers');
@@ -57,13 +57,9 @@ app.use('/payment/webhook', express.raw({ type: 'application/json' }));
 app.use(express.json());
 app.use('/payment', paymentRouter);
 
-let mem;
-beforeAll(async () => {
-  mem = await MongoMemoryServer.create();
-  await mongoose.connect(mem.getUri('pay-test'));
-});
-afterAll(async () => { await mongoose.disconnect(); await mem.stop(); });
-afterEach(async () => { await Promise.all([User.deleteMany({}), Payment.deleteMany({})]); jest.clearAllMocks(); });
+beforeAll(db.start);
+afterAll(db.stop);
+afterEach(async () => { await db.clear(); jest.clearAllMocks(); });
 
 const mkUser = async (gender = 'male', country = 'IN') => User.create({
   _id: TEST_USER_ID,
