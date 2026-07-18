@@ -691,9 +691,15 @@ async function disconnect() {
   ensuredTables.clear();
 }
 
+// Test-only seam: inject a pre-built pg-compatible executor ({ query, end }) so the
+// ODM can run against an in-process Postgres (pglite) in tests — exercising the
+// REAL SQL/JSONB engine production uses, not a Mongo emulator (see ADR-001). Not
+// used by any production path; production always goes through connect(url).
+function _setPoolForTests(poolLike) { pool = poolLike; connection.readyState = poolLike ? 1 : 0; }
+
 module.exports = { Schema, model, connect, disconnect, connection, Types, isPg: true };
 
 // Internals exposed for unit tests only. The SQL builder is pure (filter in, SQL
 // + bound params out), so it can — and must — be tested without a database.
 // Not part of the public ODM surface; do not use from application code.
-module.exports._internal = { SAFE_PATH, assertSafePath, jsonExpr, sqlPrefilter, scalarStr };
+module.exports._internal = { SAFE_PATH, assertSafePath, jsonExpr, sqlPrefilter, scalarStr, _setPoolForTests };
