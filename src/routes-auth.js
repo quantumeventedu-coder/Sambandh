@@ -77,6 +77,7 @@ const profileSchema = z.object({
   // Self-declared temperament features (Samudrika). Every field optional and
   // chosen by the user from a fixed dropdown — exactly like birth details.
   // NEVER derived from a photo or measurement (enforced by no-cv-writes-features).
+  // `null` means the user removed their nature profile — clear the whole object.
   features: z.object({
     forehead: z.enum(['broad', 'high', 'narrow', 'even']).optional(),
     eyes: z.enum(['large', 'sharp', 'soft', 'deepset']).optional(),
@@ -84,7 +85,7 @@ const profileSchema = z.object({
     gait: z.enum(['fast', 'measured', 'light', 'firm']).optional(),
     hands: z.enum(['long', 'broad', 'fine', 'square']).optional(),
     build: z.enum(['solid', 'lean', 'balanced', 'sturdy']).optional()
-  }).optional(),
+  }).nullable().optional(),
   photos: z.array(z.object({
     base64: z.string(),
     filename: z.string(),
@@ -458,8 +459,10 @@ router.patch('/profile', requireAuth, async (req, res, next) => {
     }
     if (d.intent) updates.intent = d.intent;
     if (d.interestedInGenders) updates['preferences.interestedInGenders'] = d.interestedInGenders;
-    // Self-declared features — dotted paths so a partial update keeps the rest.
-    if (d.features) for (const [k, v] of Object.entries(d.features)) updates['features.' + k] = v;
+    // Self-declared features. null → remove the whole nature profile; otherwise
+    // dotted paths so a partial update keeps the fields it didn't touch.
+    if (d.features === null) updates.features = {};
+    else if (d.features) for (const [k, v] of Object.entries(d.features)) updates['features.' + k] = v;
     if (d.astrology) {
       updates['astrology.birthDate'] = d.astrology.birthDate;
       if (d.astrology.birthTime !== undefined) updates['astrology.birthTime'] = d.astrology.birthTime;

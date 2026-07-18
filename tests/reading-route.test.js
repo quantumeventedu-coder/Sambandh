@@ -59,6 +59,19 @@ describe('feature intake — self-declared only, validated', () => {
     expect(saved.features.eyes).toBe('soft');    // untouched
     expect(saved.features.voice).toBe('clear');  // added
   });
+
+  test('remove (features: null) clears the whole nature profile', async () => {
+    const u = await mkUser({ features: { eyes: 'sharp', build: 'solid' } });
+    const r = await request(app).patch('/api/auth/profile').set('Authorization', token(u._id))
+      .send({ languages: ['hindi'], features: null });
+    expect(r.status).toBe(200);
+    const saved = await User.findById(u._id);
+    expect(saved.features && saved.features.eyes).toBeFalsy();
+    expect(saved.features && saved.features.build).toBeFalsy();
+    // and the reading still works, just without the feature layer
+    const reading = await request(app).get('/api/reading/me').set('Authorization', token(u._id));
+    expect(reading.status).toBe(200);
+  });
 });
 
 describe('GET /api/reading/me — full reading, jargon-free', () => {

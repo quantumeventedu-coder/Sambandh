@@ -1720,6 +1720,7 @@ async function renderSettings() {
       <div id="me-nakshatra"></div>
       <div id="me-rhythm"></div>
       <div id="me-network"></div>
+      <div id="me-nature"></div>
 
       <h2>Membership</h2>
       ${tierCards(u)}
@@ -1762,7 +1763,88 @@ async function renderSettings() {
     loadMyNakshatra();
     loadRhythm();
     loadNetwork();
+    loadNature(u);
   } catch (e) { screen.querySelector('.section-pad').innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+}
+
+// "Your nature profile" — the self-declare features (Samudrika) + the plain-language
+// reading they unlock. Self-described only; every field optional and removable.
+// The reading is always labelled as a READING (never "verified").
+const NATURE_FIELDS = [
+  ['build', 'Your build', [['solid', 'Solid and grounded'], ['lean', 'Lean and restless'], ['balanced', 'Balanced'], ['sturdy', 'Sturdy and strong']]],
+  ['gait', 'How you walk / carry yourself', [['fast', 'Quick and busy'], ['measured', 'Steady and unhurried'], ['light', 'Light and easy'], ['firm', 'Firm and planted']]],
+  ['voice', 'Your voice', [['deep', 'Deep, people settle when you speak'], ['quick', 'Quick, mind ahead of the room'], ['soft', 'Soft and calming'], ['clear', 'Clear and direct']]],
+  ['eyes', 'Your eyes', [['large', 'Open, easy to read'], ['sharp', 'Sharp, you notice everything'], ['soft', 'Soft, you put people at ease'], ['deepset', 'Watchful, you let people in slowly']]],
+  ['forehead', 'Your forehead', [['broad', 'Broad'], ['high', 'High'], ['narrow', 'Narrow'], ['even', 'Even']]],
+  ['hands', 'Your hands', [['long', 'Long'], ['broad', 'Broad and practical'], ['fine', 'Fine, detail-noticing'], ['square', 'Square and reliable']]]
+];
+
+async function loadNature(u) {
+  const el = $('#me-nature'); if (!el) return;
+  const f = (u && u.features) || {};
+  const opts = (field, plain) => plain.map(([v, label]) => `<option value="${v}" ${f[field] === v ? 'selected' : ''}>${esc(label)}</option>`).join('');
+  const selectors = NATURE_FIELDS.map(([field, q, plain]) => `
+    <label style="display:block;margin-bottom:10px">
+      <span class="hint" style="display:block;margin-bottom:3px">${esc(q)}</span>
+      <select id="nat-${field}" style="width:100%">
+        <option value="">—</option>${opts(field, plain)}
+      </select>
+    </label>`).join('');
+  el.innerHTML = `
+    <div class="card" style="margin-top:14px">
+      <div class="ic-row" style="color:var(--forest);font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase">${ic('sparkle') || ''} Your nature profile</div>
+      <p class="hint" style="margin-top:6px">Tell us about yourself in your own words — we use it to read your nature. Self-described, stored to your profile, editable or removable any time. Every field is optional.</p>
+      <div style="margin-top:10px">${selectors}</div>
+      <div class="row" style="gap:8px">
+        <button class="btn" onclick="saveNature()">Save &amp; read me</button>
+        ${Object.keys(f).length ? '<button class="btn secondary" onclick="removeNature()">Remove</button>' : ''}
+      </div>
+      <div id="nature-reading" style="margin-top:12px"></div>
+    </div>`;
+  renderNatureReading();
+}
+
+// Fetch and render the user's own plain-language reading, each card badged as a
+// READING (never verified).
+async function renderNatureReading() {
+  const box = $('#nature-reading'); if (!box) return;
+  try {
+    const r = await api('/reading/me');
+    const rd = r.reading || {};
+    const cards = [
+      ['Who you are', rd.who_you_are], ['Your pattern', rd.your_pattern],
+      ['Your person', rd.your_person], ['Your timing', rd.your_timing]
+    ].filter(([, v]) => v && v.answer);
+    if (!cards.length) { box.innerHTML = ''; return; }
+    box.innerHTML = `
+      <div style="margin-bottom:8px">${SBBadge.badgeHtml('reading', 'Your reading — an insight, not a verified fact')}</div>
+      ${cards.map(([title, v]) => `
+        <div class="card" style="margin-bottom:8px;background:rgba(138,92,192,.05)">
+          <div class="hint" style="font-weight:700">${esc(title)}</div>
+          <div style="margin-top:3px">${esc(v.answer)}</div>
+        </div>`).join('')}`;
+  } catch { box.innerHTML = ''; }
+}
+
+async function saveNature() {
+  const features = {};
+  for (const [field] of NATURE_FIELDS) { const v = $('#nat-' + field) && $('#nat-' + field).value; if (v) features[field] = v; }
+  try {
+    await api('/auth/profile', { method: 'PATCH', body: { languages: (S.user?.profile?.languages || ['english']), features } });
+    if (S.user) S.user.features = features;
+    toast('Saved — here\'s what we read about you ✦');
+    renderNatureReading();
+    const rm = document.querySelector('#me-nature .btn.secondary'); if (!rm && Object.keys(features).length) loadNature(S.user);
+  } catch (e) { toast(e.message); }
+}
+
+async function removeNature() {
+  try {
+    await api('/auth/profile', { method: 'PATCH', body: { languages: (S.user?.profile?.languages || ['english']), features: null } });
+    if (S.user) S.user.features = {};
+    toast('Nature profile removed.');
+    loadNature(S.user);
+  } catch (e) { toast(e.message); }
 }
 
 // Your relationship graph — connections, communities, and friend-of-friend
