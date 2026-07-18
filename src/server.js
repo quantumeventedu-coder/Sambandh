@@ -98,6 +98,7 @@ app.use('/api/notifications', notificationRoutes);
 app.use('/api/me', meRoutes);
 app.use('/api/community', require('./routes-community')); // anonymous topic rooms
 app.use('/api/astro', require('./routes-astro'));         // full astrology / kundali
+app.use('/api/reading', require('./routes-reading'));     // plain-language readings (no jargon)
 app.use('/api/ai', require('./routes-ai')); // reusable AI API (per-app X-AI-Key)
 app.use('/api/superadmin', require('./routes-superadmin')); // owner-only, SUPER_ADMIN_KEY
 

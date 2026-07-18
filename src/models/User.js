@@ -38,6 +38,11 @@ const UserSchema = new mongoose.Schema({
     sunSign: String, moonSign: String, rashi: String, nakshatra: String,
     mangalDosha: Boolean, computedAt: Date
   },
+  // Self-declared temperament features (Samudrika). Set ONLY by the user via the
+  // profile form — never derived from a photo/measurement (no-cv-writes-features).
+  features: {
+    forehead: String, eyes: String, voice: String, gait: String, hands: String, build: String
+  },
   verification: {
     level: { type: String, enum: ['phone_only', 'photo_verified', 'id_verified', 'profession_verified', 'fully_verified'], default: 'phone_only' },
     idVerified: { type: Boolean, default: false }, idType: String, idVerifiedAt: Date,
