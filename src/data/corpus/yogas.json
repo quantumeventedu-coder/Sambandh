@@ -1,0 +1,30 @@
+{
+  "_provenance": "Major planetary combinations (raja/dhana yogas and notable difficult combinations) as detected by src/services/astro-engine.js detectYogas()/detectDoshas() — the same conditions that already fire on the live charts. Structured here as data (condition + effect + factors), not prose. Framework-sourced; PDFs absent at build time.",
+  "_shape": "array of { code, name, category(raja|wealth|intellect|mahapurusha|cancellation|difficult), condition, effect, factors[] }",
+  "yogas": [
+    { "code": "gaja_kesari", "name": "Gaja Kesari", "category": "raja",
+      "condition": "Jupiter in a kendra (1/4/7/10) from the Moon", "effect": "wisdom, respect and lasting good fortune", "factors": ["jupiter", "moon"] },
+    { "code": "budha_aditya", "name": "Budha-Aditya", "category": "intellect",
+      "condition": "Sun and Mercury in the same sign (Mercury not combust for the full effect)", "effect": "sharp intellect and communication", "factors": ["sun", "mercury"] },
+    { "code": "chandra_mangal", "name": "Chandra-Mangal", "category": "wealth",
+      "condition": "Moon and Mars in the same sign", "effect": "drive and resourcefulness, often earning capacity", "factors": ["moon", "mars"] },
+    { "code": "pancha_mahapurusha", "name": "Pancha Mahapurusha", "category": "mahapurusha",
+      "condition": "Mars/Mercury/Jupiter/Venus/Saturn in own or exalted sign AND in a kendra from the Lagna", "effect": "a standout quality of that planet (courage/intellect/wisdom/charm/discipline)", "factors": ["mars", "mercury", "jupiter", "venus", "saturn", "lagna"] },
+    { "code": "raja_yoga", "name": "Raja Yoga", "category": "raja",
+      "condition": "a kendra (1/4/7/10) lord and a trikona (5/9) lord occupy the same house", "effect": "status, authority and success", "factors": ["kendra-lord", "trikona-lord"] },
+    { "code": "dhana_yoga", "name": "Dhana Yoga", "category": "wealth",
+      "condition": "the 2nd (wealth) and 11th (gains) lords sit together", "effect": "accumulation of wealth", "factors": ["2nd-lord", "11th-lord"] },
+    { "code": "vipreet_raja_yoga", "name": "Vipreet Raja Yoga", "category": "raja",
+      "condition": "a dusthana (6/8/12) lord occupies a dusthana", "effect": "adversity that ultimately turns to advantage", "factors": ["dusthana-lord"] },
+    { "code": "adhi_yoga", "name": "Adhi Yoga", "category": "raja",
+      "condition": "benefics (Jupiter/Venus/Mercury) occupy the 6th-8th from the Moon", "effect": "leadership, prosperity and good health", "factors": ["jupiter", "venus", "mercury", "moon"] },
+    { "code": "neecha_bhanga", "name": "Neecha Bhanga Raja Yoga", "category": "cancellation",
+      "condition": "a debilitated planet whose dispositor is angular (kendra) — the debilitation is cancelled", "effect": "an early weakness that becomes a source of strength", "factors": ["debilitated-planet", "dispositor"] },
+    { "code": "mangal_dosha", "name": "Mangal (Manglik)", "category": "difficult",
+      "condition": "Mars in house 1/2/4/7/8/12 from the Lagna, Moon or Venus", "effect": "heat and force in partnership; traditionally matched with a similarly-placed partner; often cancelled by other factors", "factors": ["mars", "lagna", "moon", "venus"] },
+    { "code": "kaal_sarp", "name": "Kaal Sarp", "category": "difficult",
+      "condition": "every planet falls on one side of the Rahu-Ketu axis", "effect": "intensity and delays early on, often easing with age", "factors": ["rahu", "ketu"] },
+    { "code": "kemadruma", "name": "Kemadruma", "category": "difficult",
+      "condition": "no planet (except Sun/nodes) in the 2nd/12th from the Moon and none with the Moon", "effect": "emotional ups and downs; readily mitigated by a strong Moon or aspects", "factors": ["moon"] }
+  ]
+}

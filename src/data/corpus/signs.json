@@ -1,0 +1,18 @@
+{
+  "_provenance": "Classical sign attributes (element, modality/quality, ruling planet, core temperament). Rulers and elements match src/services/astro-engine.js (SIGN_LORD / element tables) that compute the live charts. Framework-sourced; PDFs absent at build time.",
+  "_shape": "id -> { name, element, quality, ruler, temperament }",
+  "signs": {
+    "aries": { "name": "Aries", "element": "fire", "quality": "cardinal", "ruler": "mars", "temperament": "bold, direct, pioneering, impatient" },
+    "taurus": { "name": "Taurus", "element": "earth", "quality": "fixed", "ruler": "venus", "temperament": "steady, sensual, patient, stubborn" },
+    "gemini": { "name": "Gemini", "element": "air", "quality": "mutable", "ruler": "mercury", "temperament": "curious, quick, communicative, restless" },
+    "cancer": { "name": "Cancer", "element": "water", "quality": "cardinal", "ruler": "moon", "temperament": "feeling, nurturing, protective, moody" },
+    "leo": { "name": "Leo", "element": "fire", "quality": "fixed", "ruler": "sun", "temperament": "warm, proud, generous, needs recognition" },
+    "virgo": { "name": "Virgo", "element": "earth", "quality": "mutable", "ruler": "mercury", "temperament": "precise, practical, helpful, self-critical" },
+    "libra": { "name": "Libra", "element": "air", "quality": "cardinal", "ruler": "venus", "temperament": "harmonising, relational, fair, indecisive" },
+    "scorpio": { "name": "Scorpio", "element": "water", "quality": "fixed", "ruler": "mars", "temperament": "intense, deep, private, all-or-nothing" },
+    "sagittarius": { "name": "Sagittarius", "element": "fire", "quality": "mutable", "ruler": "jupiter", "temperament": "expansive, optimistic, freedom-loving, blunt" },
+    "capricorn": { "name": "Capricorn", "element": "earth", "quality": "cardinal", "ruler": "saturn", "temperament": "disciplined, ambitious, enduring, reserved" },
+    "aquarius": { "name": "Aquarius", "element": "air", "quality": "fixed", "ruler": "saturn", "temperament": "independent, inventive, principled, detached" },
+    "pisces": { "name": "Pisces", "element": "water", "quality": "mutable", "ruler": "jupiter", "temperament": "empathic, imaginative, gentle, boundary-soft" }
+  }
+}

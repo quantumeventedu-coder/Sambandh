@@ -1,0 +1,60 @@
+{
+  "_provenance": "Classical Vedic (Parashari / Brihat Jataka) framework for planetary natures, significations, natural friendships and dignities. Encoded from the well-documented tradition and cross-checked against src/services/astro-engine.js (EXALT / DEBIL / OWN / friendship tables) which computes the app's live charts. NOTE: the source PDFs (Brihat Jataka, Surya Siddhanta) were not present in docs/sources/ at build time, so citations are to the framework, not to page/section — add the sources to cross-reference.",
+  "_shape": "id -> { name, nature, governs[], friends[], enemies[], neutral[], strong:{exalted, own[]}, weak:{debilitated} }",
+  "planets": {
+    "sun": {
+      "name": "Sun", "nature": "hot, dry, masculine; the soul, ego, vitality and will",
+      "governs": ["self", "father", "authority", "vitality", "status", "confidence"],
+      "friends": ["moon", "mars", "jupiter"], "enemies": ["venus", "saturn"], "neutral": ["mercury"],
+      "strong": { "exalted": "aries", "own": ["leo"] }, "weak": { "debilitated": "libra" }
+    },
+    "moon": {
+      "name": "Moon", "nature": "cool, moist, feminine; the mind, emotions, receptivity and the mother",
+      "governs": ["mind", "emotions", "mother", "comfort", "public", "moods"],
+      "friends": ["sun", "mercury"], "enemies": [], "neutral": ["mars", "jupiter", "venus", "saturn"],
+      "strong": { "exalted": "taurus", "own": ["cancer"] }, "weak": { "debilitated": "scorpio" }
+    },
+    "mars": {
+      "name": "Mars", "nature": "hot, dry, masculine; energy, drive, courage and conflict",
+      "governs": ["courage", "energy", "siblings", "property", "conflict", "passion"],
+      "friends": ["sun", "moon", "jupiter"], "enemies": ["mercury"], "neutral": ["venus", "saturn"],
+      "strong": { "exalted": "capricorn", "own": ["aries", "scorpio"] }, "weak": { "debilitated": "cancer" }
+    },
+    "mercury": {
+      "name": "Mercury", "nature": "neutral, adaptable; intellect, speech, logic and commerce",
+      "governs": ["intellect", "speech", "communication", "commerce", "learning", "wit"],
+      "friends": ["sun", "venus"], "enemies": ["moon"], "neutral": ["mars", "jupiter", "saturn"],
+      "strong": { "exalted": "virgo", "own": ["gemini", "virgo"] }, "weak": { "debilitated": "pisces" }
+    },
+    "jupiter": {
+      "name": "Jupiter", "nature": "warm, benefic, expansive; wisdom, ethics, growth and fortune",
+      "governs": ["wisdom", "belief", "children", "fortune", "teachers", "generosity"],
+      "friends": ["sun", "moon", "mars"], "enemies": ["mercury", "venus"], "neutral": ["saturn"],
+      "strong": { "exalted": "cancer", "own": ["sagittarius", "pisces"] }, "weak": { "debilitated": "capricorn" }
+    },
+    "venus": {
+      "name": "Venus", "nature": "cool, moist, benefic; love, beauty, pleasure and relationship",
+      "governs": ["love", "partnership", "beauty", "pleasure", "art", "comfort"],
+      "friends": ["mercury", "saturn"], "enemies": ["sun", "moon"], "neutral": ["mars", "jupiter"],
+      "strong": { "exalted": "pisces", "own": ["taurus", "libra"] }, "weak": { "debilitated": "virgo" }
+    },
+    "saturn": {
+      "name": "Saturn", "nature": "cold, dry, malefic; discipline, delay, endurance and karma",
+      "governs": ["discipline", "time", "labour", "endurance", "loss", "longevity"],
+      "friends": ["mercury", "venus"], "enemies": ["sun", "moon", "mars"], "neutral": ["jupiter"],
+      "strong": { "exalted": "libra", "own": ["capricorn", "aquarius"] }, "weak": { "debilitated": "aries" }
+    },
+    "rahu": {
+      "name": "Rahu", "nature": "shadow node; ambition, obsession, the unconventional and the foreign",
+      "governs": ["ambition", "obsession", "innovation", "foreign", "illusion", "sudden change"],
+      "friends": ["venus", "saturn"], "enemies": ["sun", "moon", "mars"], "neutral": ["mercury", "jupiter"],
+      "strong": { "exalted": null, "own": [] }, "weak": { "debilitated": null }
+    },
+    "ketu": {
+      "name": "Ketu", "nature": "shadow node; detachment, insight, spirituality and the past",
+      "governs": ["detachment", "insight", "spirituality", "liberation", "past", "loss"],
+      "friends": ["venus", "saturn"], "enemies": ["sun", "moon"], "neutral": ["mars", "mercury", "jupiter"],
+      "strong": { "exalted": null, "own": [] }, "weak": { "debilitated": null }
+    }
+  }
+}
