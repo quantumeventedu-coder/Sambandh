@@ -18,6 +18,7 @@
 
 const guards = require('./reading-guards');
 const R = require('../data/reading-rules');
+const { interpret } = require('./interpretation-engine');   // single chart→meaning authority (Batch 2)
 
 const LAYER_PRIORITY = { chart: 0, behaviour: 1, features: 2 };
 
@@ -55,9 +56,20 @@ function gather(inputs = {}) {
   const { chart, features, behaviour } = inputs;
 
   if (chart) {
+    // SINGLE CHART AUTHORITY: the interpretation engine decides WHAT the chart says
+    // (Batch 2 findings → factor codes); this engine only owns the VOICE. A chart
+    // phrase-rule surfaces iff its factor is among the active findings. The two
+    // definitions are pinned equivalent by tests/reading-findings-bridge.test.js,
+    // so this is byte-identical to the old per-rule tests but with one source of
+    // truth for chart meaning (no parallel astrology logic to drift).
+    let active;
+    try {
+      active = new Set(interpret(chart).flatMap(f => f.factors));
+    } catch { active = new Set(); }
     for (const rule of R.CHART_SIGNALS) {
-      try { if (rule.test(chart)) sigs.push({ layer: 'chart', tag: rule.tag, who: rule.who, pattern: rule.pattern, person: rule.person }); }
-      catch { /* a missing chart field just means this rule doesn't fire */ }
+      if (rule.factor && active.has(rule.factor)) {
+        sigs.push({ layer: 'chart', tag: rule.tag, who: rule.who, pattern: rule.pattern, person: rule.person });
+      }
     }
   }
 

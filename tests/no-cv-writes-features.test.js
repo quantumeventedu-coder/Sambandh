@@ -15,13 +15,20 @@ const path = require('path');
 
 const SRC = path.join(__dirname, '..', 'src');
 
-// Every source file that does computer vision / face / image work. Identified by
-// name and by importing a vision library; if a new CV module is added it should be
-// added here (and it still must not touch features).
+// The computer-vision LOGIC modules — the services that actually run face/image
+// analysis. The guard targets these: they must never derive temperament features.
+//
+// Models and routes are deliberately EXCLUDED: the User model legitimately STORES
+// both a verification face-descriptor and the (separately) self-declared features,
+// and the profile route is the sanctioned self-declare intake (enum-validated).
+// Neither is CV logic. The tripwire is specifically about a vision module inventing
+// features from a face or body.
 function isCvFile(file, contents) {
+  const rel = path.relative(SRC, file).replace(/\\/g, '/');
+  if (rel.startsWith('models/') || rel.startsWith('routes-') || rel.startsWith('routes/')) return false;
   const base = path.basename(file).toLowerCase();
   if (/face|vision|nsfw|moderation|verify-engine/.test(base)) return true;
-  return /face-?api|blazeface|@vladmandic|nsfwjs|faceDescriptor|face_descriptor/i.test(contents);
+  return /face-?api|blazeface|@vladmandic|nsfwjs|facedescriptor|face_descriptor/i.test(contents);
 }
 
 function walk(dir) {

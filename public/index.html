@@ -28,7 +28,16 @@
 </div>
 <div id="toast"></div>
 <div id="modal-wrap" onclick="if(event.target===this)closeModal()"><div id="modal"></div></div>
+<style>
+  /* Two label types — kept visually distinct so a reading can never look verified. */
+  .badge-fact{display:inline-flex;align-items:center;gap:4px;font-size:11px;font-weight:700;
+    color:#1a7a3a;background:rgba(63,191,114,.14);border:1px solid rgba(63,191,114,.45);border-radius:99px;padding:2px 9px}
+  .badge-reading{display:inline-flex;align-items:center;gap:4px;font-size:11px;font-weight:700;
+    color:#8a5cc0;background:rgba(138,92,192,.12);border:1px solid rgba(138,92,192,.45);border-radius:99px;padding:2px 9px}
+</style>
 <script src="/socket.io/socket.io.js"></script>
+<script src="/badge.js?v=1"></script>
+<script src="/geometry-map.js?v=1"></script>
 <script src="/app.js?v=2"></script>
 </body>
 </html>

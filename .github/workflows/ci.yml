@@ -61,6 +61,9 @@ jobs:
       - name: Pre-fetch mongod binary
         run: npm run test:setup
 
+      - name: Validate rule corpus (Batch 0)
+        run: node scripts/validate-corpus.js
+
       - name: Lint (zero warnings tolerated)
         run: npx eslint src/ --max-warnings=0
 

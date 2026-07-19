@@ -38,6 +38,26 @@ const UserSchema = new mongoose.Schema({
     sunSign: String, moonSign: String, rashi: String, nakshatra: String,
     mangalDosha: Boolean, computedAt: Date
   },
+  // Temperament features (Samudrika). Two sanctioned writers now: the user via the
+  // profile form (self-declared), and geometric CV via services/feature-guard.js —
+  // never anything else. CV writes GEOMETRY only (never complexion), fills only
+  // fields the user hasn't declared, and its output surfaces as a READING, never
+  // "verified". Provenance per field lives in `featureSources`.
+  features: {
+    forehead: String, eyes: String, voice: String, gait: String, hands: String, build: String
+  },
+  // Per-field provenance: 'self' (user typed it) | 'cv' (geometric read). Absent →
+  // treated as self-declared. Drives the reading-vs-fact badge and the "self wins
+  // over CV" merge rule in feature-guard.applyCvFeatures.
+  featureSources: {
+    forehead: String, eyes: String, voice: String, gait: String, hands: String, build: String
+  },
+  // Separate, explicit consent for the geometric read — NOT implied by uploading a
+  // photo or by ID verification. No consent → feature-guard refuses to write.
+  cvConsent: {
+    geometry: { type: Boolean, default: false },
+    at: Date
+  },
   verification: {
     level: { type: String, enum: ['phone_only', 'photo_verified', 'id_verified', 'profession_verified', 'fully_verified'], default: 'phone_only' },
     idVerified: { type: Boolean, default: false }, idType: String, idVerifiedAt: Date,

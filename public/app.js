@@ -755,6 +755,66 @@ async function captureFace() {
   } catch (e) { setStatus(''); toast(e.message); $('#face-capture').disabled = false; }
 }
 
+// ---- Geometric read (opt-in): face geometry → a temperament READING ----
+// SEPARATE and EXPLICIT — never part of verification, never automatic. The user
+// turns it on (POST /me/cv-consent), then this reuses the SAME face-api 68-pt
+// landmarks the verifier already loads, maps them PURELY (SBGeometry — no colour/
+// pixel input, so complexion can't influence anything), keeps only confident
+// readings, and POSTs them through the server guard. The result is a reading, never
+// "verified". build/gait/hands are not produced here (no body-pose model).
+//
+// NOTE: the landmark ML itself runs only in a real browser with a camera, so this
+// wiring is exercised in the field; the geometry MATH it depends on is covered by
+// tests/geometry-map.test.js and the server guard by tests/cv-route.test.js.
+async function enableGeometricRead() {
+  try {
+    await api('/me/cv-consent', { method: 'POST', body: { geometry: true } });
+    toast('Geometric read on — it will refine your nature reading (never “verified”).');
+  } catch { toast('Could not save that preference — try again.'); }
+}
+
+async function runGeometricReadFromVideo() {
+  if (typeof faceapi === 'undefined' || typeof SBGeometry === 'undefined') return null;
+  const vid = $('#face-vid');
+  if (!vid) return null;
+  const opts = new faceapi.TinyFaceDetectorOptions({ inputSize: 416, scoreThreshold: 0.5 });
+  const det = await faceapi.detectSingleFace(vid, opts).withFaceLandmarks(true);
+  if (!det || !det.landmarks) return null;
+  const points = det.landmarks.positions.map(p => ({ x: p.x, y: p.y }));  // 68 {x,y}
+  const read = SBGeometry.geometryToFeatures(points);
+  const features = SBGeometry.confidentFeatures(read);                    // drop low-confidence
+  if (!Object.keys(features).length) return null;
+  // Server applies through feature-guard: consent required, complexion refused,
+  // self-declared never overwritten, output tagged as a reading.
+  const r = await api('/me/geometric-read', { method: 'POST', body: { features } });
+  return r;                                                               // { written, badge:'reading', ... }
+}
+
+// Body build from a full-body pose (MoveNet via TF.js — same tfjs the NSFW check
+// loads). Structural proportion ONLY (shoulder/hip/torso), mapped PURELY via
+// SBGeometry.poseToFeatures; gait/hands are never guessed. Field-exercised edge;
+// its geometry math is covered by tests/geometry-map.test.js.
+let _poseModel = null;
+async function runBodyReadFromVideo(videoEl) {
+  const vid = videoEl || $('#face-vid');
+  if (!vid || typeof SBGeometry === 'undefined') return null;
+  try {
+    if (!_poseModel) {
+      await loadScript('https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.20.0/dist/tf.min.js');
+      await loadScript('https://cdn.jsdelivr.net/npm/@tensorflow-models/pose-detection@2.1.3/dist/pose-detection.min.js');
+      _poseModel = await poseDetection.createDetector(poseDetection.SupportedModels.MoveNet);
+    }
+    const poses = await _poseModel.estimatePoses(vid);
+    if (!poses || !poses[0]) return null;
+    const kp = {};
+    for (const p of poses[0].keypoints) if (p.name) kp[p.name] = { x: p.x, y: p.y, score: p.score };
+    const read = SBGeometry.poseToFeatures(kp);
+    const features = SBGeometry.confidentFeatures(read);
+    if (!Object.keys(features).length) return null;
+    return await api('/me/geometric-read', { method: 'POST', body: { features } });  // guarded, reading-only
+  } catch { return null; }   // pose is a bonus refinement — a CDN/model hiccup never blocks anything
+}
+
 function obProfession() {
   return `<div class="section-pad">
     <h1>What do you do?</h1>
@@ -974,6 +1034,23 @@ async function obSavePhotos() {
 }
 
 // ---------------- Discover ----------------
+// Reading ④ shared bits. The server already guarantees jargon-free reading text;
+// this client guard is defense-in-depth on the NEW render paths (discover card +
+// other users' profiles) — a line containing any astrology term is dropped.
+const READING_JARGON_RE = /\b(sun|moon|mars|mercury|jupiter|venus|saturn|rahu|ketu|aries|taurus|gemini|cancer|leo|virgo|libra|scorpio|sagittarius|capricorn|aquarius|pisces|nakshatra|dosha|dasha|guna|lagna|mangal|rashi|ascendant|kundli|kundali|graha|navamsa|dasamsa|exalted|debilitated|ayanamsa|vimshottari)\b/i;
+function plainOnly(s) { return (typeof s === 'string' && s && !READING_JARGON_RE.test(s)) ? s : ''; }
+
+// The ONE reading-cards renderer, reused by the Me tab and other users' profiles.
+// Every card is labelled a READING (never verified) and jargon-guarded.
+function readingCardsHtml(pairs, { note = 'Your reading — an insight, not a verified fact' } = {}) {
+  const safe = pairs.filter(([, a]) => plainOnly(a));
+  if (!safe.length) return '';
+  return `<div style="margin:6px 0">${SBBadge.badgeHtml('reading', note)}</div>` +
+    safe.map(([title, a]) => `<div class="card" style="margin-bottom:8px;background:rgba(138,92,192,.05)">
+      <div class="hint" style="font-weight:700">${esc(title)}</div>
+      <div style="margin-top:3px">${esc(plainOnly(a))}</div></div>`).join('');
+}
+
 async function renderDiscover() {
   screen.innerHTML = `
     ${headerBar()}
@@ -1017,6 +1094,7 @@ async function renderDiscover() {
             <span class="karma">Lakshan: ${p.karma.score} ${p.karma.grade}</span>
           </div>
           ${(p.reasons && p.reasons.length) ? `<div class="why">${ic('sparkle')} ${p.reasons.map(r => esc(r)).join(' · ')}</div>` : ''}
+          ${plainOnly(p.natureLine) ? `<div class="nature-line" style="margin-top:5px;display:flex;align-items:center;gap:6px;flex-wrap:wrap">${SBBadge.badgeHtml('reading', 'Reading')}<span style="font-size:12.5px;color:var(--plum,#8a5cc0)">${esc(plainOnly(p.natureLine))}</span></div>` : ''}
         </div>
       </div>
       <div class="pcard-actions" id="pa-${p.userId}">
@@ -1150,10 +1228,16 @@ async function startChat(userId, anonymous) {
 async function renderProfile(userId) {
   screen.innerHTML = `<div class="section-pad"><div class="empty">Loading profile…</div></div>`;
   try {
-    const [p, karma] = await Promise.all([
+    const [p, karma, rdg] = await Promise.all([
       api('/discover/profile/' + userId),
-      api('/karma/profile/' + userId)
+      api('/karma/profile/' + userId),
+      api('/reading/' + userId).catch(() => null)   // reading is a nicety — never break the profile
     ]);
+    // Full plain-language reading for the viewed user (READING badge, jargon-guarded).
+    const readingBlock = rdg ? readingCardsHtml([
+      ['Their nature', rdg.line],
+      ['Who they are', rdg.who]
+    ], { note: 'Their reading — an insight, not a verified fact' }) : '';
     const photo = p.photos?.find(x => x.isPrimary)?.url || p.photos?.[0]?.url;
     screen.innerHTML = `
       <div class="app-header">
@@ -1177,6 +1261,7 @@ async function renderProfile(userId) {
           ${(p.tagsNegative || []).map(t => `<span class="tag haldi">${esc(t)}</span>`).join('')}
         </div>
         ${p.profession?.title ? `<div class="card ic-row" style="padding:12px 14px;font-size:13.5px;display:flex">${ic('briefcase')} <span>${esc(p.profession.title)}${p.profession.company ? ' · ' + esc(p.profession.company) : ''}</span> ${p.profession.verified ? '<span class="tag forest">verified</span>' : '<span class="tag plain">unverified</span>'}</div>` : ''}
+        ${readingBlock}
         ${renderKarmaFlags(karma, p.userId)}
         ${karma.activity ? `<div class="card" style="font-size:13px">
           <b style="font-size:11px;color:var(--ink-soft);text-transform:uppercase;letter-spacing:.05em">Activity — transparency</b>
@@ -1720,6 +1805,7 @@ async function renderSettings() {
       <div id="me-nakshatra"></div>
       <div id="me-rhythm"></div>
       <div id="me-network"></div>
+      <div id="me-nature"></div>
 
       <h2>Membership</h2>
       ${tierCards(u)}
@@ -1762,7 +1848,83 @@ async function renderSettings() {
     loadMyNakshatra();
     loadRhythm();
     loadNetwork();
+    loadNature(u);
   } catch (e) { screen.querySelector('.section-pad').innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+}
+
+// "Your nature profile" — the self-declare features (Samudrika) + the plain-language
+// reading they unlock. Self-described only; every field optional and removable.
+// The reading is always labelled as a READING (never "verified").
+const NATURE_FIELDS = [
+  ['build', 'Your build', [['solid', 'Solid and grounded'], ['lean', 'Lean and restless'], ['balanced', 'Balanced'], ['sturdy', 'Sturdy and strong']]],
+  ['gait', 'How you walk / carry yourself', [['fast', 'Quick and busy'], ['measured', 'Steady and unhurried'], ['light', 'Light and easy'], ['firm', 'Firm and planted']]],
+  ['voice', 'Your voice', [['deep', 'Deep, people settle when you speak'], ['quick', 'Quick, mind ahead of the room'], ['soft', 'Soft and calming'], ['clear', 'Clear and direct']]],
+  ['eyes', 'Your eyes', [['large', 'Open, easy to read'], ['sharp', 'Sharp, you notice everything'], ['soft', 'Soft, you put people at ease'], ['deepset', 'Watchful, you let people in slowly']]],
+  ['forehead', 'Your forehead', [['broad', 'Broad'], ['high', 'High'], ['narrow', 'Narrow'], ['even', 'Even']]],
+  ['hands', 'Your hands', [['long', 'Long'], ['broad', 'Broad and practical'], ['fine', 'Fine, detail-noticing'], ['square', 'Square and reliable']]]
+];
+
+async function loadNature(u) {
+  const el = $('#me-nature'); if (!el) return;
+  const f = (u && u.features) || {};
+  const opts = (field, plain) => plain.map(([v, label]) => `<option value="${v}" ${f[field] === v ? 'selected' : ''}>${esc(label)}</option>`).join('');
+  const selectors = NATURE_FIELDS.map(([field, q, plain]) => `
+    <label style="display:block;margin-bottom:10px">
+      <span class="hint" style="display:block;margin-bottom:3px">${esc(q)}</span>
+      <select id="nat-${field}" style="width:100%">
+        <option value="">—</option>${opts(field, plain)}
+      </select>
+    </label>`).join('');
+  el.innerHTML = `
+    <div class="card" style="margin-top:14px">
+      <div class="ic-row" style="color:var(--forest);font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase">${ic('sparkle') || ''} Your nature profile</div>
+      <p class="hint" style="margin-top:6px">Tell us about yourself in your own words — we use it to read your nature. Self-described, stored to your profile, editable or removable any time. Every field is optional.</p>
+      <div style="margin-top:10px">${selectors}</div>
+      <div class="row" style="gap:8px">
+        <button class="btn" onclick="saveNature()">Save &amp; read me</button>
+        ${Object.keys(f).length ? '<button class="btn secondary" onclick="removeNature()">Remove</button>' : ''}
+      </div>
+      <div id="nature-reading" style="margin-top:12px"></div>
+    </div>`;
+  renderNatureReading();
+}
+
+// Fetch and render the user's own plain-language reading, each card badged as a
+// READING (never verified).
+async function renderNatureReading() {
+  const box = $('#nature-reading'); if (!box) return;
+  try {
+    const r = await api('/reading/me');
+    const rd = r.reading || {};
+    // Same shared reading-cards renderer used on other users' profiles.
+    box.innerHTML = readingCardsHtml([
+      ['Who you are', rd.who_you_are && rd.who_you_are.answer],
+      ['Your pattern', rd.your_pattern && rd.your_pattern.answer],
+      ['Your person', rd.your_person && rd.your_person.answer],
+      ['Your timing', rd.your_timing && rd.your_timing.answer]
+    ]);
+  } catch { box.innerHTML = ''; }
+}
+
+async function saveNature() {
+  const features = {};
+  for (const [field] of NATURE_FIELDS) { const v = $('#nat-' + field) && $('#nat-' + field).value; if (v) features[field] = v; }
+  try {
+    await api('/auth/profile', { method: 'PATCH', body: { languages: (S.user?.profile?.languages || ['english']), features } });
+    if (S.user) S.user.features = features;
+    toast('Saved — here\'s what we read about you ✦');
+    renderNatureReading();
+    const rm = document.querySelector('#me-nature .btn.secondary'); if (!rm && Object.keys(features).length) loadNature(S.user);
+  } catch (e) { toast(e.message); }
+}
+
+async function removeNature() {
+  try {
+    await api('/auth/profile', { method: 'PATCH', body: { languages: (S.user?.profile?.languages || ['english']), features: null } });
+    if (S.user) S.user.features = {};
+    toast('Nature profile removed.');
+    loadNature(S.user);
+  } catch (e) { toast(e.message); }
 }
 
 // Your relationship graph — connections, communities, and friend-of-friend

@@ -1,0 +1,18 @@
+{
+  "_provenance": "Classical Vedic (Brihat Jataka / Parashari) house significations, in plain terms. Encoded from the well-documented framework; the app's chart engine already assigns whole-sign houses (astro-engine.js). Source PDFs were absent at build time — provenance is to the tradition, not to page/section.",
+  "_shape": "number(1-12) -> { name, represents, keywords[] }",
+  "houses": {
+    "1": { "name": "First house", "represents": "self and body", "keywords": ["identity", "appearance", "vitality", "temperament"] },
+    "2": { "name": "Second house", "represents": "wealth and family", "keywords": ["money", "speech", "food", "close family", "values"] },
+    "3": { "name": "Third house", "represents": "courage and siblings", "keywords": ["effort", "siblings", "skills", "communication", "short journeys"] },
+    "4": { "name": "Fourth house", "represents": "home and mother", "keywords": ["home", "mother", "roots", "comfort", "inner peace", "property"] },
+    "5": { "name": "Fifth house", "represents": "children and creativity", "keywords": ["children", "creativity", "romance", "intelligence", "play"] },
+    "6": { "name": "Sixth house", "represents": "health and enemies", "keywords": ["health", "work", "obstacles", "debts", "service", "conflict"] },
+    "7": { "name": "Seventh house", "represents": "partnership and marriage", "keywords": ["marriage", "partner", "commitment", "one-to-one relationships", "contracts"] },
+    "8": { "name": "Eighth house", "represents": "longevity and change", "keywords": ["transformation", "shared resources", "depth", "crisis", "the hidden", "longevity"] },
+    "9": { "name": "Ninth house", "represents": "fortune and belief", "keywords": ["luck", "belief", "philosophy", "teachers", "long journeys", "meaning"] },
+    "10": { "name": "Tenth house", "represents": "career and status", "keywords": ["career", "public standing", "action", "reputation", "authority"] },
+    "11": { "name": "Eleventh house", "represents": "gains and networks", "keywords": ["gains", "friends", "networks", "hopes", "income", "community"] },
+    "12": { "name": "Twelfth house", "represents": "loss and release", "keywords": ["letting go", "solitude", "faraway places", "rest", "expenses", "the subconscious"] }
+  }
+}
