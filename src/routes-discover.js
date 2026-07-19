@@ -17,6 +17,19 @@ const Message = require('./models/Message');
 const Like = require('./models/Like');
 const Pass = require('./models/Pass');
 const { requireAuth } = require('./routes-auth');
+const { gatedFor } = require('./services/site-mode');
+
+// Pre-launch gate: until the owner opens the doors, only admins/moderators reach the
+// dating surface; everyone else is on the early-access waiting list (the app shows a
+// waiting room). Belt-and-braces with the client gate. Runs AFTER requireAuth (needs req.role).
+async function requireLaunched(req, res, next) {
+  try {
+    if (await gatedFor(req.role)) {
+      return res.status(403).json({ error: "Sambandh opens soon — you're on the early-access list.", code: 'prelaunch' });
+    }
+    next();
+  } catch (e) { next(e); }
+}
 const { computeActivitySignals } = require('./karma-book');
 const { userDistanceKm } = require('./data/cities');
 const recommender = require('./services/recommender');
@@ -61,7 +74,7 @@ function distanceScore(km, maxKm) {
 }
 
 // GET /api/discover — ranked, filtered feed
-router.get('/', requireAuth, async (req, res, next) => {
+router.get('/', requireAuth, requireLaunched, async (req, res, next) => {
   try {
     const me = await User.findById(req.userId);
     if (!me) return res.status(404).json({ error: 'User not found' });
@@ -219,7 +232,7 @@ router.get('/', requireAuth, async (req, res, next) => {
 });
 
 // POST /api/discover/:userId/like — like; mutual like creates a match + chat
-router.post('/:userId/like', requireAuth, async (req, res, next) => {
+router.post('/:userId/like', requireAuth, requireLaunched, async (req, res, next) => {
   try {
     const targetId = req.params.userId;
     if (targetId === req.userId) return res.status(400).json({ error: 'Cannot like yourself' });
@@ -280,7 +293,7 @@ router.post('/:userId/like', requireAuth, async (req, res, next) => {
 });
 
 // POST /api/discover/:userId/pass — hide from feed for 7 days
-router.post('/:userId/pass', requireAuth, async (req, res, next) => {
+router.post('/:userId/pass', requireAuth, requireLaunched, async (req, res, next) => {
   try {
     if (req.params.userId === req.userId) return res.status(400).json({ error: 'Invalid' });
     await Pass.findOneAndUpdate(

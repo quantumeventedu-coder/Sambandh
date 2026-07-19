@@ -230,10 +230,20 @@ const TAB_ROUTES = ['discover', 'community', 'astro', 'chats', 'karma', 'setting
 
 window.addEventListener('hashchange', route);
 
+// Pages locked during pre-launch (the dating surface). Settings/notifications stay
+// open so a waitlisted member can still manage their account.
+const GATED_PAGES = new Set(['discover', 'profile', 'chats', 'chat', 'karma', 'community', 'room', 'astro', 'compat']);
+function isGated() {
+  return !!(S.config && S.config.prelaunch && S.user && !['admin', 'moderator'].includes(S.user.role));
+}
+
 async function route() {
   const hash = location.hash || '#/';
   const parts = hash.slice(2).split('/');
   const page = parts[0] || '';
+
+  // Public site config (pre-launch flag) — loaded once, drives the early-access gate.
+  if (!S.config) { try { S.config = await api('/auth/config'); } catch { S.config = {}; } }
 
   if (!S.token && !['welcome', 'login', 'features'].includes(page)) return nav('#/welcome');
 
@@ -247,6 +257,15 @@ async function route() {
   // Route unfinished accounts into onboarding
   if (S.user && page !== 'onboarding' && !['welcome', 'login', 'features'].includes(page)) {
     if (onboardingStep() !== 'done') return nav('#/onboarding');
+  }
+
+  // Pre-launch gate: a registered non-admin has an account + profile but the dating
+  // surfaces are locked until launch — send them to the early-access waiting room.
+  if (isGated() && GATED_PAGES.has(page)) {
+    $('#tabbar').style.display = 'none';
+    screen.classList.add('no-tabs');
+    document.body.classList.remove('with-tabs');
+    return renderWaitingRoom();
   }
 
   const showTabs = TAB_ROUTES.includes(page) || page.startsWith('profile');
@@ -274,6 +293,55 @@ async function route() {
     case 'notifications': return renderNotifications();
     default: return nav(S.token ? '#/discover' : '#/welcome');
   }
+}
+
+function ensureWaitingCss() {
+  if (document.getElementById('wr-css')) return;
+  const s = document.createElement('style');
+  s.id = 'wr-css';
+  s.textContent = `
+  .wr-wrap{max-width:520px;margin:0 auto;text-align:center}
+  .wr-card{background:linear-gradient(160deg,#fff,#fdf3f6);border:1px solid #f0dbe4;border-radius:20px;padding:28px 24px;box-shadow:0 20px 50px rgba(153,53,86,.12);margin-top:24px}
+  .wr-badge{display:inline-block;font-size:12px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;color:#b8860b;background:#fbeecb;border:1px solid #f0d9a8;border-radius:99px;padding:5px 14px}
+  .wr-h1{font-family:Georgia,serif;font-size:28px;margin:16px 0 8px;color:#4B1528}
+  .wr-sub{color:#6a4b56;font-size:15px;line-height:1.55;margin-bottom:18px}
+  .wr-checks{text-align:left;background:#faf3f5;border:1px solid #efe0e6;border-radius:14px;padding:12px 16px;margin-bottom:18px}
+  .wr-row{display:flex;align-items:center;gap:10px;font-size:14px;color:#3a1420;padding:5px 0}
+  .wr-tick{width:24px;height:24px;flex:0 0 24px;border-radius:50%;display:grid;place-items:center;font-size:13px;font-weight:800;background:#eee;color:#999}
+  .wr-tick.on{background:#e3f4ea;color:#1f7a4d}.wr-tick.pend{background:#fbeecb;color:#b8860b}
+  .wr-foot{color:#9a8590;font-size:12.5px;margin-top:14px}
+  .wr-card .btn{margin-bottom:10px}`;
+  document.head.appendChild(s);
+}
+
+// Early-access waiting room — shown to registered non-admins while the site is in
+// pre-launch. Their account, payment and profile are done; the dating features open
+// at launch. They can still edit their profile / notifications from Settings.
+function renderWaitingRoom() {
+  ensureWaitingCss();
+  const u = S.user || {};
+  const name = (u.profile && u.profile.firstName) || u.firstName || 'there';
+  const paid = !!(u.membership && u.membership.joinFeePaid);
+  const verified = !!(u.verification && (u.verification.selfieVerified || u.verification.level && u.verification.level !== 'phone_only'));
+  const row = (ok, label) => `<div class="wr-row"><span class="wr-tick ${ok ? 'on' : ''}">${ok ? '✓' : '○'}</span>${label}</div>`;
+  screen.innerHTML = `
+    <div class="section-pad wr-wrap">
+      <div class="wr-card">
+        <div class="wr-badge">✦ Early access</div>
+        <h1 class="wr-h1">You're in, ${esc(name)}.</h1>
+        <p class="wr-sub">Your spot on Sambandh is secured. We're putting the final touches on the most honest dating experience in India — and opening the doors <b>very soon</b>. We'll email you the moment it's live.</p>
+        <div class="wr-checks">
+          ${row(true, 'Account created')}
+          ${row(paid, 'Membership active')}
+          ${row(verified, 'Photo verified')}
+          <div class="wr-row"><span class="wr-tick pend">…</span>Matching &amp; chats — <b>unlocking at launch</b></div>
+        </div>
+        <button class="btn ic-row" style="display:flex;justify-content:center" onclick="nav('#/settings')">${ic('edit')} Polish your profile while you wait</button>
+        <button class="btn secondary ic-row" style="display:flex;justify-content:center" onclick="nav('#/notifications')">${ic('bell')} Notification settings</button>
+        <button class="btn secondary" onclick="logout()">Sign out</button>
+        <p class="wr-foot">Questions? grievance@sambandh.in</p>
+      </div>
+    </div>`;
 }
 
 // ---------------- Welcome + Login ----------------
