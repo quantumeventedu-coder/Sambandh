@@ -89,6 +89,7 @@ app.get('/api/cities', (req, res) => {
   res.json({ cities: matches });
 });
 
+app.use('/api/waitlist', require('./routes-waitlist')); // public pre-launch waiting list
 app.use('/api/auth', authRoutes);
 app.use('/api/verification', verificationRoutes);
 app.use('/api/chat', chatRoutes);

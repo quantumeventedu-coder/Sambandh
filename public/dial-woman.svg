@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 460 760" preserveAspectRatio="xMidYMax meet">
+  <defs>
+    <radialGradient id="aura" cx="50%" cy="34%" r="62%">
+      <stop offset="0%" stop-color="#F3C14B" stop-opacity=".55"/>
+      <stop offset="42%" stop-color="#D4537E" stop-opacity=".28"/>
+      <stop offset="72%" stop-color="#4B1528" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="body" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#f4d9c4"/>
+      <stop offset="55%" stop-color="#caa07f"/>
+      <stop offset="100%" stop-color="#3a1220"/>
+    </linearGradient>
+    <linearGradient id="hair" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#2a1416"/>
+      <stop offset="100%" stop-color="#0f0708"/>
+    </linearGradient>
+  </defs>
+  <rect width="460" height="760" fill="url(#aura)"/>
+  <!-- shoulders -->
+  <path d="M70 760 C 90 590 150 520 230 520 C 310 520 370 590 390 760 Z" fill="url(#body)" opacity=".92"/>
+  <!-- neck -->
+  <rect x="200" y="430" width="60" height="120" rx="26" fill="url(#body)"/>
+  <!-- head -->
+  <ellipse cx="230" cy="330" rx="96" ry="118" fill="url(#body)"/>
+  <!-- hair -->
+  <path d="M132 320 C 132 200 200 150 230 150 C 260 150 328 200 328 320 C 328 250 300 300 300 340 C 300 250 250 220 230 220 C 210 220 160 250 160 340 C 160 300 132 250 132 320 Z" fill="url(#hair)"/>
+  <path d="M120 340 C 120 470 150 540 150 540 L 140 560 C 120 500 108 430 120 340 Z" fill="url(#hair)"/>
+  <path d="M340 340 C 340 470 310 540 310 540 L 320 560 C 340 500 352 430 340 340 Z" fill="url(#hair)"/>
+  <!-- soft rim light -->
+  <path d="M326 300 C 340 380 320 470 300 520" fill="none" stroke="#F3C14B" stroke-width="3" stroke-opacity=".5" stroke-linecap="round"/>
+</svg>
