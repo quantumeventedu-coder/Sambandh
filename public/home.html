@@ -373,6 +373,20 @@
   #nd-connect .note{color:#9c8590;font-size:12px;margin:0 0 11px}
   .nd-badge-fact{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:800;color:#69d18e;background:rgba(31,122,77,.18);border:1px solid rgba(63,191,114,.5);border-radius:99px;padding:5px 13px}
   .nd-badge-read{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:800;color:#e7c04f;background:rgba(243,193,75,.12);border:1px solid rgba(243,193,75,.4);border-radius:99px;padding:4px 11px}
+  /* gold dial pedestal (turntable the figure stands on) */
+  #nd-pedestal{position:absolute;left:50%;bottom:10px;transform:translateX(-50%);width:min(620px,62%);height:180px;z-index:2;pointer-events:none}
+  #nd-pedestal .disc{position:absolute;left:50%;top:42%;transform:translate(-50%,-50%);border-radius:50%;border:2px solid rgba(243,193,75,.5);box-shadow:0 0 18px rgba(243,193,75,.4),inset 0 0 26px rgba(243,193,75,.14)}
+  #nd-pedestal .d1{width:100%;height:160px}
+  #nd-pedestal .d2{width:80%;height:124px}
+  #nd-pedestal .d3{width:58%;height:88px;border-color:rgba(255,120,170,.45);box-shadow:0 0 16px rgba(255,120,170,.4)}
+  #nd-pedestal .d4{width:36%;height:52px}
+  #nd-pedestal .sheen{position:absolute;left:50%;top:42%;transform:translate(-50%,-50%);width:100%;height:160px;border-radius:50%;
+    background:conic-gradient(from 0deg,transparent 0 4%,#ffe6a6 12%,transparent 30% 54%,#ff9ec4 66%,transparent 82%);
+    -webkit-mask:radial-gradient(farthest-side,transparent calc(100% - 34px),#000 calc(100% - 30px));
+            mask:radial-gradient(farthest-side,transparent calc(100% - 34px),#000 calc(100% - 30px));
+    filter:blur(4px);animation:ndspin 12s linear infinite}
+  #nd-pedestal .knob{position:absolute;left:50%;bottom:0;transform:translateX(-50%);width:84px;height:54px;border-radius:50%;
+    background:radial-gradient(62% 74% at 50% 26%,#fff0c8,#e0a92e 52%,#8f5f10);box-shadow:0 10px 22px rgba(0,0,0,.6),0 0 24px rgba(243,193,75,.55)}
   #nd-foot{position:relative;z-index:7;text-align:center;color:#9c8590;font-size:12.5px;margin-top:26px}
   #nd-foot .pv{margin-top:9px;display:flex;gap:10px;justify-content:center;flex-wrap:wrap}
   @media(max-width:920px){
@@ -402,6 +416,7 @@
       <div class="nd-orbit b" id="ring-back-b"><div class="fill"></div></div>
       <div class="nd-orbit a" id="ring-back"><div class="fill"></div></div>
       <div id="nd-dots"></div>
+      <div id="nd-pedestal" aria-hidden="true"><div class="sheen"></div><div class="disc d1"></div><div class="disc d2"></div><div class="disc d3"></div><div class="disc d4"></div><div class="knob"></div></div>
       <div id="nd-figure"></div>
       <div class="nd-orbit a" id="ring-front"><div class="fill"></div></div>
       <div id="nd-cards"></div>
