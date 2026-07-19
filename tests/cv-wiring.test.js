@@ -14,6 +14,7 @@ const appjs = read('public', 'app.js');
 
 // isolate the two CV browser functions
 const geomFn = (appjs.match(/async function runGeometricReadFromVideo\(\)[\s\S]*?\n}/) || [''])[0];
+const bodyFn = (appjs.match(/async function runBodyReadFromVideo\([\s\S]*?\n}/) || [''])[0];
 const captureFn = (appjs.match(/async function captureFace\(\)[\s\S]*?\n}/) || [''])[0];
 
 test('the pure geometry module is loaded in the app shell', () => {
@@ -43,4 +44,13 @@ test('the geometry mapper only receives landmark points, not the frame', () => {
   // it maps det.landmarks.positions → {x,y} and feeds THOSE to SBGeometry
   expect(geomFn).toMatch(/landmarks\.positions/);
   expect(geomFn).toMatch(/SBGeometry\.geometryToFeatures/);
+});
+
+test('the body/pose read is equally clean — keypoints in, only {features} out', () => {
+  expect(bodyFn).toBeTruthy();
+  expect(bodyFn).toMatch(/poseToFeatures/);                 // maps pose KEYPOINTS
+  expect(bodyFn).toMatch(/geometric-read/);                 // same guarded endpoint
+  expect(bodyFn).toMatch(/body:\s*\{\s*features\s*\}/);     // payload is exactly { features }
+  expect(bodyFn).not.toMatch(/base64|toDataURL|getImageData|pixel|rgb|colou?r/i);
+  expect(bodyFn).toMatch(/confidentFeatures/);
 });

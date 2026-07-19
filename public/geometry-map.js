@@ -108,7 +108,55 @@
     return features;
   }
 
-  const api = { geometryToFeatures: geometryToFeatures, confidentFeatures: confidentFeatures };
+  // ---- BODY POSE → build (structural proportion only) ----
+  // Input: named body keypoints { left_shoulder:{x,y,score?}, right_shoulder, left_hip,
+  // right_hip } as a browser pose model (MoveNet/BlazePose) produces. Output: the
+  // `build` field from the same neutral vocabulary (solid/lean/balanced/sturdy),
+  // read PURELY from shoulder/hip/torso PROPORTIONS. Same honesty rules as the face
+  // path: arity 1 (no colour/pixel input), and it measures STRUCTURE only — never
+  // weight, fatness, attractiveness or worth. gait needs motion across frames and
+  // hands need a hand-landmark model, so both stay `unmeasured` (never guessed).
+
+  function kpOk(p) { return p && typeof p.x === 'number' && typeof p.y === 'number'; }
+
+  /**
+   * @param {Record<string, {x:number,y:number,score?:number}>} kp  named keypoints
+   * @returns {{ features: Record<string,string>, confidence: Record<string,number>, unmeasured: string[] }}
+   */
+  function poseToFeatures(kp) {
+    const out = { features: {}, confidence: {}, unmeasured: ['gait', 'hands'] };
+    if (!kp || typeof kp !== 'object') { out.unmeasured = ['build', 'gait', 'hands']; return out; }
+    const ls = kp.left_shoulder, rs = kp.right_shoulder, lh = kp.left_hip, rh = kp.right_hip;
+    if (![ls, rs, lh, rh].every(kpOk)) { out.unmeasured = ['build', 'gait', 'hands']; return out; }
+
+    const shoulderW = dist(ls, rs);
+    const hipW = dist(lh, rh);
+    const torsoH = dist(mid(ls, rs), mid(lh, rh));
+    if (!(torsoH > 0) || !(hipW > 0)) { out.unmeasured = ['build', 'gait', 'hands']; return out; }
+
+    const breadth = shoulderW / torsoH;   // shoulders relative to torso height
+    const taper = shoulderW / hipW;        // V-taper vs straight
+
+    let build;
+    if (breadth < 0.55) build = 'lean';                       // narrow frame for its height
+    else if (breadth >= 0.75) build = taper >= 1.15 ? 'solid' : 'sturdy';  // broad; tapered vs blocky
+    else build = 'balanced';
+    out.features.build = build;
+
+    // approximate (single frame, 2-D) → capped; if the model gave keypoint scores,
+    // fold their average in so a low-confidence detection yields a low-confidence read.
+    const scores = [ls, rs, lh, rh].map(p => (typeof p.score === 'number' ? p.score : 1));
+    const detConf = scores.reduce((a, b) => a + b, 0) / scores.length;
+    out.confidence.build = Math.round(Math.min(0.6, 0.6 * detConf) * 100) / 100;
+
+    return out;
+  }
+
+  const api = {
+    geometryToFeatures: geometryToFeatures,
+    poseToFeatures: poseToFeatures,
+    confidentFeatures: confidentFeatures
+  };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.SBGeometry = api;
 })(typeof self !== 'undefined' ? self : this);

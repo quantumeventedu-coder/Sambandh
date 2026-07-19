@@ -790,6 +790,31 @@ async function runGeometricReadFromVideo() {
   return r;                                                               // { written, badge:'reading', ... }
 }
 
+// Body build from a full-body pose (MoveNet via TF.js — same tfjs the NSFW check
+// loads). Structural proportion ONLY (shoulder/hip/torso), mapped PURELY via
+// SBGeometry.poseToFeatures; gait/hands are never guessed. Field-exercised edge;
+// its geometry math is covered by tests/geometry-map.test.js.
+let _poseModel = null;
+async function runBodyReadFromVideo(videoEl) {
+  const vid = videoEl || $('#face-vid');
+  if (!vid || typeof SBGeometry === 'undefined') return null;
+  try {
+    if (!_poseModel) {
+      await loadScript('https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.20.0/dist/tf.min.js');
+      await loadScript('https://cdn.jsdelivr.net/npm/@tensorflow-models/pose-detection@2.1.3/dist/pose-detection.min.js');
+      _poseModel = await poseDetection.createDetector(poseDetection.SupportedModels.MoveNet);
+    }
+    const poses = await _poseModel.estimatePoses(vid);
+    if (!poses || !poses[0]) return null;
+    const kp = {};
+    for (const p of poses[0].keypoints) if (p.name) kp[p.name] = { x: p.x, y: p.y, score: p.score };
+    const read = SBGeometry.poseToFeatures(kp);
+    const features = SBGeometry.confidentFeatures(read);
+    if (!Object.keys(features).length) return null;
+    return await api('/me/geometric-read', { method: 'POST', body: { features } });  // guarded, reading-only
+  } catch { return null; }   // pose is a bonus refinement — a CDN/model hiccup never blocks anything
+}
+
 function obProfession() {
   return `<div class="section-pad">
     <h1>What do you do?</h1>

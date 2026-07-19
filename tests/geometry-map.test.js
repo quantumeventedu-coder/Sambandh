@@ -83,6 +83,57 @@ describe('forehead — brow-breadth proxy (approximate, confidence-capped)', () 
   });
 });
 
+describe('body pose → build (structural proportion only)', () => {
+  // synthetic keypoints: shoulders at y=0, hips lower; widths/heights set the ratios
+  const pose = ({ sw, hipW, torsoH, score }) => ({
+    left_shoulder: { x: 50 - sw / 2, y: 0, score },
+    right_shoulder: { x: 50 + sw / 2, y: 0, score },
+    left_hip: { x: 50 - hipW / 2, y: torsoH, score },
+    right_hip: { x: 50 + hipW / 2, y: torsoH, score }
+  });
+
+  test('narrow frame for its height → lean', () => {
+    expect(geo.poseToFeatures(pose({ sw: 20, hipW: 16, torsoH: 100 })).features.build).toBe('lean');
+  });
+  test('broad + tapered (V) → solid', () => {
+    expect(geo.poseToFeatures(pose({ sw: 60, hipW: 30, torsoH: 70 })).features.build).toBe('solid');
+  });
+  test('broad but shoulders≈hips (blocky) → sturdy', () => {
+    expect(geo.poseToFeatures(pose({ sw: 60, hipW: 58, torsoH: 70 })).features.build).toBe('sturdy');
+  });
+  test('mid breadth → balanced', () => {
+    expect(geo.poseToFeatures(pose({ sw: 45, hipW: 38, torsoH: 70 })).features.build).toBe('balanced');
+  });
+
+  test('only build is produced — gait + hands stay unmeasured (never guessed)', () => {
+    const r = geo.poseToFeatures(pose({ sw: 45, hipW: 38, torsoH: 70 }));
+    expect(r.unmeasured).toEqual(['gait', 'hands']);
+    expect(r.features).not.toHaveProperty('gait');
+    expect(r.features).not.toHaveProperty('hands');
+  });
+
+  test('the emitted build value is in the shared vocabulary', () => {
+    const v = geo.poseToFeatures(pose({ sw: 60, hipW: 30, torsoH: 70 })).features.build;
+    expect(CV_MEASURABLE.build).toContain(v);
+  });
+
+  test('missing keypoints → nothing measured (build also unmeasured), no throw', () => {
+    for (const bad of [null, {}, { left_shoulder: { x: 1, y: 2 } }, { left_shoulder: { x: 'a', y: 0 }, right_shoulder: {}, left_hip: {}, right_hip: {} }]) {
+      const r = geo.poseToFeatures(bad);
+      expect(r.features).toEqual({});
+      expect(r.unmeasured).toContain('build');
+    }
+  });
+
+  test('no colour/pixel argument (arity 1) + low keypoint scores lower confidence', () => {
+    expect(geo.poseToFeatures.length).toBe(1);
+    const hi = geo.poseToFeatures(pose({ sw: 60, hipW: 30, torsoH: 70, score: 1 })).confidence.build;
+    const lo = geo.poseToFeatures(pose({ sw: 60, hipW: 30, torsoH: 70, score: 0.3 })).confidence.build;
+    expect(lo).toBeLessThan(hi);
+    expect(hi).toBeLessThanOrEqual(0.6);   // single-frame 2-D read is capped
+  });
+});
+
 describe('robustness + determinism', () => {
   test('too-few / malformed landmarks → empty features, still marks unmeasured', () => {
     for (const bad of [null, [], [{ x: 1, y: 2 }], Array(68).fill({ x: 'a', y: 0 })]) {
