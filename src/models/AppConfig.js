@@ -5,6 +5,11 @@ const mongoose = require('../db/odm');
 // is only the fallback/default. Managed from the super-admin panel.
 const AppConfigSchema = new mongoose.Schema({
   key: { type: String, unique: true, default: 'singleton', index: true },
+  // Pre-launch mode: people can register + pay + build their profile, but the dating
+  // features (Discover/Chats/matching) are gated behind an "early access" waiting
+  // room until launch. Admins/moderators bypass. Owner flips this off at launch.
+  // Default ON (undefined → gated); only an explicit false opens the doors.
+  prelaunch: { type: Boolean, default: true },
   llm: {
     enabled: { type: Boolean, default: true },
     provider: { type: String, default: 'anthropic' },

@@ -633,8 +633,16 @@ router.post('/login', ipLimit, async (req, res, next) => {
 
 // ---- Google account login ----
 // GET /auth/config — public config for the login screen (Google client id if set)
-router.get('/config', (req, res) => {
-  res.json({ googleClientId: process.env.GOOGLE_CLIENT_ID || null });
+// + the pre-launch flag so the app knows whether to show the early-access waiting
+// room instead of the dating features.
+router.get('/config', async (req, res, next) => {
+  try {
+    const { isPrelaunch } = require('./services/site-mode');
+    res.json({
+      googleClientId: process.env.GOOGLE_CLIENT_ID || null,
+      prelaunch: await isPrelaunch()
+    });
+  } catch (err) { next(err); }
 });
 
 // POST /auth/google — verify a Google ID token (One Tap / Sign-In), then log in

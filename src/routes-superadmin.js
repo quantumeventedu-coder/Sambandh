@@ -67,6 +67,34 @@ router.get('/stats', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+// ---- Pre-launch gate (early-access mode) ----------------------------------
+// GET → current state + registration counts; PUT { prelaunch:boolean } → flip it.
+router.get('/prelaunch', async (req, res, next) => {
+  try {
+    const { isPrelaunch } = require('./services/site-mode');
+    const Waitlist = require('./models/Waitlist');
+    const [on, registered, paid, verified, emailWaitlist] = await Promise.all([
+      isPrelaunch(),
+      User.countDocuments({}),
+      User.countDocuments({ 'membership.joinFeePaid': true }),
+      User.countDocuments({ 'verification.selfieVerified': true }),
+      Waitlist.countDocuments({}).catch(() => 0)
+    ]);
+    res.json({ prelaunch: on, registered, paid, verified, emailWaitlist });
+  } catch (err) { next(err); }
+});
+router.put('/prelaunch', async (req, res, next) => {
+  try {
+    if (typeof (req.body && req.body.prelaunch) !== 'boolean') {
+      return res.status(400).json({ error: 'prelaunch (boolean) is required' });
+    }
+    const { setPrelaunch } = require('./services/site-mode');
+    const on = await setPrelaunch(req.body.prelaunch);
+    await audit('prelaunch_set', 'config', 'singleton', { prelaunch: on });
+    res.json({ prelaunch: on, message: on ? 'Pre-launch ON — dating features gated for non-admins.' : 'LAUNCHED — dating features open to everyone.' });
+  } catch (err) { next(err); }
+});
+
 // ---- User search & inspection ---------------------------------------------
 router.get('/users', async (req, res, next) => {
   try {

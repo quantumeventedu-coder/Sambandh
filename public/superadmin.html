@@ -151,8 +151,21 @@ async function runTest() {
 }
 
 async function renderOverview() {
-  const s = await api('/stats');
+  const [s, pl] = await Promise.all([api('/stats'), api('/prelaunch')]);
+  const launched = !pl.prelaunch;
   $('#view').innerHTML = `
+    <div class="card" style="margin-bottom:14px;border:1px solid ${launched ? '#2e7d46' : '#b8860b'}">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
+        <div>
+          <b style="font-size:15px">${launched ? '🟢 LAUNCHED — open to everyone' : '🔒 Pre-launch (early access)'}</b>
+          <div style="color:var(--mut);font-size:13px;margin-top:4px">${launched ? 'All verified members can use Discover, Chats & matching.' : 'People can register + pay + build a profile, but Discover/Chats/matching are gated (waiting room). Admins bypass.'}</div>
+          <div style="color:var(--mut);font-size:12px;margin-top:6px">Registered <b>${pl.registered}</b> · Paid <b>${pl.paid}</b> · Photo-verified <b>${pl.verified}</b> · Email waitlist <b>${pl.emailWaitlist}</b></div>
+        </div>
+        <button onclick="togglePrelaunch(${launched})" style="background:${launched ? 'transparent' : 'var(--pink)'};border:1px solid var(--pink);white-space:nowrap">
+          ${launched ? 'Return to pre-launch' : 'Open the doors — LAUNCH'}
+        </button>
+      </div>
+    </div>
     <div class="stats">
       <div class="stat"><b>${s.users.total}</b><span>USERS</span></div>
       <div class="stat"><b>${s.users.verified}</b><span>ID VERIFIED</span></div>
@@ -167,6 +180,15 @@ async function renderOverview() {
     </div>
     <div class="notice" style="margin-top:14px">Chat content access lives under <b>Users &amp; Chats</b> and always
       requires a written reason. Admins/moderators cannot see message content at all — only you can, and it's logged.</div>`;
+}
+
+async function togglePrelaunch(launching) {
+  const msg = launching
+    ? 'LAUNCH now? Discover, Chats and matching will open to EVERY verified member. Continue?'
+    : 'Return to pre-launch? Dating features will be gated (waiting room) for all non-admins.';
+  if (!confirm(msg)) return;
+  await apiPut('/prelaunch', { prelaunch: !launching });   // launching → prelaunch:false
+  renderOverview();
 }
 
 async function renderUsers() {
