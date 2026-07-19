@@ -755,6 +755,41 @@ async function captureFace() {
   } catch (e) { setStatus(''); toast(e.message); $('#face-capture').disabled = false; }
 }
 
+// ---- Geometric read (opt-in): face geometry → a temperament READING ----
+// SEPARATE and EXPLICIT — never part of verification, never automatic. The user
+// turns it on (POST /me/cv-consent), then this reuses the SAME face-api 68-pt
+// landmarks the verifier already loads, maps them PURELY (SBGeometry — no colour/
+// pixel input, so complexion can't influence anything), keeps only confident
+// readings, and POSTs them through the server guard. The result is a reading, never
+// "verified". build/gait/hands are not produced here (no body-pose model).
+//
+// NOTE: the landmark ML itself runs only in a real browser with a camera, so this
+// wiring is exercised in the field; the geometry MATH it depends on is covered by
+// tests/geometry-map.test.js and the server guard by tests/cv-route.test.js.
+async function enableGeometricRead() {
+  try {
+    await api('/me/cv-consent', { method: 'POST', body: { geometry: true } });
+    toast('Geometric read on — it will refine your nature reading (never “verified”).');
+  } catch { toast('Could not save that preference — try again.'); }
+}
+
+async function runGeometricReadFromVideo() {
+  if (typeof faceapi === 'undefined' || typeof SBGeometry === 'undefined') return null;
+  const vid = $('#face-vid');
+  if (!vid) return null;
+  const opts = new faceapi.TinyFaceDetectorOptions({ inputSize: 416, scoreThreshold: 0.5 });
+  const det = await faceapi.detectSingleFace(vid, opts).withFaceLandmarks(true);
+  if (!det || !det.landmarks) return null;
+  const points = det.landmarks.positions.map(p => ({ x: p.x, y: p.y }));  // 68 {x,y}
+  const read = SBGeometry.geometryToFeatures(points);
+  const features = SBGeometry.confidentFeatures(read);                    // drop low-confidence
+  if (!Object.keys(features).length) return null;
+  // Server applies through feature-guard: consent required, complexion refused,
+  // self-declared never overwritten, output tagged as a reading.
+  const r = await api('/me/geometric-read', { method: 'POST', body: { features } });
+  return r;                                                               // { written, badge:'reading', ... }
+}
+
 function obProfession() {
   return `<div class="section-pad">
     <h1>What do you do?</h1>
