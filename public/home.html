@@ -407,8 +407,7 @@
       <h2 class="serif">Turn the dial. See who they are.</h2>
       <p class="sub">Each facet unfolds a part of who they are — in plain words, never jargon.</p>
       <div id="nd-toggle">
-        <button type="button" data-p="full" class="on">Full body</button>
-        <button type="button" data-p="woman">Woman</button>
+        <button type="button" data-p="woman" class="on">Woman</button>
         <button type="button" data-p="man">Man</button>
       </div>
     </div>
@@ -449,7 +448,6 @@
     {k:'drive',cls:'c-drive R',lab:'DRIVE',title:'Growth oriented',d:'Always learning, always evolving — steady forward motion.'}
   ];
   var PEOPLE={
-    full:{img:'/dial-full.jpg',fb:'/dial-woman.svg',pos:'HER',S:'She',Sl:'she',O:'her',P:'her',name:'Priya'},
     woman:{img:'/dial-woman.jpg',fb:'/dial-woman.svg',pos:'HER',S:'She',Sl:'she',O:'her',P:'her',name:'Priya'},
     man:{img:'/dial-man.jpg',fb:'/dial-man.svg',pos:'HIS',S:'He',Sl:'he',O:'him',P:'his',name:'Rohan'}
   };
@@ -474,7 +472,7 @@
   Array.prototype.forEach.call(document.querySelectorAll('#nd-toggle button'),function(b){
     b.addEventListener('click',function(){Array.prototype.forEach.call(document.querySelectorAll('#nd-toggle button'),function(x){x.classList.remove('on')});b.classList.add('on');render(b.getAttribute('data-p'));});
   });
-  render('full');
+  render('woman');
 })();
 </script>
 

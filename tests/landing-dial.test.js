@@ -10,7 +10,7 @@ const path = require('path');
 const html = fs.readFileSync(path.join(__dirname, '..', 'public', 'home.html'), 'utf8');
 // the section + its inline render script (up to the render('full') call)
 const start = html.indexOf('<!-- THE NATURE DIAL');
-const end = html.indexOf("render('full');", start);
+const end = html.indexOf("render('woman');", start);
 const dial = html.slice(start, end > -1 ? end + 40 : start + 6000);
 
 describe('the Nature Dial exists and is ordered correctly', () => {
