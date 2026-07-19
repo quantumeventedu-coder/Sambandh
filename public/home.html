@@ -432,18 +432,17 @@
     {k:'world',cls:'c-world R',lab:'WORLD',title:'Loyal and committed',d:'{S} values trust above everything and stands by {P} people.'},
     {k:'drive',cls:'c-drive R',lab:'DRIVE',title:'Growth oriented',d:'Always learning, always evolving — steady forward motion.'}
   ];
-  var FB='/dial-woman.svg';
   var PEOPLE={
-    full:{img:'/dial-full.jpg',pos:'HER',S:'She',Sl:'she',O:'her',P:'her',name:'Priya'},
-    woman:{img:'/dial-woman.jpg',pos:'HER',S:'She',Sl:'she',O:'her',P:'her',name:'Priya'},
-    man:{img:'/dial-man.jpg',pos:'HIS',S:'He',Sl:'he',O:'him',P:'his',name:'Rohan'}
+    full:{img:'/dial-full.jpg',fb:'/dial-woman.svg',pos:'HER',S:'She',Sl:'she',O:'her',P:'her',name:'Priya'},
+    woman:{img:'/dial-woman.jpg',fb:'/dial-woman.svg',pos:'HER',S:'She',Sl:'she',O:'her',P:'her',name:'Priya'},
+    man:{img:'/dial-man.jpg',fb:'/dial-man.svg',pos:'HIS',S:'He',Sl:'he',O:'him',P:'his',name:'Rohan'}
   };
   function fill(t,p){return t.replace(/{Sl}/g,p.Sl).replace(/{S}/g,p.S).replace(/{O}/g,p.O).replace(/{P}/g,p.P);}
   function cap(s){return s.charAt(0).toUpperCase()+s.slice(1);}
   function render(key){
     var p=PEOPLE[key]; if(!p)return;
     var fig=document.getElementById('nd-figure');
-    fig.style.backgroundImage='url('+p.img+'), url('+FB+')';   // real photo on top, silhouette behind
+    fig.style.backgroundImage='url('+p.img+'), url('+p.fb+')';   // real photo on top, silhouette behind
     document.getElementById('nd-cards').innerHTML=FACETS.map(function(f){
       return '<div class="nd-card '+f.cls+'"><div class="lab">'+p.pos+' '+f.lab+'</div><h4>'+f.title+'</h4><p>'+fill(f.d,p)+'</p>'+(ICON[f.k]||'')+'</div>';
     }).join('');
