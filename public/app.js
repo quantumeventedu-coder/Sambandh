@@ -1225,71 +1225,89 @@ async function startChat(userId, anonymous) {
 }
 
 // ---------------- Profile detail ----------------
-// The profile opens as a Ben-10-Omnitrix-style dial: the person sits in a glowing
-// green/gold rotating ring with their nature facets orbiting it; scroll down for the
-// full profile. CSS injected once.
+// The profile opens as a Ben-10-Omnitrix HOLOGRAM: the person rises as a projection
+// with a flat, spinning, segmented selector WHEEL of nature-facet icons around their
+// feet; scroll down for the full profile. CSS injected once.
 function ensureOmniCss() {
   if (document.getElementById('omni-css')) return;
   const s = document.createElement('style');
   s.id = 'omni-css';
   s.textContent = `
-  .omni-wrap{position:relative;background:radial-gradient(120% 90% at 50% 20%,#123024 0%,#0c1a14 46%,#070d0a 100%);padding:22px 16px 20px;text-align:center;overflow:hidden;border-radius:0 0 22px 22px}
-  .omni-wrap .oc{position:absolute;top:12px;width:36px;height:36px;border-radius:50%;border:1px solid rgba(255,255,255,.22);background:rgba(0,0,0,.32);color:#fff;font-size:17px;cursor:pointer;z-index:5}
-  .omni-wrap .oc.back{left:14px}.omni-wrap .oc.rep{right:14px;width:auto;padding:0 12px;border-radius:99px;font-size:12px;color:#ffd6de}
-  .omni{position:relative;width:270px;height:270px;margin:8px auto 2px;max-width:78vw}
-  .omni-ring{position:absolute;inset:0;border-radius:50%;background:conic-gradient(from 0deg,#0a3d24,#3bd67e 18%,#c9ffe0 26%,#3bd67e 34%,#0a3d24 50%,#1f7a4d 66%,#F3C14B 80%,#3bd67e 92%,#0a3d24);
-    -webkit-mask:radial-gradient(farthest-side,transparent calc(100% - 15px),#000 calc(100% - 14px));mask:radial-gradient(farthest-side,transparent calc(100% - 15px),#000 calc(100% - 14px));
-    filter:drop-shadow(0 0 12px rgba(59,214,126,.75)) drop-shadow(0 0 26px rgba(243,193,75,.4));animation:omnispin 9s linear infinite}
-  .omni-ring.inner{inset:24px;animation-duration:6s;animation-direction:reverse;opacity:.9;background:conic-gradient(from 120deg,#0a3d24,#3bd67e 30%,#0a3d24 55%,#c9ffe0 78%,#0a3d24);
-    -webkit-mask:radial-gradient(farthest-side,transparent calc(100% - 7px),#000 calc(100% - 6px));mask:radial-gradient(farthest-side,transparent calc(100% - 7px),#000 calc(100% - 6px))}
-  @keyframes omnispin{to{transform:rotate(360deg)}}
-  @media(prefers-reduced-motion:reduce){.omni-ring{animation:none}}
-  .omni-core{position:absolute;inset:42px;border-radius:50%;overflow:hidden;border:3px solid rgba(59,214,126,.55);box-shadow:inset 0 0 34px rgba(0,0,0,.6),0 0 22px rgba(59,214,126,.45);background:linear-gradient(160deg,#3a1830,#1a0f24);display:grid;place-items:center}
-  .omni-core img{width:100%;height:100%;object-fit:cover}
-  .omni-core .letter{font-family:Georgia,serif;font-size:74px;color:rgba(255,255,255,.9)}
-  .omni-chip{position:absolute;z-index:4;background:rgba(10,26,18,.74);border:1px solid rgba(59,214,126,.45);color:#dffbe9;font-size:11px;font-weight:700;border-radius:99px;padding:5px 11px;backdrop-filter:blur(4px);white-space:nowrap;box-shadow:0 6px 16px rgba(0,0,0,.4);max-width:150px;overflow:hidden;text-overflow:ellipsis}
-  .omni-chip b{color:#ffe6a6}
-  .oc-tl{left:-6px;top:20px}.oc-tr{right:-6px;top:20px}.oc-l{left:-14px;top:47%}.oc-r{right:-14px;top:47%}.oc-bl{left:8px;bottom:14px}.oc-br{right:8px;bottom:14px}
-  .omni-name{color:#fff;margin-top:8px}.omni-name h2{font-size:25px;margin:0}
-  .omni-name .meta{color:#bfe9d2;font-size:13px;margin-top:2px}
-  .omni-ver{display:inline-flex;align-items:center;gap:5px;margin-top:9px;color:#8fe9b4;background:rgba(31,122,77,.25);border:1px solid rgba(59,214,126,.5);border-radius:99px;font-size:12px;font-weight:700;padding:4px 12px}
-  .omni-turn{margin-top:11px;color:#9fdcb8;font-size:12px}.omni-turn .ct{display:inline-block;animation:obob 1.4s ease-in-out infinite}
+  .holo-wrap{position:relative;max-width:560px;margin:0 auto;height:600px;background:radial-gradient(80% 60% at 50% 78%,#0d2415 0%,#071009 55%,#040706 100%);overflow:hidden}
+  .holo-wrap .oc{position:absolute;top:12px;z-index:9;width:36px;height:36px;border-radius:50%;border:1px solid rgba(120,240,150,.35);background:rgba(0,0,0,.4);color:#bff5cf;font-size:17px;cursor:pointer}
+  .holo-wrap .oc.back{left:14px}.holo-wrap .oc.rep{right:14px;width:auto;padding:0 12px;border-radius:99px;font-size:12px}
+  .holo-fig{position:absolute;left:50%;bottom:150px;transform:translateX(-50%);width:min(310px,64%);height:470px;z-index:4;background-position:center top;background-size:cover;background-repeat:no-repeat;
+    -webkit-mask:linear-gradient(#000 0,#000 62%,rgba(0,0,0,.5) 82%,transparent 96%);mask:linear-gradient(#000 0,#000 62%,rgba(0,0,0,.5) 82%,transparent 96%);
+    filter:drop-shadow(0 0 26px rgba(120,240,140,.4));border-radius:14px 14px 0 0;display:grid;place-items:center}
+  .holo-fig .letter{font-family:Georgia,serif;font-size:120px;color:rgba(200,255,210,.85)}
+  .holo-beam{position:absolute;left:50%;bottom:120px;transform:translateX(-50%);width:min(280px,58%);height:220px;z-index:3;background:linear-gradient(to top,rgba(150,255,170,.5),rgba(120,240,140,.12) 55%,transparent);
+    -webkit-mask:radial-gradient(60% 100% at 50% 100%,#000,transparent 72%);filter:blur(6px);pointer-events:none}
+  .wheel{position:absolute;left:50%;bottom:104px;transform:translate(-50%,0) perspective(760px) rotateX(66deg);width:min(400px,86%);aspect-ratio:1;z-index:2;pointer-events:none}
+  .wheel .spin{position:absolute;inset:0;border-radius:50%;animation:whspin 16s linear infinite;background:repeating-conic-gradient(from 0deg,rgba(150,245,165,.42) 0 43deg,rgba(90,220,110,.22) 43deg 44deg,rgba(215,255,220,.85) 44deg 45deg);
+    -webkit-mask:radial-gradient(farthest-side,transparent 55%,#000 56%,#000 99%,transparent 100%);mask:radial-gradient(farthest-side,transparent 55%,#000 56%,#000 99%,transparent 100%);filter:drop-shadow(0 0 16px rgba(120,240,140,.7))}
+  .wheel .rim{position:absolute;inset:0;border-radius:50%;border:2px solid rgba(180,255,190,.75);box-shadow:0 0 18px rgba(120,240,140,.6),inset 0 0 18px rgba(120,240,140,.4)}
+  .wheel .hub{position:absolute;left:50%;top:50%;width:22%;height:22%;transform:translate(-50%,-50%);border-radius:50%;background:radial-gradient(circle,#dfffe4,#3bd67e 60%,#0a3d24);box-shadow:0 0 20px rgba(120,240,140,.8)}
+  @keyframes whspin{to{transform:rotate(360deg)}}
+  @media(prefers-reduced-motion:reduce){.wheel .spin{animation:none}}
+  .facet{position:absolute;z-index:5;width:74px;text-align:center;color:#cffbd8;font-size:10px;font-weight:700;text-shadow:0 1px 4px #000}
+  .facet .ico{width:30px;height:30px;margin:0 auto 2px;display:grid;place-items:center;border-radius:50%;background:rgba(10,40,20,.7);border:1px solid rgba(120,240,140,.5);box-shadow:0 0 10px rgba(120,240,140,.4)}
+  .facet .ico svg{width:17px;height:17px;stroke:#8df5aa;fill:none;stroke-width:1.7}
+  .holo-name{position:absolute;left:0;right:0;bottom:40px;z-index:6;text-align:center;color:#fff}
+  .holo-name h2{font-size:25px;margin:0}
+  .holo-name .meta{color:#a7e6bd;font-size:13px;margin-top:2px}
+  .holo-ver{display:inline-flex;gap:5px;margin-top:9px;color:#9bf0ba;background:rgba(31,122,77,.3);border:1px solid rgba(120,240,140,.5);border-radius:99px;font-size:12px;font-weight:700;padding:4px 12px}
+  .holo-turn{position:absolute;left:0;right:0;bottom:12px;z-index:6;text-align:center;color:#8fd9a6;font-size:12px}.holo-turn .ct{display:inline-block;animation:obob 1.4s ease-in-out infinite}
   @keyframes obob{0%,100%{transform:translateY(0)}50%{transform:translateY(4px)}}`;
   document.head.appendChild(s);
 }
-function shortWords(s, n) { return String(s || '').split(/\s+/).slice(0, n).join(' '); }
 
-// Build the Omnitrix dial header from real profile data.
+// Build the Omnitrix hologram header from real profile data.
 function omniHeader(p, karma, rdg, photo) {
   const verified = p.verification && p.verification.level !== 'phone_only';
-  const pos = p.tagsPositive || [];
-  const chips = [];
-  if (rdg && rdg.line) chips.push(['oc-tl', `<b>Reading</b> ${esc(shortWords(rdg.line, 2))}`]);
-  chips.push(['oc-tr', verified ? '✓ Verified' : 'New here']);
-  if (pos[0]) chips.push(['oc-l', esc(pos[0])]);
-  if (pos[1]) chips.push(['oc-r', esc(pos[1])]);
-  if (karma && karma.grade) chips.push(['oc-bl', `Lakshan <b>${esc(karma.grade)}</b>`]);
-  if (p.intent && p.intent[0]) chips.push(['oc-br', esc(p.intent[0])]);
   const meta = [p.city, (p.distanceKm != null ? p.distanceKm + ' km away' : '')].filter(Boolean).join(' · ');
-  const core = photo
-    ? `<img src="${esc(photo)}" onerror="this.replaceWith(Object.assign(document.createElement('span'),{className:'letter',textContent:'${esc((p.firstName || '?')[0].toUpperCase())}'}))"/>`
-    : `<span class="letter">${esc((p.firstName || '?')[0].toUpperCase())}</span>`;
+  const figStyle = photo ? `background-image:url('${esc(photo)}')` : 'background:radial-gradient(circle at 50% 30%,#1f5a37,#0a2416)';
+  const letter = photo ? '' : `<span class="letter">${esc((p.firstName || '?')[0].toUpperCase())}</span>`;
   return `
-    <div class="omni-wrap">
+    <div class="holo-wrap" id="holoWrap">
       <button class="oc back" onclick="history.back()" aria-label="Back">←</button>
       <button class="oc rep" onclick="openReport('${p.userId}')">⚑ Report</button>
-      <div class="omni" onclick="this.querySelector('.omni-ring').style.animationDuration=(2+Math.random()*8)+'s'">
-        <div class="omni-ring"></div><div class="omni-ring inner"></div>
-        <div class="omni-core">${core}</div>
-        ${chips.map(c => `<div class="omni-chip ${c[0]}">${c[1]}</div>`).join('')}
-      </div>
-      <div class="omni-name">
+      <div class="wheel"><div class="spin"></div><div class="rim"></div><div class="hub"></div></div>
+      <div class="holo-beam"></div>
+      <div class="holo-fig" style="${figStyle}">${letter}</div>
+      <div id="omni-facets"></div>
+      <div class="holo-name">
         <h2 class="serif">${esc(p.firstName)}${p.age ? ', ' + p.age : ''}</h2>
         ${meta ? `<div class="meta">${esc(meta)}</div>` : ''}
-        ${verified ? `<div class="omni-ver">${esc(verLabel(p.verification))}</div>` : ''}
+        ${verified ? `<div class="holo-ver">${esc(verLabel(p.verification))}</div>` : ''}
       </div>
-      <div class="omni-turn"><span class="ct">▾</span> scroll to read their full nature</div>
+      <div class="holo-turn"><span class="ct">▾</span> scroll to read their full nature</div>
     </div>`;
+}
+
+// Position the 8 facet icons on the (perspective-tilted) wheel — measured from the
+// rendered container, so it lines up on any width. Called after the profile renders.
+function layoutOmniFacets() {
+  const wrap = document.getElementById('holoWrap');
+  const host = wrap && wrap.querySelector('#omni-facets');
+  if (!host) return;
+  const F = [
+    ['Persona', 'M12 8a4 4 0 100-8 4 4 0 000 8zM4 21c0-4 3.5-6 8-6'],
+    ['Passions', 'M12 3a6 6 0 00-4 10 3 3 0 011 3h6a3 3 0 011-3 6 6 0 00-4-10z'],
+    ['Energy', 'M7 3h10l-2 7 2 11H7l2-11z'],
+    ['World', 'M12 3l7 3v5c0 5-3.5 8-7 10-3.5-2-7-5-7-10V6z'],
+    ['Drive', 'M4 20L20 4M14 4h6v6'],
+    ['Approach', 'M12 21s-7-4.5-7-9a4 4 0 017-2 4 4 0 017 2c0 4.5-7 9-7 9z'],
+    ['Values', 'M12 2l3 6 6 .5-4.5 4 1.5 6-6-3.5L6 18.5l1.5-6L3 8.5 9 8z'],
+    ['Loyal', 'M20 6L9 17l-5-5']
+  ];
+  const W = wrap.clientWidth, H = wrap.clientHeight;
+  const wheel = Math.min(400, W * 0.86);
+  const cx = W / 2, cy = H - 104 - wheel / 2, rx = wheel * 0.44, ry = wheel * 0.44 * 0.42;
+  host.innerHTML = F.map((f, i) => {
+    const a = (-90 + i * (360 / F.length)) * Math.PI / 180;
+    const x = cx + rx * Math.cos(a), y = cy + ry * Math.sin(a);
+    return `<div class="facet" style="left:${x - 37}px;top:${y - 24}px"><div class="ico"><svg viewBox="0 0 24 24"><path d="${f[1]}"/></svg></div>${f[0]}</div>`;
+  }).join('');
 }
 
 async function renderProfile(userId) {
@@ -1338,6 +1356,7 @@ async function renderProfile(userId) {
         <button class="btn secondary ic-row" style="display:flex;justify-content:center" onclick="addIncognito('${p.userId}')">${ic('eyeOff')} Hide my profile from them</button>
         <button class="btn danger ic-row" style="display:flex;justify-content:center" onclick="blockUser('${p.userId}')">${ic('slash')} Block</button>
       </div>`;
+    requestAnimationFrame(layoutOmniFacets);   // place the wheel's facet icons once measured
   } catch (e) {
     screen.innerHTML = `<div class="section-pad"><div class="empty">${esc(e.message)}</div><button class="btn ghost" onclick="history.back()">← Back</button></div>`;
   }
