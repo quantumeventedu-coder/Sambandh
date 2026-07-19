@@ -375,19 +375,25 @@
   .nd-badge-fact{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:800;color:#69d18e;background:rgba(31,122,77,.18);border:1px solid rgba(63,191,114,.5);border-radius:99px;padding:5px 13px}
   .nd-badge-read{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:800;color:#e7c04f;background:rgba(243,193,75,.12);border:1px solid rgba(243,193,75,.4);border-radius:99px;padding:4px 11px}
   /* gold dial pedestal (turntable the figure stands on) */
-  #nd-pedestal{position:absolute;left:50%;bottom:10px;transform:translateX(-50%);width:min(620px,62%);height:180px;z-index:2;pointer-events:none}
-  #nd-pedestal .disc{position:absolute;left:50%;top:42%;transform:translate(-50%,-50%);border-radius:50%;border:2px solid rgba(243,193,75,.5);box-shadow:0 0 18px rgba(243,193,75,.4),inset 0 0 26px rgba(243,193,75,.14)}
-  #nd-pedestal .d1{width:100%;height:160px}
-  #nd-pedestal .d2{width:80%;height:124px}
-  #nd-pedestal .d3{width:58%;height:88px;border-color:rgba(255,120,170,.45);box-shadow:0 0 16px rgba(255,120,170,.4)}
-  #nd-pedestal .d4{width:36%;height:52px}
-  #nd-pedestal .sheen{position:absolute;left:50%;top:42%;transform:translate(-50%,-50%);width:100%;height:160px;border-radius:50%;
-    background:conic-gradient(from 0deg,transparent 0 4%,#ffe6a6 12%,transparent 30% 54%,#ff9ec4 66%,transparent 82%);
-    -webkit-mask:radial-gradient(farthest-side,transparent calc(100% - 34px),#000 calc(100% - 30px));
-            mask:radial-gradient(farthest-side,transparent calc(100% - 34px),#000 calc(100% - 30px));
-    filter:blur(4px);animation:ndspin 12s linear infinite}
-  #nd-pedestal .knob{position:absolute;left:50%;bottom:0;transform:translateX(-50%);width:84px;height:54px;border-radius:50%;
-    background:radial-gradient(62% 74% at 50% 26%,#fff0c8,#e0a92e 52%,#8f5f10);box-shadow:0 10px 22px rgba(0,0,0,.6),0 0 24px rgba(243,193,75,.55)}
+  #nd-pedestal{position:absolute;left:50%;bottom:4px;transform:translateX(-50%);width:min(760px,74%);height:220px;z-index:2;pointer-events:none}
+  #nd-pedestal .disc{position:absolute;left:50%;top:40%;transform:translate(-50%,-50%);border-radius:50%;border:2px solid rgba(243,193,75,.85);box-shadow:0 0 26px rgba(243,193,75,.7),inset 0 0 30px rgba(243,193,75,.22)}
+  #nd-pedestal .d1{width:100%;height:200px}
+  #nd-pedestal .d2{width:78%;height:150px}
+  #nd-pedestal .d3{width:56%;height:104px;border-color:rgba(255,120,170,.7);box-shadow:0 0 24px rgba(255,120,170,.65)}
+  #nd-pedestal .d4{width:34%;height:60px;border-color:rgba(255,235,180,.9)}
+  /* two counter-rotating bright arcs make the turntable clearly spin */
+  #nd-pedestal .sheen{position:absolute;left:50%;top:40%;transform:translate(-50%,-50%);width:100%;height:200px;border-radius:50%;
+    background:conic-gradient(from 0deg,transparent 0 3%,#fff3d6 10%,#ffcf72 18%,transparent 34% 52%,#ff9ec4 62%,#fff0cf 70%,transparent 86%);
+    -webkit-mask:radial-gradient(farthest-side,transparent calc(100% - 46px),#000 calc(100% - 40px));
+            mask:radial-gradient(farthest-side,transparent calc(100% - 46px),#000 calc(100% - 40px));
+    filter:blur(3px) drop-shadow(0 0 10px rgba(255,205,110,.9));animation:ndspin 9s linear infinite}
+  #nd-pedestal .sheen2{position:absolute;left:50%;top:40%;transform:translate(-50%,-50%);width:78%;height:150px;border-radius:50%;
+    background:conic-gradient(from 120deg,transparent 0 8%,#ffd873 20%,transparent 40% 70%,#ffb0d4 84%,transparent 96%);
+    -webkit-mask:radial-gradient(farthest-side,transparent calc(100% - 20px),#000 calc(100% - 16px));
+            mask:radial-gradient(farthest-side,transparent calc(100% - 20px),#000 calc(100% - 16px));
+    filter:blur(2px);animation:ndspin 6s linear infinite reverse}
+  #nd-pedestal .knob{position:absolute;left:50%;bottom:0;transform:translateX(-50%);width:96px;height:60px;border-radius:50%;
+    background:radial-gradient(62% 74% at 50% 26%,#fff6df,#e0a92e 50%,#8f5f10);box-shadow:0 12px 26px rgba(0,0,0,.65),0 0 34px rgba(243,193,75,.75)}
   #nd-foot{position:relative;z-index:7;text-align:center;color:#9c8590;font-size:12.5px;margin-top:26px}
   #nd-foot .pv{margin-top:9px;display:flex;gap:10px;justify-content:center;flex-wrap:wrap}
   @media(max-width:920px){
@@ -416,7 +422,7 @@
       <div class="nd-orbit b" id="ring-back-b"><div class="fill"></div></div>
       <div class="nd-orbit a" id="ring-back"><div class="fill"></div></div>
       <div id="nd-dots"></div>
-      <div id="nd-pedestal" aria-hidden="true"><div class="sheen"></div><div class="disc d1"></div><div class="disc d2"></div><div class="disc d3"></div><div class="disc d4"></div><div class="knob"></div></div>
+      <div id="nd-pedestal" aria-hidden="true"><div class="sheen"></div><div class="sheen2"></div><div class="disc d1"></div><div class="disc d2"></div><div class="disc d3"></div><div class="disc d4"></div><div class="knob"></div></div>
       <div id="nd-figure"></div>
       <div class="nd-orbit a" id="ring-front"><div class="fill"></div></div>
       <div id="nd-cards"></div>
@@ -464,7 +470,7 @@
     document.getElementById('nd-connect').innerHTML=
       '<div class="lab">'+p.pos+' '+f0.lab+' &middot; A reading</div><h4 class="serif">'+f0.title+'</h4>'+
       '<p>'+fill(f0.d,p)+'</p><div class="note">'+cap(p.P)+' core nature — a reading, not a verified fact.</div>'+
-      '<span class="nd-badge-fact">✓ '+p.name+' is photo + ID verified</span>';
+      '<span class="nd-badge-fact">✓ '+p.name+' — photo + ID verified</span>';
   }
   var dots='',seed=[[10,30,10],[24,58,7],[38,20,5],[62,26,6],[78,44,9],[88,64,6],[16,74,8],[70,72,7],[46,14,4],[54,80,5]];
   seed.forEach(function(s,i){dots+='<span class="nd-dot" style="left:'+s[0]+'%;top:'+s[1]+'%;width:'+s[2]+'px;height:'+s[2]+'px;animation-delay:'+(i*0.6)+'s"></span>';});
