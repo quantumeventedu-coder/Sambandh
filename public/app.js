@@ -1225,6 +1225,73 @@ async function startChat(userId, anonymous) {
 }
 
 // ---------------- Profile detail ----------------
+// The profile opens as a Ben-10-Omnitrix-style dial: the person sits in a glowing
+// green/gold rotating ring with their nature facets orbiting it; scroll down for the
+// full profile. CSS injected once.
+function ensureOmniCss() {
+  if (document.getElementById('omni-css')) return;
+  const s = document.createElement('style');
+  s.id = 'omni-css';
+  s.textContent = `
+  .omni-wrap{position:relative;background:radial-gradient(120% 90% at 50% 20%,#123024 0%,#0c1a14 46%,#070d0a 100%);padding:22px 16px 20px;text-align:center;overflow:hidden;border-radius:0 0 22px 22px}
+  .omni-wrap .oc{position:absolute;top:12px;width:36px;height:36px;border-radius:50%;border:1px solid rgba(255,255,255,.22);background:rgba(0,0,0,.32);color:#fff;font-size:17px;cursor:pointer;z-index:5}
+  .omni-wrap .oc.back{left:14px}.omni-wrap .oc.rep{right:14px;width:auto;padding:0 12px;border-radius:99px;font-size:12px;color:#ffd6de}
+  .omni{position:relative;width:270px;height:270px;margin:8px auto 2px;max-width:78vw}
+  .omni-ring{position:absolute;inset:0;border-radius:50%;background:conic-gradient(from 0deg,#0a3d24,#3bd67e 18%,#c9ffe0 26%,#3bd67e 34%,#0a3d24 50%,#1f7a4d 66%,#F3C14B 80%,#3bd67e 92%,#0a3d24);
+    -webkit-mask:radial-gradient(farthest-side,transparent calc(100% - 15px),#000 calc(100% - 14px));mask:radial-gradient(farthest-side,transparent calc(100% - 15px),#000 calc(100% - 14px));
+    filter:drop-shadow(0 0 12px rgba(59,214,126,.75)) drop-shadow(0 0 26px rgba(243,193,75,.4));animation:omnispin 9s linear infinite}
+  .omni-ring.inner{inset:24px;animation-duration:6s;animation-direction:reverse;opacity:.9;background:conic-gradient(from 120deg,#0a3d24,#3bd67e 30%,#0a3d24 55%,#c9ffe0 78%,#0a3d24);
+    -webkit-mask:radial-gradient(farthest-side,transparent calc(100% - 7px),#000 calc(100% - 6px));mask:radial-gradient(farthest-side,transparent calc(100% - 7px),#000 calc(100% - 6px))}
+  @keyframes omnispin{to{transform:rotate(360deg)}}
+  @media(prefers-reduced-motion:reduce){.omni-ring{animation:none}}
+  .omni-core{position:absolute;inset:42px;border-radius:50%;overflow:hidden;border:3px solid rgba(59,214,126,.55);box-shadow:inset 0 0 34px rgba(0,0,0,.6),0 0 22px rgba(59,214,126,.45);background:linear-gradient(160deg,#3a1830,#1a0f24);display:grid;place-items:center}
+  .omni-core img{width:100%;height:100%;object-fit:cover}
+  .omni-core .letter{font-family:Georgia,serif;font-size:74px;color:rgba(255,255,255,.9)}
+  .omni-chip{position:absolute;z-index:4;background:rgba(10,26,18,.74);border:1px solid rgba(59,214,126,.45);color:#dffbe9;font-size:11px;font-weight:700;border-radius:99px;padding:5px 11px;backdrop-filter:blur(4px);white-space:nowrap;box-shadow:0 6px 16px rgba(0,0,0,.4);max-width:150px;overflow:hidden;text-overflow:ellipsis}
+  .omni-chip b{color:#ffe6a6}
+  .oc-tl{left:-6px;top:20px}.oc-tr{right:-6px;top:20px}.oc-l{left:-14px;top:47%}.oc-r{right:-14px;top:47%}.oc-bl{left:8px;bottom:14px}.oc-br{right:8px;bottom:14px}
+  .omni-name{color:#fff;margin-top:8px}.omni-name h2{font-size:25px;margin:0}
+  .omni-name .meta{color:#bfe9d2;font-size:13px;margin-top:2px}
+  .omni-ver{display:inline-flex;align-items:center;gap:5px;margin-top:9px;color:#8fe9b4;background:rgba(31,122,77,.25);border:1px solid rgba(59,214,126,.5);border-radius:99px;font-size:12px;font-weight:700;padding:4px 12px}
+  .omni-turn{margin-top:11px;color:#9fdcb8;font-size:12px}.omni-turn .ct{display:inline-block;animation:obob 1.4s ease-in-out infinite}
+  @keyframes obob{0%,100%{transform:translateY(0)}50%{transform:translateY(4px)}}`;
+  document.head.appendChild(s);
+}
+function shortWords(s, n) { return String(s || '').split(/\s+/).slice(0, n).join(' '); }
+
+// Build the Omnitrix dial header from real profile data.
+function omniHeader(p, karma, rdg, photo) {
+  const verified = p.verification && p.verification.level !== 'phone_only';
+  const pos = p.tagsPositive || [];
+  const chips = [];
+  if (rdg && rdg.line) chips.push(['oc-tl', `<b>Reading</b> ${esc(shortWords(rdg.line, 2))}`]);
+  chips.push(['oc-tr', verified ? '✓ Verified' : 'New here']);
+  if (pos[0]) chips.push(['oc-l', esc(pos[0])]);
+  if (pos[1]) chips.push(['oc-r', esc(pos[1])]);
+  if (karma && karma.grade) chips.push(['oc-bl', `Lakshan <b>${esc(karma.grade)}</b>`]);
+  if (p.intent && p.intent[0]) chips.push(['oc-br', esc(p.intent[0])]);
+  const meta = [p.city, (p.distanceKm != null ? p.distanceKm + ' km away' : '')].filter(Boolean).join(' · ');
+  const core = photo
+    ? `<img src="${esc(photo)}" onerror="this.replaceWith(Object.assign(document.createElement('span'),{className:'letter',textContent:'${esc((p.firstName || '?')[0].toUpperCase())}'}))"/>`
+    : `<span class="letter">${esc((p.firstName || '?')[0].toUpperCase())}</span>`;
+  return `
+    <div class="omni-wrap">
+      <button class="oc back" onclick="history.back()" aria-label="Back">←</button>
+      <button class="oc rep" onclick="openReport('${p.userId}')">⚑ Report</button>
+      <div class="omni" onclick="this.querySelector('.omni-ring').style.animationDuration=(2+Math.random()*8)+'s'">
+        <div class="omni-ring"></div><div class="omni-ring inner"></div>
+        <div class="omni-core">${core}</div>
+        ${chips.map(c => `<div class="omni-chip ${c[0]}">${c[1]}</div>`).join('')}
+      </div>
+      <div class="omni-name">
+        <h2 class="serif">${esc(p.firstName)}${p.age ? ', ' + p.age : ''}</h2>
+        ${meta ? `<div class="meta">${esc(meta)}</div>` : ''}
+        ${verified ? `<div class="omni-ver">${esc(verLabel(p.verification))}</div>` : ''}
+      </div>
+      <div class="omni-turn"><span class="ct">▾</span> scroll to read their full nature</div>
+    </div>`;
+}
+
 async function renderProfile(userId) {
   screen.innerHTML = `<div class="section-pad"><div class="empty">Loading profile…</div></div>`;
   try {
@@ -1239,16 +1306,11 @@ async function renderProfile(userId) {
       ['Who they are', rdg.who]
     ], { note: 'Their reading — an insight, not a verified fact' }) : '';
     const photo = p.photos?.find(x => x.isPrimary)?.url || p.photos?.[0]?.url;
+    ensureOmniCss();
     screen.innerHTML = `
-      <div class="app-header">
-        <button class="back" style="background:none;border:none;font-size:22px;cursor:pointer" onclick="history.back()">←</button>
-        <div style="flex:1;padding-left:8px"><b>${esc(p.firstName)}${p.age ? ', ' + p.age : ''}</b>
-          <div style="font-size:11px;color:var(--forest)">${verLabel(p.verification)}</div></div>
-        <button style="background:none;border:none;cursor:pointer;color:var(--danger)" title="Report" onclick="openReport('${p.userId}')">${ic('flag', 'ic-lg')}</button>
-      </div>
+      ${omniHeader(p, karma, rdg, photo)}
       <div class="section-pad">
-        ${photo ? `<img src="${esc(photo)}" onerror="this.style.display='none'" style="width:100%;border-radius:16px;max-height:380px;object-fit:cover;margin-bottom:14px"/>`
-          : p.anonymous ? `<div class="notice anon ic-row" style="display:flex">${ic('ghost')} <span>This person browses anonymously. Chat first — identities reveal by mutual consent.</span></div>` : ''}
+        ${(!photo && p.anonymous) ? `<div class="notice anon ic-row" style="display:flex">${ic('ghost')} <span>This person browses anonymously. Chat first — identities reveal by mutual consent.</span></div>` : ''}
         <div class="stat-row">
           <div class="stat"><b>${karma.score}</b><span>Lakshan score</span></div>
           <div class="stat"><b>${karma.grade}</b><span>grade</span></div>
