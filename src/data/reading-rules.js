@@ -34,7 +34,7 @@ const SIGN_ELEMENT = {
 // ---------------------------------------------------------------------------
 const CHART_SIGNALS = [
   {
-    id: 'heat', tag: 'intense',
+    id: 'heat', tag: 'intense', factor: 'dosha_mangal',
     // Mars-in-sensitive-house effect (Mangal): brings force to relationships.
     test: c => (c.doshas || []).some(d => /Mangal/i.test(d.name)),
     who: 'You bring heat to a relationship — intensity, not lukewarm.',
@@ -42,7 +42,7 @@ const CHART_SIGNALS = [
     person: "Someone calm and steady who doesn't flinch when you get intense."
   },
   {
-    id: 'idealises', tag: 'idealises',
+    id: 'idealises', tag: 'idealises', factor: 'venus_debilitated',
     // Weak-Venus effect: an exacting inner picture of the ideal partner.
     test: c => c.planets?.Venus?.dignity === 'debilitated',
     who: 'You hold a picture of the right person so clearly that real people get measured against it.',
@@ -50,35 +50,35 @@ const CHART_SIGNALS = [
     person: 'Someone secure enough that you can finally put the checklist down.'
   },
   {
-    id: 'moonFire', tag: 'restless',
+    id: 'moonFire', tag: 'restless', factor: 'moon_fire',
     test: c => SIGN_ELEMENT[c.moonSign] === 'fire',
     who: 'You get restless when things settle into routine.',
     pattern: 'You chase the spark and go cool when it turns ordinary.',
     person: 'Someone who keeps life moving without keeping you off balance.'
   },
   {
-    id: 'moonWater', tag: 'deep',
+    id: 'moonWater', tag: 'deep', factor: 'moon_water',
     test: c => SIGN_ELEMENT[c.moonSign] === 'water',
     who: 'You feel things deeply and you remember everything.',
     pattern: "You give a lot, and you quietly keep score when it isn't returned.",
     person: "Someone warm and consistent who never makes you guess where you stand."
   },
   {
-    id: 'moonEarth', tag: 'grounded',
+    id: 'moonEarth', tag: 'grounded', factor: 'moon_earth',
     test: c => SIGN_ELEMENT[c.moonSign] === 'earth',
     who: "You're steady, and you build things to last.",
     pattern: 'You open slowly, and people read that as cold before they read it as safe.',
     person: 'Someone patient who earns their way in and stays.'
   },
   {
-    id: 'moonAir', tag: 'curious',
+    id: 'moonAir', tag: 'curious', factor: 'moon_air',
     test: c => SIGN_ELEMENT[c.moonSign] === 'air',
     who: 'You live in your head and you love a good back-and-forth.',
     pattern: 'You can talk around a feeling instead of landing on it.',
     person: "Someone easy to talk to who gently pins you down."
   },
   {
-    id: 'saturnSteady', tag: 'slow-warm',
+    id: 'saturnSteady', tag: 'slow-warm', factor: 'saturn_strong',
     // Strong-Saturn effect: slow to commit, then durable.
     test: c => ['own sign', 'exalted'].includes(c.planets?.Saturn?.dignity) ||
       [1, 4, 7, 10].includes(c.planets?.Saturn?.house),
@@ -87,14 +87,14 @@ const CHART_SIGNALS = [
     person: 'Someone patient enough to wait out your slow start.'
   },
   {
-    id: 'sunProud', tag: 'proud',
+    id: 'sunProud', tag: 'proud', factor: 'sun_strong',
     test: c => ['own sign', 'exalted'].includes(c.planets?.Sun?.dignity),
     who: 'You need to be respected, not managed.',
     pattern: 'You pull back the moment you feel handled.',
     person: 'Someone who leads with respect and never talks down to you.'
   },
   {
-    id: 'rahuRestless', tag: 'restless',
+    id: 'rahuRestless', tag: 'restless', factor: 'dasha_rahu',
     // Current major period run by the restless, forward-driving influence.
     test: c => c.dasha?.current?.lord === 'Rahu',
     who: "You're chasing something bigger right now and you can't sit still for long.",
