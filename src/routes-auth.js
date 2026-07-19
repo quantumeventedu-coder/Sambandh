@@ -459,10 +459,15 @@ router.patch('/profile', requireAuth, async (req, res, next) => {
     }
     if (d.intent) updates.intent = d.intent;
     if (d.interestedInGenders) updates['preferences.interestedInGenders'] = d.interestedInGenders;
-    // Self-declared features. null → remove the whole nature profile; otherwise
-    // dotted paths so a partial update keeps the fields it didn't touch.
-    if (d.features === null) updates.features = {};
-    else if (d.features) for (const [k, v] of Object.entries(d.features)) updates['features.' + k] = v;
+    // Self-declared features. null → remove the whole nature profile (and its
+    // provenance); otherwise dotted paths so a partial update keeps untouched
+    // fields. Each field the user sets is stamped source:'self', which makes it
+    // WIN over any later CV geometric guess (see services/feature-guard.js).
+    if (d.features === null) { updates.features = {}; updates.featureSources = {}; }
+    else if (d.features) for (const [k, v] of Object.entries(d.features)) {
+      updates['features.' + k] = v;
+      updates['featureSources.' + k] = 'self';
+    }
     if (d.astrology) {
       updates['astrology.birthDate'] = d.astrology.birthDate;
       if (d.astrology.birthTime !== undefined) updates['astrology.birthTime'] = d.astrology.birthTime;

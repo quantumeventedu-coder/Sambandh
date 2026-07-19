@@ -164,6 +164,52 @@ router.post('/pause', requireAuth, async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+// ---- Geometric read (computer vision → temperament features) ----
+// The single sanctioned server path for CV to touch `features`. All the ethical
+// guardrails live in services/feature-guard.js: geometry only, NEVER complexion,
+// separate consent, self-declared wins, and the output is a READING not a fact.
+
+const featureGuard = require('./services/feature-guard');
+
+// POST /api/me/cv-consent — opt in / out of the geometric read, explicitly. This
+// is NOT implied by uploading a photo or by ID verification.
+router.post('/cv-consent', requireAuth, async (req, res, next) => {
+  try {
+    const on = req.body?.geometry === true;
+    await User.findByIdAndUpdate(req.userId, {
+      'cvConsent.geometry': on,
+      'cvConsent.at': new Date()
+    });
+    res.json({ ok: true, geometry: on });
+  } catch (err) { next(err); }
+});
+
+// POST /api/me/geometric-read — apply candidate geometry measured in the browser
+// (MediaPipe) to the user's features, through the guard. Body: { features: {...} }
+// with discretised geometric values only. Rejects (403) without consent, (400) on
+// any complexion term. Returns which fields were written, all as READINGS.
+router.post('/geometric-read', requireAuth, async (req, res, next) => {
+  try {
+    const user = await User.findById(req.userId).lean();
+    if (!user) return res.status(404).json({ error: 'User not found', code: 'not_found' });
+    // Throws ForbiddenError (403) / ValidationError (400) → typed error handler.
+    const patch = featureGuard.applyCvFeatures(user, req.body?.features || {});
+    const updates = {};
+    for (const k of patch.written) {
+      updates['features.' + k] = patch.features[k];
+      updates['featureSources.' + k] = 'cv';
+    }
+    if (patch.written.length) await User.findByIdAndUpdate(req.userId, updates);
+    res.json({
+      ok: true,
+      written: patch.written,           // fields the CV filled (undeclared only)
+      badge: 'reading',                 // never "verified" — line #2
+      features: patch.features,
+      sources: patch.featureSources
+    });
+  } catch (err) { next(err); }
+});
+
 // ---- Blocking (spec §2.4.5, §2.8.5) ----
 
 // GET /api/me/blocked — list blocked users
