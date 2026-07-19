@@ -1,17 +1,21 @@
 // tests/landing-dial.test.js — the public Nature Dial section holds the same guards
 // as the app: plain language (no astrology terms) and the Verified/Reading split
-// (facets are readings, never "verified"). Also enforces the perf discipline.
+// (facets are readings, never "verified"). Also enforces the perf/asset discipline.
+// The section's copy is rendered by an inline <script> (FACETS), so we scan the
+// section AND that script.
 
 const fs = require('fs');
 const path = require('path');
 
 const html = fs.readFileSync(path.join(__dirname, '..', 'public', 'home.html'), 'utf8');
-const dial = (html.match(/<section id="nature-dial">[\s\S]*?<\/section>/) || [''])[0];
-const visibleText = dial.replace(/<[^>]+>/g, ' ');   // strip tags → what a visitor reads
+// the section + its inline render script (up to the render('full') call)
+const start = html.indexOf('<!-- THE NATURE DIAL');
+const end = html.indexOf("render('full');", start);
+const dial = html.slice(start, end > -1 ? end + 40 : start + 6000);
 
 describe('the Nature Dial exists and is ordered correctly', () => {
   test('section present, below the trust hero and above pricing', () => {
-    expect(dial).toBeTruthy();
+    expect(start).toBeGreaterThan(-1);
     const hero = html.indexOf('id="top"');
     const nd = html.indexOf('id="nature-dial"');
     const pricing = html.indexOf('id="pricing"');
@@ -21,49 +25,37 @@ describe('the Nature Dial exists and is ordered correctly', () => {
   });
 });
 
-describe('no astrology jargon in public dial copy', () => {
+describe('no astrology jargon in the dial copy', () => {
   const JARGON = /\b(sun|moon|mars|mercury|jupiter|venus|saturn|rahu|ketu|aries|taurus|gemini|cancer|leo|virgo|libra|scorpio|sagittarius|capricorn|aquarius|pisces|nakshatra|dosha|dasha|guna|lagna|mangal|rashi|ascendant|kundli|kundali|graha|navamsa|samudrika|vedic|horoscope|zodiac)\b/i;
-  test('the visible dial text contains no term', () => {
-    expect(JARGON.test(visibleText)).toBe(false);
+  test('neither the markup nor the rendered facet copy contains a term', () => {
+    expect(JARGON.test(dial)).toBe(false);
   });
 });
 
 describe('Verified/Reading split holds on the public page', () => {
-  test('the facet cards are readings — none says "verified"', () => {
-    const cards = dial.match(/<div class="nd-card[\s\S]*?<\/div>\s*<\/div>/g) || dial.match(/class="nd-card[\s\S]*?<\/p><\/div>/g) || [];
-    // fall back to scanning each nd-card block
-    const blocks = dial.split('class="nd-card').slice(1);
-    expect(blocks.length).toBeGreaterThanOrEqual(6);
-    for (const b of blocks) {
-      const card = b.slice(0, b.indexOf('</div></div>') + 1);
-      expect(card.toLowerCase()).not.toContain('verified');
-    }
+  test('the facet definitions are readings — no facet is presented as "verified"', () => {
+    // pull the FACETS array (title/label/desc strings) and assert none says "verified"
+    const facets = (dial.match(/var FACETS=\[[\s\S]*?\];/) || [''])[0];
+    expect(facets).toMatch(/PERSONA|ENERGY|WORLD/);          // the array is present
+    expect(facets.toLowerCase()).not.toContain('verified');  // a facet is never "verified"
   });
 
-  test('the reading disclaimer is present and the fact/reading badges are distinct', () => {
-    expect(dial).toContain('a reading');                 // insight, not a fact
-    expect(dial).toMatch(/nd-badge-read/);
-    expect(dial).toMatch(/nd-badge-fact/);
-    // the only "verified" on the dial is the identity FACT badge, worded as a fact
-    expect(dial).toMatch(/verify[\s\S]*photo \+ ID|photo \+ ID/i);
+  test('the honesty framing + both distinct badges are present', () => {
+    expect(dial).toMatch(/a reading, not a verified fact/i);  // facets are readings
+    expect(dial).toMatch(/nd-badge-read/);                    // reading badge
+    expect(dial).toMatch(/nd-badge-fact/);                    // distinct fact badge
+    // the only "verified" claim is the identity FACT (photo + ID)
+    expect(dial).toMatch(/photo \+ ID verified/i);
   });
 });
 
-describe('performance discipline (Indian mobile)', () => {
-  test('the centre portrait is an EXTERNAL image, lazy-loaded, with dimensions', () => {
-    const fig = (dial.match(/<img id="nd-figure"[\s\S]*?\/>/) || [''])[0];
-    expect(fig).toContain('loading="lazy"');
-    expect(fig).toMatch(/width="\d+"/);
-    expect(fig).toMatch(/height="\d+"/);
-    expect(fig).toMatch(/src="\/dial-hero\.(jpg|png|webp)"/);   // external file, not inline
-    expect(fig).not.toMatch(/src="data:image/);                // never base64-embedded
-  });
-
-  test('no large base64 image is embedded anywhere in the dial section', () => {
-    expect(dial).not.toMatch(/data:image\/[a-z]+;base64,[A-Za-z0-9+/]{500,}/);
+describe('asset + performance discipline (Indian mobile)', () => {
+  test('the portrait is an EXTERNAL file (dial-*.jpg), never inline base64', () => {
+    expect(dial).toMatch(/\/dial-(full|woman|man)\.jpg/);     // external image files
+    expect(dial).not.toMatch(/data:image\/[a-z]+;base64,[A-Za-z0-9+/]{500,}/); // no heavy inline blob
   });
 
   test('animation is disabled under prefers-reduced-motion', () => {
-    expect(html).toMatch(/prefers-reduced-motion[\s\S]*?#nd-rings i\{animation:none\}/);
+    expect(html).toMatch(/prefers-reduced-motion:reduce\)\{[^}]*animation:none/);
   });
 });

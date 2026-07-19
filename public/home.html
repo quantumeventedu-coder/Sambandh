@@ -67,6 +67,18 @@
   @media(max-width:900px){.hero p.sub{margin-left:auto;margin-right:auto}}
   .cta-row{display:flex;gap:14px;flex-wrap:wrap}
   @media(max-width:900px){.cta-row{justify-content:center}}
+  /* waiting-list capture */
+  .waitform{display:flex;gap:10px;flex-wrap:wrap;max-width:480px}
+  .waitform input{flex:1 1 220px;min-width:0;padding:14px 16px;border-radius:12px;border:1px solid rgba(255,255,255,.28);
+    background:rgba(255,255,255,.1);color:#fff;font-size:15px;outline:none}
+  .waitform input::placeholder{color:rgba(255,255,255,.6)}
+  .waitform input:focus{border-color:var(--haldi);background:rgba(255,255,255,.16)}
+  .waitform .btn{white-space:nowrap}
+  .waitmsg{margin-top:12px;font-size:14.5px;color:var(--haldi);min-height:20px;font-weight:600}
+  .waitnote{margin-top:10px;font-size:13px;color:rgba(255,255,255,.62)}
+  .final .waitform{margin:0 auto}
+  .final .waitform input{background:rgba(255,255,255,.14);border-color:rgba(255,255,255,.3)}
+  @media(max-width:900px){.waitform{margin-left:auto;margin-right:auto}}
   .hero-metrics{display:flex;gap:28px;margin-top:34px}
   @media(max-width:900px){.hero-metrics{justify-content:center}}
   .hero-metrics .m b{font-family:Georgia,serif;font-size:26px;color:var(--haldi);display:block;line-height:1}
@@ -213,8 +225,14 @@
       <div class="htag"><i></i> India's verified, honesty-first dating</div>
       <h1>Meet people who are <span class="grad">actually who they say</span> they are.</h1>
       <p class="sub">Every member is face-verified. An AI <b>Lakshan Book</b> quietly keeps people honest. You match on real intent and deep compatibility — not just photos.</p>
-      <div class="cta-row">
-        <a href="/app" class="btn gold" id="ctaHero">Open the app →</a>
+      <form class="waitform" id="waitHero" onsubmit="return joinWaitlist(event,'hero')">
+        <input type="email" name="email" inputmode="email" autocomplete="email" placeholder="Enter your email" required aria-label="Email address"/>
+        <button type="submit" class="btn gold">Join the waiting list</button>
+      </form>
+      <div class="waitmsg" id="waitHeroMsg"></div>
+      <div class="waitnote" id="waitCount">Be among the first — we open the doors soon.</div>
+      <div class="cta-row" style="margin-top:16px">
+        <a href="/app" class="btn ghost" id="ctaHero">Open the app →</a>
         <a href="#features" class="btn ghost">See how it works</a>
       </div>
       <div class="hero-metrics">
@@ -309,83 +327,85 @@
   </div>
 </section>
 
-<!-- THE NATURE DIAL — showcase (below the trust story, above pricing). The centre
-     portrait is an EXTERNAL, AI-generated marketing image (public/dial-hero.jpg) in
-     an <img> slot, lazy-loaded on scroll — never base64. The facets are READINGS
+<!-- THE NATURE DIAL — showcase (below the trust story, above pricing). A realistic
+     member portrait (drop cut-out photos at /dial-full.jpg, /dial-woman.jpg,
+     /dial-man.jpg — an SVG silhouette stands in until then) inside a real 3-D
+     holographic orbit, with glass facet cards angled around it. Facets are READINGS
      (never "verified"); only the identity line is a fact. No astrology terms. -->
 <style>
-  #nature-dial{background:radial-gradient(120% 120% at 50% 0%,#2a0b16 0%,#1a0710 55%,#0d0409 100%);color:#f3e9ec;padding:78px 0 64px;overflow:hidden}
-  #nature-dial .eyebrow{color:var(--haldi);font-size:12px;font-weight:800;letter-spacing:.28em;text-transform:uppercase;text-align:center}
-  #nature-dial h2{color:#fff;text-align:center;font-size:clamp(28px,5vw,46px);margin:8px 0 6px}
-  #nature-dial .sub{color:#c9b3bd;text-align:center;max-width:560px;margin:0 auto 8px}
-  #nd-stage{position:relative;max-width:1060px;margin:22px auto 0;min-height:560px;display:flex;align-items:center;justify-content:center}
-  #nd-rings{position:absolute;top:52%;left:50%;width:min(760px,88vw);height:230px;transform:translate(-50%,-50%);pointer-events:none}
-  #nd-rings i{position:absolute;inset:0;border-radius:50%;border:2px solid transparent;
-    border-top-color:rgba(243,193,75,.85);border-bottom-color:rgba(212,83,126,.85);
-    filter:drop-shadow(0 0 14px rgba(243,193,75,.5)) drop-shadow(0 0 20px rgba(212,83,126,.4));
-    transform:rotateX(74deg);animation:ndspin 18s linear infinite}
-  #nd-rings i:nth-child(2){inset:22px 60px;animation-duration:26s;animation-direction:reverse;opacity:.8}
-  @keyframes ndspin{to{transform:rotateX(74deg) rotate(360deg)}}
-  #nd-figure{position:relative;z-index:2;height:520px;width:auto;max-width:46%;object-fit:contain;
-    filter:drop-shadow(0 30px 50px rgba(0,0,0,.6));border-radius:12px}
-  #nd-figure.fallback{width:230px;height:430px;max-width:60%;border-radius:140px 140px 24px 24px;
-    background:radial-gradient(60% 40% at 50% 22%,rgba(243,193,75,.35),rgba(212,83,126,.18) 60%,transparent 72%);
-    border:1px solid rgba(243,193,75,.25)}
-  .nd-card{position:absolute;z-index:3;width:186px;background:rgba(30,12,20,.62);
-    border:1px solid rgba(243,193,75,.28);border-radius:14px;padding:13px 15px;backdrop-filter:blur(6px);
-    box-shadow:0 12px 30px rgba(0,0,0,.45)}
-  .nd-card .lab{color:var(--haldi);font-size:9.5px;font-weight:800;letter-spacing:.14em;text-transform:uppercase}
-  .nd-card h4{font-family:Georgia,serif;color:#fff;font-size:19px;line-height:1.15;margin:4px 0 5px}
-  .nd-card p{color:#c3aab4;font-size:11.5px;line-height:1.45;margin:0}
-  .nd-tl{top:6%;left:2%} .nd-ml{top:34%;left:9%} .nd-bl{bottom:16%;left:3%}
-  .nd-tr{top:12%;right:3%} .nd-mr{top:40%;right:1%} .nd-br{bottom:18%;right:5%}
-  #nd-connect{position:relative;z-index:4;max-width:520px;margin:-6px auto 0;background:rgba(22,8,14,.82);
-    border:1px solid rgba(243,193,75,.22);border-radius:16px;padding:16px 20px;text-align:left}
-  #nd-connect .lab{color:var(--haldi);font-size:10px;font-weight:800;letter-spacing:.14em;text-transform:uppercase}
-  #nd-connect h4{font-family:Georgia,serif;color:#fff;font-size:22px;margin:5px 0 5px}
-  #nd-connect p{color:#cbb4bd;font-size:13.5px;margin:0 0 10px}
-  .nd-badge-read{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:800;color:#e7c04f;
-    background:rgba(243,193,75,.12);border:1px solid rgba(243,193,75,.4);border-radius:99px;padding:3px 11px}
-  .nd-badge-fact{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:800;color:#69d18e;
-    background:rgba(31,122,77,.16);border:1px solid rgba(63,191,114,.45);border-radius:99px;padding:3px 11px}
-  #nd-foot{text-align:center;color:#9c8590;font-size:12.5px;margin-top:20px}
-  #nd-foot .pv{margin-top:8px;display:flex;gap:10px;justify-content:center;flex-wrap:wrap}
-  @media(max-width:860px){
-    #nd-stage{flex-direction:column;min-height:0}
-    #nd-rings,.nd-card{position:static}
-    #nd-figure{max-width:70%;height:auto;margin:0 auto 14px}
-    #nd-cards{display:grid;grid-template-columns:1fr 1fr;gap:10px;width:100%;margin-top:10px}
-    .nd-card{width:auto}
-    #nd-connect{margin-top:16px}
+  #nature-dial{position:relative;background:radial-gradient(70% 55% at 50% 40%,#3d260f 0%,#1a0f0a 44%,#080506 100%);color:#f3e9ec;padding:64px 0 66px;overflow:hidden}
+  #nd-head{text-align:center;position:relative;z-index:7}
+  #nd-head .eyebrow{color:var(--haldi);font-size:12px;font-weight:800;letter-spacing:.34em;text-transform:uppercase}
+  #nd-head h2{color:#fff;font-size:clamp(28px,4.4vw,48px);margin:8px 0 6px;line-height:1.06}
+  #nd-head .sub{color:#cab2bc;max-width:560px;margin:0 auto;font-size:15px}
+  #nd-toggle{display:inline-flex;gap:2px;background:rgba(18,10,8,.72);border:1px solid rgba(243,193,75,.32);border-radius:99px;padding:5px;margin-top:14px}
+  #nd-toggle button{font:inherit;font-size:13.5px;font-weight:700;color:#d9c2cb;background:transparent;border:0;padding:8px 18px;border-radius:99px;cursor:pointer;transition:.2s}
+  #nd-toggle button.on{background:linear-gradient(135deg,#ffd97a,var(--haldi));color:var(--deep);box-shadow:0 6px 18px rgba(243,193,75,.35)}
+
+  #nd-stage{position:relative;height:660px;margin-top:6px}
+  .nd-orbit{position:absolute;left:50%;top:64%;transform:translate(-50%,-50%);border-radius:50%;pointer-events:none;
+    -webkit-mask:radial-gradient(farthest-side,transparent calc(100% - 7px),#000 calc(100% - 6px));
+            mask:radial-gradient(farthest-side,transparent calc(100% - 7px),#000 calc(100% - 6px))}
+  .nd-orbit.a{width:min(640px,66%);height:210px} .nd-orbit.b{width:min(760px,78%);height:262px}
+  .nd-orbit .fill{position:absolute;inset:0;border-radius:50%;
+    background:conic-gradient(from 256deg,#fff3d6,#ffd873 10%,#ffca67 24%,#ff96c2 40%,#ff3d8f 51%,#ffa6cf 61%,#ffd873 80%,#fff3d6);
+    filter:drop-shadow(0 0 6px #ffdca0) drop-shadow(0 0 16px rgba(255,190,110,.95)) drop-shadow(0 0 30px rgba(255,70,150,.75));
+    animation:ndspin 16s linear infinite}
+  .nd-orbit.b .fill{animation-duration:24s;animation-direction:reverse;opacity:.8}
+  @keyframes ndspin{to{transform:rotate(360deg)}}
+  #ring-back{z-index:1} #ring-front{z-index:4;clip-path:inset(44% 0 0 0)}
+  .nd-floor{position:absolute;left:50%;top:70%;transform:translate(-50%,-50%);width:min(760px,80%);height:150px;z-index:1;background:radial-gradient(50% 60% at 50% 50%,rgba(255,180,90,.32),transparent 70%);filter:blur(8px);pointer-events:none}
+  .nd-dot{position:absolute;border-radius:50%;background:radial-gradient(circle,rgba(255,224,150,.95),rgba(243,193,75,0) 70%);z-index:2;pointer-events:none;animation:ndfloat 8s ease-in-out infinite}
+  @keyframes ndfloat{0%,100%{transform:translateY(0);opacity:.3}50%{transform:translateY(-18px);opacity:.9}}
+  #nd-figure{position:absolute;left:50%;bottom:0;transform:translateX(-50%);width:min(420px,44%);height:620px;z-index:3;background-position:center bottom;background-size:contain;background-repeat:no-repeat;filter:drop-shadow(0 24px 60px rgba(0,0,0,.7))}
+  .nd-card{position:absolute;z-index:5;width:186px;padding:15px 17px;border-radius:16px;background:linear-gradient(155deg,rgba(60,34,18,.34),rgba(14,8,6,.46));border:1px solid rgba(243,193,75,.4);backdrop-filter:blur(9px);-webkit-backdrop-filter:blur(9px);box-shadow:0 20px 46px rgba(0,0,0,.55),inset 0 1px 0 rgba(255,240,207,.12)}
+  .nd-card .lab{color:var(--haldi);font-size:10px;font-weight:800;letter-spacing:.16em;text-transform:uppercase}
+  .nd-card h4{font-family:Georgia,serif;color:#fff;font-size:20px;line-height:1.12;margin:5px 0 6px}
+  .nd-card p{color:#cbb3bd;font-size:12px;line-height:1.42;margin:0}
+  .nd-card svg{width:20px;height:20px;margin-top:9px;stroke:rgba(243,193,75,.75);fill:none;stroke-width:1.6}
+  .nd-card.L{transform:perspective(1100px) rotateY(19deg)} .nd-card.R{transform:perspective(1100px) rotateY(-19deg)}
+  .c-persona{left:1%;top:16%} .c-passions{left:15%;top:36%} .c-approach{left:6%;bottom:9%}
+  .c-energy{right:15%;top:19%} .c-world{right:0;top:33%} .c-drive{right:9%;bottom:10%}
+  #nd-connect{position:absolute;left:50%;bottom:-4px;transform:translateX(-50%);z-index:6;width:min(560px,78%);background:linear-gradient(160deg,rgba(43,20,12,.93),rgba(16,9,7,.96));border:1px solid rgba(243,193,75,.26);border-radius:18px;padding:18px 22px;box-shadow:0 26px 60px rgba(0,0,0,.6)}
+  #nd-connect .lab{color:var(--haldi);font-size:11px;font-weight:800;letter-spacing:.14em;text-transform:uppercase}
+  #nd-connect h4{font-family:Georgia,serif;color:#fff;font-size:24px;margin:6px 0 7px}
+  #nd-connect p{color:#cbb4bd;font-size:14px;margin:0 0 6px}
+  #nd-connect .note{color:#9c8590;font-size:12px;margin:0 0 11px}
+  .nd-badge-fact{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:800;color:#69d18e;background:rgba(31,122,77,.18);border:1px solid rgba(63,191,114,.5);border-radius:99px;padding:5px 13px}
+  .nd-badge-read{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:800;color:#e7c04f;background:rgba(243,193,75,.12);border:1px solid rgba(243,193,75,.4);border-radius:99px;padding:4px 11px}
+  #nd-foot{position:relative;z-index:7;text-align:center;color:#9c8590;font-size:12.5px;margin-top:26px}
+  #nd-foot .pv{margin-top:9px;display:flex;gap:10px;justify-content:center;flex-wrap:wrap}
+  @media(max-width:920px){
+    #nd-stage{height:auto}
+    .nd-orbit,.nd-dot,.nd-floor{display:none}
+    #nd-figure{position:relative;left:auto;bottom:auto;transform:none;margin:16px auto 0;width:min(280px,70%);height:360px}
+    .nd-card{position:static;width:auto;transform:none!important}
+    #nd-cards{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:14px}
+    #nd-connect{position:static;transform:none;width:auto;margin:16px auto 0}
   }
-  @media(prefers-reduced-motion:reduce){#nd-rings i{animation:none}}
+  @media(prefers-reduced-motion:reduce){.nd-orbit .fill,.nd-dot{animation:none}}
 </style>
 <section id="nature-dial">
   <div class="wrap">
-    <div class="eyebrow">The Nature Dial</div>
-    <h2 class="serif">Turn the dial. See who they are.</h2>
-    <p class="sub">Each facet unfolds a part of who they are — in plain words, never jargon.</p>
-    <div id="nd-stage">
-      <div id="nd-rings" aria-hidden="true"><i></i><i></i></div>
-      <!-- Drop an AI-generated marketing portrait at public/dial-hero.jpg. Until then,
-           a glowing abstract avatar stands in (matches the in-app "hidden" state). -->
-      <img id="nd-figure" class="fallback" alt="A member on the Nature Dial (illustrative)"
-           width="230" height="430" loading="lazy" decoding="async"
-           src="/dial-hero.jpg" onerror="this.classList.add('fallback');this.removeAttribute('src')"/>
-      <div id="nd-cards">
-        <div class="nd-card nd-tl"><div class="lab">Persona</div><h4>Grounded &amp; calm</h4><p>Stays steady under pressure and brings stability to the people around them.</p></div>
-        <div class="nd-card nd-ml"><div class="lab">Passions</div><h4>Deep thinker</h4><p>Enjoys understanding how things work and why people think the way they do.</p></div>
-        <div class="nd-card nd-bl"><div class="lab">Approach</div><h4>Thoughtful &amp; kind</h4><p>Notices the small things that matter to the people they care about.</p></div>
-        <div class="nd-card nd-tr"><div class="lab">Energy</div><h4>Balanced &amp; steady</h4><p>Brings calm to chaos and helps others feel at ease.</p></div>
-        <div class="nd-card nd-mr"><div class="lab">World</div><h4>Loyal &amp; committed</h4><p>Values trust above everything and stands by their people.</p></div>
-        <div class="nd-card nd-br"><div class="lab">Drive</div><h4>Growth oriented</h4><p>Always learning, always evolving — steady forward motion.</p></div>
+    <div id="nd-head">
+      <div class="eyebrow">The Nature Dial</div>
+      <h2 class="serif">Turn the dial. See who they are.</h2>
+      <p class="sub">Each facet unfolds a part of who they are — in plain words, never jargon.</p>
+      <div id="nd-toggle">
+        <button type="button" data-p="full" class="on">Full body</button>
+        <button type="button" data-p="woman">Woman</button>
+        <button type="button" data-p="man">Man</button>
       </div>
     </div>
-    <div id="nd-connect">
-      <div class="lab">How they connect</div>
-      <h4 class="serif">Grounded &amp; calm</h4>
-      <p>Their match is someone steady who doesn't need constant reassurance — a person who brings the spark while they keep it steady.</p>
-      <span class="nd-badge-read">✦ A reading — an insight, not a verified fact</span>
+    <div id="nd-stage">
+      <div class="nd-floor"></div>
+      <div class="nd-orbit b" id="ring-back-b"><div class="fill"></div></div>
+      <div class="nd-orbit a" id="ring-back"><div class="fill"></div></div>
+      <div id="nd-dots"></div>
+      <div id="nd-figure"></div>
+      <div class="nd-orbit a" id="ring-front"><div class="fill"></div></div>
+      <div id="nd-cards"></div>
+      <div id="nd-connect"></div>
     </div>
     <div id="nd-foot">
       Inside Sambandh this runs on a real member's photo and reading — this is a preview, not a real person.
@@ -394,6 +414,54 @@
     </div>
   </div>
 </section>
+<script>
+(function(){
+  var ICON={
+    persona:'<svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 3.5-6 8-6s8 2 8 6"/></svg>',
+    passions:'<svg viewBox="0 0 24 24"><path d="M12 3a6 6 0 0 0-4 10c1 1 1 2 1 3h6c0-1 0-2 1-3a6 6 0 0 0-4-10z"/><path d="M9 20h6"/></svg>',
+    approach:'<svg viewBox="0 0 24 24"><path d="M12 21s-7-4.5-7-9a4 4 0 0 1 7-2 4 4 0 0 1 7 2c0 4.5-7 9-7 9z"/></svg>',
+    energy:'<svg viewBox="0 0 24 24"><path d="M7 3h10l-2 7 2 11H7l2-11z"/></svg>',
+    world:'<svg viewBox="0 0 24 24"><path d="M12 3l7 3v5c0 5-3.5 8-7 10-3.5-2-7-5-7-10V6z"/></svg>',
+    drive:'<svg viewBox="0 0 24 24"><path d="M4 20L20 4M14 4h6v6"/></svg>'
+  };
+  var FACETS=[
+    {k:'persona',cls:'c-persona L',lab:'PERSONA',title:'Grounded and calm',d:'{S} stays steady under pressure and brings stability to the people around {O}.'},
+    {k:'passions',cls:'c-passions L',lab:'PASSIONS',title:'Deep thinker',d:'{S} enjoys understanding how things work and why people think the way they do.'},
+    {k:'approach',cls:'c-approach L',lab:'APPROACH',title:'Thoughtful and kind',d:'{S} notices the small things that matter to the people {Sl} cares about.'},
+    {k:'energy',cls:'c-energy R',lab:'ENERGY',title:'Balanced and steady',d:'{S} brings calm to chaos and helps others feel at ease.'},
+    {k:'world',cls:'c-world R',lab:'WORLD',title:'Loyal and committed',d:'{S} values trust above everything and stands by {P} people.'},
+    {k:'drive',cls:'c-drive R',lab:'DRIVE',title:'Growth oriented',d:'Always learning, always evolving — steady forward motion.'}
+  ];
+  var FB='/dial-woman.svg';
+  var PEOPLE={
+    full:{img:'/dial-full.jpg',pos:'HER',S:'She',Sl:'she',O:'her',P:'her',name:'Priya'},
+    woman:{img:'/dial-woman.jpg',pos:'HER',S:'She',Sl:'she',O:'her',P:'her',name:'Priya'},
+    man:{img:'/dial-man.jpg',pos:'HIS',S:'He',Sl:'he',O:'him',P:'his',name:'Rohan'}
+  };
+  function fill(t,p){return t.replace(/{Sl}/g,p.Sl).replace(/{S}/g,p.S).replace(/{O}/g,p.O).replace(/{P}/g,p.P);}
+  function cap(s){return s.charAt(0).toUpperCase()+s.slice(1);}
+  function render(key){
+    var p=PEOPLE[key]; if(!p)return;
+    var fig=document.getElementById('nd-figure');
+    fig.style.backgroundImage='url('+p.img+'), url('+FB+')';   // real photo on top, silhouette behind
+    document.getElementById('nd-cards').innerHTML=FACETS.map(function(f){
+      return '<div class="nd-card '+f.cls+'"><div class="lab">'+p.pos+' '+f.lab+'</div><h4>'+f.title+'</h4><p>'+fill(f.d,p)+'</p>'+(ICON[f.k]||'')+'</div>';
+    }).join('');
+    var f0=FACETS[0];
+    document.getElementById('nd-connect').innerHTML=
+      '<div class="lab">'+p.pos+' '+f0.lab+' &middot; A reading</div><h4 class="serif">'+f0.title+'</h4>'+
+      '<p>'+fill(f0.d,p)+'</p><div class="note">'+cap(p.P)+' core nature — a reading, not a verified fact.</div>'+
+      '<span class="nd-badge-fact">✓ '+p.name+' is photo + ID verified</span>';
+  }
+  var dots='',seed=[[10,30,10],[24,58,7],[38,20,5],[62,26,6],[78,44,9],[88,64,6],[16,74,8],[70,72,7],[46,14,4],[54,80,5]];
+  seed.forEach(function(s,i){dots+='<span class="nd-dot" style="left:'+s[0]+'%;top:'+s[1]+'%;width:'+s[2]+'px;height:'+s[2]+'px;animation-delay:'+(i*0.6)+'s"></span>';});
+  var dz=document.getElementById('nd-dots'); if(dz)dz.innerHTML=dots;
+  Array.prototype.forEach.call(document.querySelectorAll('#nd-toggle button'),function(b){
+    b.addEventListener('click',function(){Array.prototype.forEach.call(document.querySelectorAll('#nd-toggle button'),function(x){x.classList.remove('on')});b.classList.add('on');render(b.getAttribute('data-p'));});
+  });
+  render('full');
+})();
+</script>
 
 <!-- PRICING -->
 <section class="block" id="pricing">
@@ -447,9 +515,14 @@
     <div class="final reveal">
       <div class="aurora" style="opacity:.4"><span class="a"></span><span class="b"></span></div>
       <div style="position:relative;z-index:1">
-        <h2>Dating, without the guesswork.</h2>
-        <p>Join a community where everyone is verified and honesty is the default. Your first impression is a real one.</p>
-        <a href="/app" class="btn gold" id="ctaFinal">Open Sambandh →</a>
+        <h2>Be first in line.</h2>
+        <p>We're building the most premium, honesty-first dating platform in the world — and opening the doors soon. Join the waiting list and we'll invite you the moment we launch.</p>
+        <form class="waitform" id="waitFinal" onsubmit="return joinWaitlist(event,'final')">
+          <input type="email" name="email" inputmode="email" autocomplete="email" placeholder="Enter your email" required aria-label="Email address"/>
+          <button type="submit" class="btn gold">Join the waiting list</button>
+        </form>
+        <div class="waitmsg" id="waitFinalMsg" style="text-align:center"></div>
+        <a href="/app" class="btn ghost" id="ctaFinal" style="margin-top:14px">Open the app →</a>
       </div>
     </div>
   </div>
@@ -499,6 +572,43 @@
       ['ctaHero','ctaFinal'].forEach(id => { const el = document.getElementById(id); if (el) el.textContent = 'Back to Sambandh →'; });
     }
   } catch (e) {}
+
+  // ---- Waiting list ----
+  window.joinWaitlist = async function (ev, source) {
+    ev.preventDefault();
+    const form = ev.target;
+    const email = (form.querySelector('input[name=email]') || {}).value || '';
+    const btn = form.querySelector('button');
+    const msg = document.getElementById(source === 'final' ? 'waitFinalMsg' : 'waitHeroMsg');
+    btn.disabled = true; const label = btn.textContent; btn.textContent = 'Joining…';
+    try {
+      const r = await fetch('/api/waitlist', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: email, source: source })
+      });
+      const data = await r.json().catch(() => ({}));
+      if (r.ok) {
+        form.reset();
+        msg.textContent = data.position ? ('✓ You\'re #' + data.position + ' on the list — check your inbox soon.') : '✓ You\'re on the list — we\'ll be in touch.';
+        loadWaitCount();
+      } else {
+        msg.textContent = (data && data.error) || 'Please enter a valid email.';
+      }
+    } catch (e) {
+      msg.textContent = 'Network hiccup — please try again.';
+    } finally {
+      btn.disabled = false; btn.textContent = label;
+    }
+    return false;
+  };
+  async function loadWaitCount() {
+    try {
+      const r = await fetch('/api/waitlist/count'); const d = await r.json();
+      const el = document.getElementById('waitCount');
+      if (el && d && d.count > 0) el.textContent = d.count.toLocaleString() + (d.count === 1 ? ' person' : ' people') + ' already waiting — join them.';
+    } catch (e) {}
+  }
+  loadWaitCount();
 </script>
 </body>
 </html>
