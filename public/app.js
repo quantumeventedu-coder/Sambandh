@@ -1225,6 +1225,91 @@ async function startChat(userId, anonymous) {
 }
 
 // ---------------- Profile detail ----------------
+// The profile opens as a Ben-10-Omnitrix HOLOGRAM: the person rises as a projection
+// with a flat, spinning, segmented selector WHEEL of nature-facet icons around their
+// feet; scroll down for the full profile. CSS injected once.
+function ensureOmniCss() {
+  if (document.getElementById('omni-css')) return;
+  const s = document.createElement('style');
+  s.id = 'omni-css';
+  s.textContent = `
+  .holo-wrap{position:relative;max-width:560px;margin:0 auto;height:600px;background:radial-gradient(80% 60% at 50% 78%,#0d2415 0%,#071009 55%,#040706 100%);overflow:hidden}
+  .holo-wrap .oc{position:absolute;top:12px;z-index:9;width:36px;height:36px;border-radius:50%;border:1px solid rgba(120,240,150,.35);background:rgba(0,0,0,.4);color:#bff5cf;font-size:17px;cursor:pointer}
+  .holo-wrap .oc.back{left:14px}.holo-wrap .oc.rep{right:14px;width:auto;padding:0 12px;border-radius:99px;font-size:12px}
+  .holo-fig{position:absolute;left:50%;bottom:150px;transform:translateX(-50%);width:min(310px,64%);height:470px;z-index:4;background-position:center top;background-size:cover;background-repeat:no-repeat;
+    -webkit-mask:linear-gradient(#000 0,#000 62%,rgba(0,0,0,.5) 82%,transparent 96%);mask:linear-gradient(#000 0,#000 62%,rgba(0,0,0,.5) 82%,transparent 96%);
+    filter:drop-shadow(0 0 26px rgba(120,240,140,.4));border-radius:14px 14px 0 0;display:grid;place-items:center}
+  .holo-fig .letter{font-family:Georgia,serif;font-size:120px;color:rgba(200,255,210,.85)}
+  .holo-beam{position:absolute;left:50%;bottom:120px;transform:translateX(-50%);width:min(280px,58%);height:220px;z-index:3;background:linear-gradient(to top,rgba(150,255,170,.5),rgba(120,240,140,.12) 55%,transparent);
+    -webkit-mask:radial-gradient(60% 100% at 50% 100%,#000,transparent 72%);filter:blur(6px);pointer-events:none}
+  .wheel{position:absolute;left:50%;bottom:104px;transform:translate(-50%,0) perspective(760px) rotateX(66deg);width:min(400px,86%);aspect-ratio:1;z-index:2;pointer-events:none}
+  .wheel .spin{position:absolute;inset:0;border-radius:50%;animation:whspin 16s linear infinite;background:repeating-conic-gradient(from 0deg,rgba(150,245,165,.42) 0 43deg,rgba(90,220,110,.22) 43deg 44deg,rgba(215,255,220,.85) 44deg 45deg);
+    -webkit-mask:radial-gradient(farthest-side,transparent 55%,#000 56%,#000 99%,transparent 100%);mask:radial-gradient(farthest-side,transparent 55%,#000 56%,#000 99%,transparent 100%);filter:drop-shadow(0 0 16px rgba(120,240,140,.7))}
+  .wheel .rim{position:absolute;inset:0;border-radius:50%;border:2px solid rgba(180,255,190,.75);box-shadow:0 0 18px rgba(120,240,140,.6),inset 0 0 18px rgba(120,240,140,.4)}
+  .wheel .hub{position:absolute;left:50%;top:50%;width:22%;height:22%;transform:translate(-50%,-50%);border-radius:50%;background:radial-gradient(circle,#dfffe4,#3bd67e 60%,#0a3d24);box-shadow:0 0 20px rgba(120,240,140,.8)}
+  @keyframes whspin{to{transform:rotate(360deg)}}
+  @media(prefers-reduced-motion:reduce){.wheel .spin{animation:none}}
+  .facet{position:absolute;z-index:5;width:74px;text-align:center;color:#cffbd8;font-size:10px;font-weight:700;text-shadow:0 1px 4px #000}
+  .facet .ico{width:30px;height:30px;margin:0 auto 2px;display:grid;place-items:center;border-radius:50%;background:rgba(10,40,20,.7);border:1px solid rgba(120,240,140,.5);box-shadow:0 0 10px rgba(120,240,140,.4)}
+  .facet .ico svg{width:17px;height:17px;stroke:#8df5aa;fill:none;stroke-width:1.7}
+  .holo-name{position:absolute;left:0;right:0;bottom:40px;z-index:6;text-align:center;color:#fff}
+  .holo-name h2{font-size:25px;margin:0}
+  .holo-name .meta{color:#a7e6bd;font-size:13px;margin-top:2px}
+  .holo-ver{display:inline-flex;gap:5px;margin-top:9px;color:#9bf0ba;background:rgba(31,122,77,.3);border:1px solid rgba(120,240,140,.5);border-radius:99px;font-size:12px;font-weight:700;padding:4px 12px}
+  .holo-turn{position:absolute;left:0;right:0;bottom:12px;z-index:6;text-align:center;color:#8fd9a6;font-size:12px}.holo-turn .ct{display:inline-block;animation:obob 1.4s ease-in-out infinite}
+  @keyframes obob{0%,100%{transform:translateY(0)}50%{transform:translateY(4px)}}`;
+  document.head.appendChild(s);
+}
+
+// Build the Omnitrix hologram header from real profile data.
+function omniHeader(p, karma, rdg, photo) {
+  const verified = p.verification && p.verification.level !== 'phone_only';
+  const meta = [p.city, (p.distanceKm != null ? p.distanceKm + ' km away' : '')].filter(Boolean).join(' · ');
+  const figStyle = photo ? `background-image:url('${esc(photo)}')` : 'background:radial-gradient(circle at 50% 30%,#1f5a37,#0a2416)';
+  const letter = photo ? '' : `<span class="letter">${esc((p.firstName || '?')[0].toUpperCase())}</span>`;
+  return `
+    <div class="holo-wrap" id="holoWrap">
+      <button class="oc back" onclick="history.back()" aria-label="Back">←</button>
+      <button class="oc rep" onclick="openReport('${p.userId}')">⚑ Report</button>
+      <div class="wheel"><div class="spin"></div><div class="rim"></div><div class="hub"></div></div>
+      <div class="holo-beam"></div>
+      <div class="holo-fig" style="${figStyle}">${letter}</div>
+      <div id="omni-facets"></div>
+      <div class="holo-name">
+        <h2 class="serif">${esc(p.firstName)}${p.age ? ', ' + p.age : ''}</h2>
+        ${meta ? `<div class="meta">${esc(meta)}</div>` : ''}
+        ${verified ? `<div class="holo-ver">${esc(verLabel(p.verification))}</div>` : ''}
+      </div>
+      <div class="holo-turn"><span class="ct">▾</span> scroll to read their full nature</div>
+    </div>`;
+}
+
+// Position the 8 facet icons on the (perspective-tilted) wheel — measured from the
+// rendered container, so it lines up on any width. Called after the profile renders.
+function layoutOmniFacets() {
+  const wrap = document.getElementById('holoWrap');
+  const host = wrap && wrap.querySelector('#omni-facets');
+  if (!host) return;
+  const F = [
+    ['Persona', 'M12 8a4 4 0 100-8 4 4 0 000 8zM4 21c0-4 3.5-6 8-6'],
+    ['Passions', 'M12 3a6 6 0 00-4 10 3 3 0 011 3h6a3 3 0 011-3 6 6 0 00-4-10z'],
+    ['Energy', 'M7 3h10l-2 7 2 11H7l2-11z'],
+    ['World', 'M12 3l7 3v5c0 5-3.5 8-7 10-3.5-2-7-5-7-10V6z'],
+    ['Drive', 'M4 20L20 4M14 4h6v6'],
+    ['Approach', 'M12 21s-7-4.5-7-9a4 4 0 017-2 4 4 0 017 2c0 4.5-7 9-7 9z'],
+    ['Values', 'M12 2l3 6 6 .5-4.5 4 1.5 6-6-3.5L6 18.5l1.5-6L3 8.5 9 8z'],
+    ['Loyal', 'M20 6L9 17l-5-5']
+  ];
+  const W = wrap.clientWidth, H = wrap.clientHeight;
+  const wheel = Math.min(400, W * 0.86);
+  const cx = W / 2, cy = H - 104 - wheel / 2, rx = wheel * 0.44, ry = wheel * 0.44 * 0.42;
+  host.innerHTML = F.map((f, i) => {
+    const a = (-90 + i * (360 / F.length)) * Math.PI / 180;
+    const x = cx + rx * Math.cos(a), y = cy + ry * Math.sin(a);
+    return `<div class="facet" style="left:${x - 37}px;top:${y - 24}px"><div class="ico"><svg viewBox="0 0 24 24"><path d="${f[1]}"/></svg></div>${f[0]}</div>`;
+  }).join('');
+}
+
 async function renderProfile(userId) {
   screen.innerHTML = `<div class="section-pad"><div class="empty">Loading profile…</div></div>`;
   try {
@@ -1239,16 +1324,11 @@ async function renderProfile(userId) {
       ['Who they are', rdg.who]
     ], { note: 'Their reading — an insight, not a verified fact' }) : '';
     const photo = p.photos?.find(x => x.isPrimary)?.url || p.photos?.[0]?.url;
+    ensureOmniCss();
     screen.innerHTML = `
-      <div class="app-header">
-        <button class="back" style="background:none;border:none;font-size:22px;cursor:pointer" onclick="history.back()">←</button>
-        <div style="flex:1;padding-left:8px"><b>${esc(p.firstName)}${p.age ? ', ' + p.age : ''}</b>
-          <div style="font-size:11px;color:var(--forest)">${verLabel(p.verification)}</div></div>
-        <button style="background:none;border:none;cursor:pointer;color:var(--danger)" title="Report" onclick="openReport('${p.userId}')">${ic('flag', 'ic-lg')}</button>
-      </div>
+      ${omniHeader(p, karma, rdg, photo)}
       <div class="section-pad">
-        ${photo ? `<img src="${esc(photo)}" onerror="this.style.display='none'" style="width:100%;border-radius:16px;max-height:380px;object-fit:cover;margin-bottom:14px"/>`
-          : p.anonymous ? `<div class="notice anon ic-row" style="display:flex">${ic('ghost')} <span>This person browses anonymously. Chat first — identities reveal by mutual consent.</span></div>` : ''}
+        ${(!photo && p.anonymous) ? `<div class="notice anon ic-row" style="display:flex">${ic('ghost')} <span>This person browses anonymously. Chat first — identities reveal by mutual consent.</span></div>` : ''}
         <div class="stat-row">
           <div class="stat"><b>${karma.score}</b><span>Lakshan score</span></div>
           <div class="stat"><b>${karma.grade}</b><span>grade</span></div>
@@ -1276,6 +1356,7 @@ async function renderProfile(userId) {
         <button class="btn secondary ic-row" style="display:flex;justify-content:center" onclick="addIncognito('${p.userId}')">${ic('eyeOff')} Hide my profile from them</button>
         <button class="btn danger ic-row" style="display:flex;justify-content:center" onclick="blockUser('${p.userId}')">${ic('slash')} Block</button>
       </div>`;
+    requestAnimationFrame(layoutOmniFacets);   // place the wheel's facet icons once measured
   } catch (e) {
     screen.innerHTML = `<div class="section-pad"><div class="empty">${esc(e.message)}</div><button class="btn ghost" onclick="history.back()">← Back</button></div>`;
   }
