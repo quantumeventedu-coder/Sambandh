@@ -51,7 +51,56 @@ async function setPrelaunch(on) {
     { upsert: true, new: true }
   );
   _cache = { at: Date.now(), on: value };
+  // LAUNCH (on → false): every early-access member (registered + paid during
+  // pre-launch) gets their 30 days (re)started NOW, so the gated time isn't burned.
+  // Idempotent via trialGrantedAt so re-flipping never re-grants.
+  if (!value) await grantEarlyAccessTrials();
   return value;
+}
+
+/**
+ * At launch, give every early-access member (registered + paid during pre-launch)
+ * their 30 days FROM LAUNCH so the gated time isn't burned — WITHOUT ever downgrading
+ * a tier they paid for (pro/max) or shortening an entitlement that already runs past
+ * 30 days. Per-user so one failure can't abort the rest; idempotent via
+ * trialGrantedAt. Returns { granted, failed }.
+ * @returns {Promise<{granted:number, failed:number}>}
+ */
+async function grantEarlyAccessTrials() {
+  const User = require('../models/User');
+  const { logger } = require('../lib/logger');
+  const now = Date.now();
+  const minEnd = now + 30 * 86400000;
+  let granted = 0, failed = 0, users = [];
+  try {
+    users = await User.find({ 'membership.earlyAccess': true, 'membership.trialGrantedAt': { $exists: false } });
+  } catch (e) {
+    logger.error({ err: e instanceof Error ? e.message : String(e) }, 'early-access trial grant: query failed');
+    return { granted: 0, failed: 0 };
+  }
+  for (const u of users) {
+    try {
+      const m = u.membership || {};
+      const curEnd = m.tierExpiresAt ? new Date(m.tierExpiresAt).getTime() : 0;
+      // keep whatever they already paid for (base/pro/max); only lift 'free'/unset to base
+      const tier = m.tier && m.tier !== 'free' ? m.tier : 'base';
+      await User.findByIdAndUpdate(u._id, {
+        $set: {
+          'membership.tier': tier,
+          'membership.joinFeePaid': true,
+          'membership.tierExpiresAt': new Date(Math.max(curEnd, minEnd)),   // never shorten
+          'membership.trialGrantedAt': new Date(now)
+        }
+      });
+      granted++;
+    } catch (e) {
+      failed++;
+      logger.error({ userId: String(u._id), err: e instanceof Error ? e.message : String(e) }, 'early-access trial grant: user failed');
+    }
+  }
+  if (failed) logger.warn({ granted, failed }, 'early-access trial grant: some members were not granted');
+  else logger.info({ granted }, 'early-access trials granted at launch');
+  return { granted, failed };
 }
 
 /**
@@ -67,4 +116,4 @@ async function gatedFor(role) {
 
 function _clearCacheForTests() { _cache = { at: 0, on: true }; }
 
-module.exports = { isPrelaunch, setPrelaunch, gatedFor, roleBypasses, BYPASS_ROLES, _clearCacheForTests };
+module.exports = { isPrelaunch, setPrelaunch, gatedFor, grantEarlyAccessTrials, roleBypasses, BYPASS_ROLES, _clearCacheForTests };

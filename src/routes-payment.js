@@ -286,14 +286,19 @@ async function activateTier(userId, purpose, payment) {
   const from = user.membership?.tierExpiresAt && user.membership.tierExpiresAt > new Date() &&
     user.membership.tier === tier
     ? user.membership.tierExpiresAt.getTime() : Date.now();
+  // Paying during pre-launch → early-access member. Their 30 days will be (re)started
+  // at launch so gated time isn't burned (site-mode.setPrelaunch grants the trial).
+  let earlyAccess = false;
+  try { earlyAccess = await require('./services/site-mode').isPrelaunch(); } catch { /* default false */ }
   await User.findByIdAndUpdate(userId, {
     'membership.tier': tier,
     'membership.tierExpiresAt': new Date(from + 30 * 86400000),
     'membership.joinFeePaid': true,
     'membership.paidAt': new Date(),
+    ...(earlyAccess ? { 'membership.earlyAccess': true } : {}),
     ...(payment ? { 'membership.joinFeePaymentId': payment._id, 'membership.joinFeeAmountCHF': payment.amountCHF } : {})
   });
-  require('./services/analytics').track('tier_activated', userId, { tier });
+  require('./services/analytics').track('tier_activated', userId, { tier, earlyAccess });
 }
 
 /**
@@ -385,3 +390,4 @@ router.post('/webhook', async (req, res, next) => {
 });
 
 module.exports = router;
+module.exports.activateTier = activateTier;   // exported for tests (early-access flag integration)

@@ -91,7 +91,56 @@ router.put('/prelaunch', async (req, res, next) => {
     const { setPrelaunch } = require('./services/site-mode');
     const on = await setPrelaunch(req.body.prelaunch);
     await audit('prelaunch_set', 'config', 'singleton', { prelaunch: on });
-    res.json({ prelaunch: on, message: on ? 'Pre-launch ON — dating features gated for non-admins.' : 'LAUNCHED — dating features open to everyone.' });
+    res.json({ prelaunch: on, message: on ? 'Pre-launch ON — dating features gated for non-admins.' : 'LAUNCHED — dating features open to everyone (early-access trials granted).' });
+  } catch (err) { next(err); }
+});
+
+// POST /purge-test-data { confirm:true } — delete demo/test accounts (no real email,
+// not admin/moderator) and their related records. The owner's clean-slate for launch.
+// Requires confirm:true so it can't fire by accident. Audited.
+router.post('/purge-test-data', async (req, res, next) => {
+  try {
+    if (!req.body || req.body.confirm !== true) {
+      return res.status(400).json({ error: 'Pass { confirm: true } to purge test/demo accounts.' });
+    }
+    // SAFETY: only in pre-launch. Once launched, real members exist and many look
+    // exactly like test accounts (phone-only), so the purge is disabled — it can
+    // never nuke a real member post-launch.
+    const { isPrelaunch } = require('./services/site-mode');
+    if (!(await isPrelaunch())) {
+      return res.status(409).json({ error: 'Purge is only allowed in pre-launch mode (to avoid deleting real members).' });
+    }
+    // KEEP: real personal-email accounts, admins/moderators, AND anyone flagged as a
+    // real early-access member (registered + paid AFTER the trial feature shipped —
+    // membership.earlyAccess). Old dev/test junk predates that flag, so it's removed.
+    const REAL = /@(gmail|outlook|yahoo|hotmail|icloud|proton|protonmail|live|rediffmail|zoho)\./i;
+    const all = await User.find({}).lean();
+    const keep = u => (u.email && REAL.test(u.email)) || ['admin', 'moderator'].includes(u.role) || (u.membership && u.membership.earlyAccess === true);
+    const ids = all.filter(u => !keep(u)).map(u => u._id);
+    if (!ids.length) return res.json({ deleted: 0, kept: all.length, message: 'No test/demo accounts found.' });
+
+    const M = n => require('./models/' + n);
+    const inIds = { $in: ids };
+    const fromTo = { $or: [{ from: inIds }, { to: inIds }] };
+    await Promise.all([
+      M('KarmaBook').deleteMany({ userId: inIds }).catch(() => {}),
+      M('Reputation').deleteMany({ userId: inIds }).catch(() => {}),
+      M('Notification').deleteMany({ userId: inIds }).catch(() => {}),
+      M('Payment').deleteMany({ userId: inIds }).catch(() => {}),
+      M('Verification').deleteMany({ userId: inIds }).catch(() => {}),
+      M('Escalation').deleteMany({ userId: inIds }).catch(() => {}),
+      M('TrainingExample').deleteMany({ userId: inIds }).catch(() => {}),
+      M('RoomMember').deleteMany({ userId: inIds }).catch(() => {}),
+      M('Report').deleteMany({ $or: [{ userId: inIds }, { reportedUserId: inIds }, { reporterId: inIds }, { targetUserId: inIds }] }).catch(() => {}),
+      M('Like').deleteMany(fromTo).catch(() => {}),
+      M('Pass').deleteMany(fromTo).catch(() => {}),
+      M('Message').deleteMany(fromTo).catch(() => {}),
+      M('Chat').deleteMany({ participants: inIds }).catch(() => {})
+    ]);
+    await User.deleteMany({ _id: inIds });
+    const kept = all.length - ids.length;
+    await audit('purge_test_data', 'user', 'bulk', { deleted: ids.length, kept });
+    res.json({ deleted: ids.length, kept, message: `Purged ${ids.length} test/demo accounts. ${kept} real/admin/early-access accounts kept.` });
   } catch (err) { next(err); }
 });
 

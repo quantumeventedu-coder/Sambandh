@@ -161,9 +161,12 @@ async function renderOverview() {
           <div style="color:var(--mut);font-size:13px;margin-top:4px">${launched ? 'All verified members can use Discover, Chats & matching.' : 'People can register + pay + build a profile, but Discover/Chats/matching are gated (waiting room). Admins bypass.'}</div>
           <div style="color:var(--mut);font-size:12px;margin-top:6px">Registered <b>${pl.registered}</b> · Paid <b>${pl.paid}</b> · Photo-verified <b>${pl.verified}</b> · Email waitlist <b>${pl.emailWaitlist}</b></div>
         </div>
-        <button onclick="togglePrelaunch(${launched})" style="background:${launched ? 'transparent' : 'var(--pink)'};border:1px solid var(--pink);white-space:nowrap">
-          ${launched ? 'Return to pre-launch' : 'Open the doors — LAUNCH'}
-        </button>
+        <div style="display:flex;flex-direction:column;gap:8px">
+          <button onclick="togglePrelaunch(${launched})" style="background:${launched ? 'transparent' : 'var(--pink)'};border:1px solid var(--pink);white-space:nowrap">
+            ${launched ? 'Return to pre-launch' : 'Open the doors — LAUNCH'}
+          </button>
+          <button onclick="purgeTestData()" class="ghost" style="white-space:nowrap;font-size:12px">Purge demo/test accounts</button>
+        </div>
       </div>
     </div>
     <div class="stats">
@@ -180,6 +183,15 @@ async function renderOverview() {
     </div>
     <div class="notice" style="margin-top:14px">Chat content access lives under <b>Users &amp; Chats</b> and always
       requires a written reason. Admins/moderators cannot see message content at all — only you can, and it's logged.</div>`;
+}
+
+async function purgeTestData() {
+  if (!confirm('Delete ALL demo/test accounts (no real email, not admin) and their data? Real & admin accounts are kept. This cannot be undone.')) return;
+  try {
+    const r = await apiPost('/purge-test-data', { confirm: true });
+    alert(r.message || ('Deleted ' + r.deleted + ', kept ' + r.kept));
+    renderOverview();
+  } catch (e) { alert('Purge failed: ' + e.message); }
 }
 
 async function togglePrelaunch(launching) {
