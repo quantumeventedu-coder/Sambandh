@@ -342,7 +342,7 @@
   #nd-toggle button{font:inherit;font-size:13.5px;font-weight:700;color:#d9c2cb;background:transparent;border:0;padding:8px 18px;border-radius:99px;cursor:pointer;transition:.2s}
   #nd-toggle button.on{background:linear-gradient(135deg,#ffd97a,var(--haldi));color:var(--deep);box-shadow:0 6px 18px rgba(243,193,75,.35)}
 
-  #nd-stage{position:relative;height:660px;margin-top:6px}
+  #nd-stage{position:relative;height:clamp(560px,60vw,780px);margin-top:6px}
   .nd-orbit{position:absolute;left:50%;top:64%;transform:translate(-50%,-50%);border-radius:50%;pointer-events:none;
     -webkit-mask:radial-gradient(farthest-side,transparent calc(100% - 7px),#000 calc(100% - 6px));
             mask:radial-gradient(farthest-side,transparent calc(100% - 7px),#000 calc(100% - 6px))}
@@ -357,8 +357,10 @@
   .nd-floor{position:absolute;left:50%;top:70%;transform:translate(-50%,-50%);width:min(760px,80%);height:150px;z-index:1;background:radial-gradient(50% 60% at 50% 50%,rgba(255,180,90,.32),transparent 70%);filter:blur(8px);pointer-events:none}
   .nd-dot{position:absolute;border-radius:50%;background:radial-gradient(circle,rgba(255,224,150,.95),rgba(243,193,75,0) 70%);z-index:2;pointer-events:none;animation:ndfloat 8s ease-in-out infinite}
   @keyframes ndfloat{0%,100%{transform:translateY(0);opacity:.3}50%{transform:translateY(-18px);opacity:.9}}
-  #nd-figure{position:absolute;left:50%;bottom:0;transform:translateX(-50%);width:min(440px,46%);height:640px;z-index:3;background-position:center bottom;background-size:contain;background-repeat:no-repeat;filter:drop-shadow(0 24px 60px rgba(0,0,0,.7));
-    -webkit-mask:radial-gradient(78% 92% at 50% 42%,#000 74%,transparent 100%);mask:radial-gradient(78% 92% at 50% 42%,#000 74%,transparent 100%)}
+  /* alpha-PNG figure: sized by the stage height so it's a big, prominent full figure.
+     Edges are transparent in the image itself — no CSS mask (which would clip). */
+  #nd-figure{position:absolute;left:50%;bottom:0;transform:translateX(-50%);width:min(560px,54vw);height:97%;z-index:3;background-position:bottom center;background-size:contain;background-repeat:no-repeat;filter:drop-shadow(0 22px 55px rgba(0,0,0,.7));
+    -webkit-mask:radial-gradient(74% 90% at 50% 42%,#000 66%,transparent 100%);mask:radial-gradient(74% 90% at 50% 42%,#000 66%,transparent 100%)}
   .nd-card{position:absolute;z-index:5;width:186px;padding:15px 17px;border-radius:16px;background:linear-gradient(155deg,rgba(60,34,18,.34),rgba(14,8,6,.46));border:1px solid rgba(243,193,75,.4);backdrop-filter:blur(9px);-webkit-backdrop-filter:blur(9px);box-shadow:0 20px 46px rgba(0,0,0,.55),inset 0 1px 0 rgba(255,240,207,.12)}
   .nd-card .lab{color:var(--haldi);font-size:10px;font-weight:800;letter-spacing:.16em;text-transform:uppercase}
   .nd-card h4{font-family:Georgia,serif;color:#fff;font-size:20px;line-height:1.12;margin:5px 0 6px}
@@ -399,7 +401,7 @@
   @media(max-width:920px){
     #nd-stage{height:auto}
     .nd-orbit,.nd-dot,.nd-floor{display:none}
-    #nd-figure{position:relative;left:auto;bottom:auto;transform:none;margin:16px auto 0;width:min(280px,70%);height:360px}
+    #nd-figure{position:relative;left:auto;bottom:auto;transform:none;margin:16px auto 0;width:min(320px,82%);height:clamp(380px,90vw,460px)}
     .nd-card{position:static;width:auto;transform:none!important}
     #nd-cards{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:14px}
     #nd-connect{position:static;transform:none;width:auto;margin:16px auto 0}
