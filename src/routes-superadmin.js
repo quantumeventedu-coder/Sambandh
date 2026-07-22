@@ -91,7 +91,41 @@ router.put('/prelaunch', async (req, res, next) => {
     const { setPrelaunch } = require('./services/site-mode');
     const on = await setPrelaunch(req.body.prelaunch);
     await audit('prelaunch_set', 'config', 'singleton', { prelaunch: on });
-    res.json({ prelaunch: on, message: on ? 'Pre-launch ON — dating features gated for non-admins.' : 'LAUNCHED — dating features open to everyone.' });
+    res.json({ prelaunch: on, message: on ? 'Pre-launch ON — dating features gated for non-admins.' : 'LAUNCHED — dating features open to everyone (early-access trials granted).' });
+  } catch (err) { next(err); }
+});
+
+// POST /purge-test-data { confirm:true } — delete demo/test accounts (no real email,
+// not admin/moderator) and their related records. The owner's clean-slate for launch.
+// Requires confirm:true so it can't fire by accident. Audited.
+router.post('/purge-test-data', async (req, res, next) => {
+  try {
+    if (!req.body || req.body.confirm !== true) {
+      return res.status(400).json({ error: 'Pass { confirm: true } to purge test/demo accounts.' });
+    }
+    const REAL = /@(gmail|outlook|yahoo|hotmail|icloud|proton|protonmail|live)\./i;
+    const all = await User.find({}).lean();
+    const doomed = all.filter(u => !((u.email && REAL.test(u.email)) || ['admin', 'moderator'].includes(u.role)));
+    const ids = doomed.map(u => u._id);
+    if (!ids.length) return res.json({ deleted: 0, kept: all.length, message: 'No test/demo accounts found.' });
+
+    const KarmaBook = require('./models/KarmaBook');
+    const Reputation = require('./models/Reputation');
+    const Like = require('./models/Like');
+    const Pass = require('./models/Pass');
+    const Notification = require('./models/Notification');
+    await Promise.all([
+      KarmaBook.deleteMany({ userId: { $in: ids } }),
+      Reputation.deleteMany({ userId: { $in: ids } }),
+      Notification.deleteMany({ userId: { $in: ids } }),
+      Like.deleteMany({ $or: [{ from: { $in: ids } }, { to: { $in: ids } }] }),
+      Pass.deleteMany({ $or: [{ from: { $in: ids } }, { to: { $in: ids } }] }),
+      Message.deleteMany({ $or: [{ from: { $in: ids } }, { to: { $in: ids } }] }),
+      Chat.deleteMany({ participants: { $in: ids } })
+    ]);
+    await User.deleteMany({ _id: { $in: ids } });
+    await audit('purge_test_data', 'user', 'bulk', { deleted: ids.length, kept: all.length - ids.length });
+    res.json({ deleted: ids.length, kept: all.length - ids.length, message: `Purged ${ids.length} test/demo accounts. ${all.length - ids.length} real/admin accounts kept.` });
   } catch (err) { next(err); }
 });
 

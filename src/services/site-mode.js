@@ -51,7 +51,29 @@ async function setPrelaunch(on) {
     { upsert: true, new: true }
   );
   _cache = { at: Date.now(), on: value };
+  // LAUNCH (on → false): every early-access member (registered + paid during
+  // pre-launch) gets their 30 days (re)started NOW, so the gated time isn't burned.
+  // Idempotent via trialGrantedAt so re-flipping never re-grants.
+  if (!value) await grantEarlyAccessTrials();
   return value;
+}
+
+/**
+ * Grant a fresh 30-day base membership to early-access members who haven't been
+ * granted yet. Called at launch. Returns the number granted.
+ * @returns {Promise<number>}
+ */
+async function grantEarlyAccessTrials() {
+  const User = require('../models/User');
+  const now = new Date();
+  const trialEnd = new Date(now.getTime() + 30 * 86400000);
+  try {
+    const r = await User.updateMany(
+      { 'membership.earlyAccess': true, 'membership.trialGrantedAt': { $exists: false } },
+      { $set: { 'membership.tier': 'base', 'membership.joinFeePaid': true, 'membership.tierExpiresAt': trialEnd, 'membership.trialGrantedAt': now } }
+    );
+    return (r && (r.modifiedCount ?? r.nModified)) || 0;
+  } catch { return 0; }
 }
 
 /**
@@ -67,4 +89,4 @@ async function gatedFor(role) {
 
 function _clearCacheForTests() { _cache = { at: 0, on: true }; }
 
-module.exports = { isPrelaunch, setPrelaunch, gatedFor, roleBypasses, BYPASS_ROLES, _clearCacheForTests };
+module.exports = { isPrelaunch, setPrelaunch, gatedFor, grantEarlyAccessTrials, roleBypasses, BYPASS_ROLES, _clearCacheForTests };

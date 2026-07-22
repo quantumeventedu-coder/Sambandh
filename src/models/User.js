@@ -75,7 +75,12 @@ const UserSchema = new mongoose.Schema({
     // 'free' = no active membership (cannot use the app). Everything is paid:
     // base CHF 1/5/3 per month by gender · pro CHF 6/mo · max CHF 15/mo.
     tier: { type: String, enum: ['free', 'base', 'pro', 'max'], default: 'free' },
-    tierExpiresAt: Date
+    tierExpiresAt: Date,
+    // Early access: registered + paid DURING pre-launch. Their paid days must not be
+    // consumed while the app is gated — at launch their 30 days are (re)started, so
+    // they get a full 30-day free run once the doors open (site-mode.setPrelaunch).
+    earlyAccess: { type: Boolean, default: false },
+    trialGrantedAt: Date
   },
   preferences: {
     interestedInGenders: [String],
