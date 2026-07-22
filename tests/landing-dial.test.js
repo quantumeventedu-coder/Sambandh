@@ -43,7 +43,7 @@ describe('asset + performance discipline', () => {
   test('the scene is an EXTERNAL image, lazy-loaded, never base64', () => {
     const img = (dial.match(/<img id="nd-scene"[\s\S]*?\/>/) || [''])[0];
     expect(img).toContain('loading="lazy"');
-    expect(img).toMatch(/src="\/dial-scene-(woman|man)\.jpg"/);
+    expect(img).toMatch(/src="\/dial-scene-(woman|man)\.jpg(\?v=\d+)?"/);   // allow a cache-bust query
     expect(img).not.toMatch(/src="data:image/);
     // both toggle scenes are external files
     expect(dial).toMatch(/\/dial-scene-woman\.jpg/);
