@@ -17,19 +17,10 @@ const Message = require('./models/Message');
 const Like = require('./models/Like');
 const Pass = require('./models/Pass');
 const { requireAuth } = require('./routes-auth');
-const { gatedFor } = require('./services/site-mode');
-
-// Pre-launch gate: until the owner opens the doors, only admins/moderators reach the
-// dating surface; everyone else is on the early-access waiting list (the app shows a
-// waiting room). Belt-and-braces with the client gate. Runs AFTER requireAuth (needs req.role).
-async function requireLaunched(req, res, next) {
-  try {
-    if (await gatedFor(req.role)) {
-      return res.status(403).json({ error: "Sambandh opens soon — you're on the early-access list.", code: 'prelaunch' });
-    }
-    next();
-  } catch (e) { next(e); }
-}
+// Pre-launch gate: the single shared authority (services/site-mode.js). Until the
+// owner opens the doors, only admins/moderators reach the dating surface; everyone
+// else is on the early-access waiting list. Runs AFTER requireAuth (needs req.role).
+const { requireLaunched } = require('./services/site-mode');
 const { computeActivitySignals } = require('./karma-book');
 const { userDistanceKm } = require('./data/cities');
 const recommender = require('./services/recommender');
@@ -314,7 +305,7 @@ function maxTierActive(user) {
 }
 
 // GET /api/discover/likes — who liked me (count for everyone; the list is a Max perk)
-router.get('/likes', requireAuth, async (req, res, next) => {
+router.get('/likes', requireAuth, requireLaunched, async (req, res, next) => {
   try {
     const me = await User.findById(req.userId);
     const likes = await Like.find({ to: req.userId }).sort({ createdAt: -1 }).limit(50);
@@ -336,7 +327,7 @@ router.get('/likes', requireAuth, async (req, res, next) => {
 });
 
 // GET /api/discover/profile/:userId — full public profile view
-router.get('/profile/:userId', requireAuth, async (req, res, next) => {
+router.get('/profile/:userId', requireAuth, requireLaunched, async (req, res, next) => {
   try {
     const me = await User.findById(req.userId);
     const u = await User.findById(req.params.userId);

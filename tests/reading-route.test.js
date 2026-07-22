@@ -28,9 +28,11 @@ const mkUser = (over = {}) => User.create({
   astrology: CHART, intent: ['marriage'], ...over
 });
 
+const { launch } = require('./helpers/launch');
 beforeAll(db.start);
 afterAll(db.stop);
 afterEach(db.clear);
+beforeEach(launch);   // reading of another member is launch-gated; open the doors for these tests
 
 describe('feature intake — self-declared only, validated', () => {
   test('a valid features patch is stored on the user', async () => {

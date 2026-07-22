@@ -11,11 +11,12 @@ const Chat = require('./models/Chat');
 const Message = require('./models/Message');
 const User = require('./models/User');
 const { checkDailyLimits } = require('./routes-chat');
+const { gatedFor } = require('./services/site-mode');
 
 module.exports = function setupChatSockets(io) {
   // Authenticate every socket with the same JWT the REST API uses
   // (auth payload token, or the sb_token HttpOnly cookie)
-  io.use((socket, next) => {
+  io.use(async (socket, next) => {
     try {
       let token = socket.handshake.auth?.token;
       if (!token && socket.handshake.headers.cookie) {
@@ -27,6 +28,11 @@ module.exports = function setupChatSockets(io) {
       if (!token) return next(new Error('Missing token'));
       const decoded = jwt.verify(token, process.env.JWT_SECRET);
       socket.userId = decoded.userId;
+      socket.role = decoded.role;
+      // Pre-launch containment: real-time chat (and the presence broadcast below)
+      // is a dating feature. A gated user (non-admin, pre-launch) may not open the
+      // socket at all — this closes the HTTP-gate bypass on the primary send path.
+      if (await gatedFor(socket.role)) return next(new Error('prelaunch'));
       next();
     } catch {
       next(new Error('Invalid token'));

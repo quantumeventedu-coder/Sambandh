@@ -9,6 +9,8 @@
 const express = require('express');
 const User = require('./models/User');
 const { requireAuth } = require('./routes-auth');
+const { requireLaunched } = require('./services/site-mode');
+const { proOrMaxActive } = require('./services/membership');
 const engine = require('./services/astro-engine');
 const { nakshatraByName } = require('./data/nakshatras');
 
@@ -108,11 +110,18 @@ router.get('/chart', requireAuth, async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
-// GET /astro/chart/:userId — another member's chart (if they share astrology)
-router.get('/chart/:userId', requireAuth, async (req, res, next) => {
+// GET /astro/chart/:userId — another member's chart. Pro/Max feature (same gate as
+// the Nature Dial reading), and only after launch — a free/base viewer would
+// otherwise get MORE raw astrology here than the paid reading exposes.
+router.get('/chart/:userId', requireAuth, requireLaunched, async (req, res, next) => {
   try {
-    const user = await User.findById(req.params.userId).lean();
+    const [me, user] = await Promise.all([
+      User.findById(req.userId).lean(),
+      User.findById(req.params.userId).lean()
+    ]);
     if (!user) return res.status(404).json({ error: 'User not found' });
+    const privileged = proOrMaxActive(me) || ['admin', 'moderator'].includes(req.role);
+    if (!privileged) return res.json({ locked: true, requiredTier: 'pro' });
     if (user.preferences?.showAstrologyToOthers === false) return res.status(403).json({ error: 'This person keeps their astrology private.' });
     if (!user.astrology?.birthDate) return res.json({ chart: null, needsBirthData: true });
     const chart = engine.computeChart(user.astrology);
@@ -162,10 +171,12 @@ router.get('/transits', requireAuth, async (req, res, next) => {
 
 // GET /astro/compat/:userId?type=romance|friendship|business — relationship-lens
 // astrological compatibility between you and another member.
-router.get('/compat/:userId', requireAuth, async (req, res, next) => {
+router.get('/compat/:userId', requireAuth, requireLaunched, async (req, res, next) => {
   try {
     const [me, other] = await Promise.all([User.findById(req.userId).lean(), User.findById(req.params.userId).lean()]);
     if (!other) return res.status(404).json({ error: 'User not found' });
+    const privileged = proOrMaxActive(me) || ['admin', 'moderator'].includes(req.role);
+    if (!privileged) return res.json({ locked: true, requiredTier: 'pro' });
     if (other.preferences?.showAstrologyToOthers === false) return res.status(403).json({ error: 'This person keeps their astrology private.' });
     if (!me?.astrology?.birthDate || !other?.astrology?.birthDate) return res.json({ compat: null, needsBirthData: true });
     const type = ['romance', 'friendship', 'business'].includes(req.query.type) ? req.query.type : 'romance';

@@ -16,6 +16,7 @@ const engine = require('./services/reading-engine');
 const astro = require('./services/astro-engine');
 const compat = require('./services/compatibility-engine');
 const { requireAuth } = require('./routes-auth');
+const { requireLaunched } = require('./services/site-mode');
 
 const router = express.Router();
 
@@ -39,7 +40,7 @@ router.get('/me', requireAuth, async (req, res, next) => {
 
 // Deeper pair reading — gated on MUTUAL marriage intent. Defined before /:userId
 // so "compat" isn't swallowed as a user id.
-router.get('/compat/:userId', requireAuth, async (req, res, next) => {
+router.get('/compat/:userId', requireAuth, requireLaunched, async (req, res, next) => {
   try {
     const [me, other] = await Promise.all([
       User.findById(req.userId),
@@ -62,16 +63,13 @@ router.get('/compat/:userId', requireAuth, async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
-// A member's active tier is pro/max (an unexpired paid Pro or Max membership).
-function proOrMaxActive(user) {
-  return !!user && ['pro', 'max'].includes(user.membership?.tier) &&
-    (!user.membership?.tierExpiresAt || new Date(user.membership.tierExpiresAt) > new Date());
-}
+// A member's active tier is pro/max — the single authority lives in services/membership.js.
+const { proOrMaxActive } = require('./services/membership');
 
 // What another person's profile shows to you. The full Nature Dial reading (their
 // persona/energy/how-they-connect) is a Sambandh Pro feature — free/base members get
 // a locked teaser instead. Admins/moderators bypass for oversight.
-router.get('/:userId', requireAuth, async (req, res, next) => {
+router.get('/:userId', requireAuth, requireLaunched, async (req, res, next) => {
   try {
     const [me, user] = await Promise.all([
       User.findById(req.userId),

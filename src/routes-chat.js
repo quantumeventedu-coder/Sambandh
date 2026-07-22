@@ -5,6 +5,7 @@ const Chat = require('./models/Chat');
 const Message = require('./models/Message');
 const User = require('./models/User');
 const { requireAuth } = require('./routes-auth');
+const { requireLaunched } = require('./services/site-mode');
 const events = require('./services/events');
 
 const router = express.Router();
@@ -53,7 +54,7 @@ async function checkDailyLimits(user, kind) {
 }
 
 // Get all my conversations
-router.get('/', requireAuth, async (req, res, next) => {
+router.get('/', requireAuth, requireLaunched, async (req, res, next) => {
   try {
     const chats = await Chat.find({
       participants: req.userId,
@@ -90,7 +91,7 @@ router.get('/', requireAuth, async (req, res, next) => {
 });
 
 // Get messages for a chat
-router.get('/:chatId/messages', requireAuth, async (req, res, next) => {
+router.get('/:chatId/messages', requireAuth, requireLaunched, async (req, res, next) => {
   try {
     const chat = await Chat.findById(req.params.chatId);
     if (!chat || !chat.participants.some(p => p.toString() === req.userId)) {
@@ -114,7 +115,7 @@ router.get('/:chatId/messages', requireAuth, async (req, res, next) => {
 });
 
 // Start a new chat (or return existing)
-router.post('/start', requireAuth, async (req, res, next) => {
+router.post('/start', requireAuth, requireLaunched, async (req, res, next) => {
   try {
     const { withUserId, anonymous = false } = req.body;
     if (!withUserId) return res.status(400).json({ error: 'withUserId required' });
@@ -161,7 +162,7 @@ router.post('/start', requireAuth, async (req, res, next) => {
 });
 
 // Send message (also goes through Socket.io for real-time, but REST works as fallback)
-router.post('/:chatId/messages', requireAuth, async (req, res, next) => {
+router.post('/:chatId/messages', requireAuth, requireLaunched, async (req, res, next) => {
   try {
     const text = (req.body.text || '').trim();
     if (!text) return res.status(400).json({ error: 'Empty message' });
@@ -218,7 +219,7 @@ router.post('/:chatId/messages', requireAuth, async (req, res, next) => {
 });
 
 // Block a chat (mutual — neither side can message)
-router.post('/:chatId/block', requireAuth, async (req, res, next) => {
+router.post('/:chatId/block', requireAuth, requireLaunched, async (req, res, next) => {
   try {
     const chat = await Chat.findById(req.params.chatId);
     if (!chat || !chat.participants.some(p => p.toString() === req.userId)) {
@@ -230,7 +231,7 @@ router.post('/:chatId/block', requireAuth, async (req, res, next) => {
 });
 
 // Delete chat from my view only
-router.delete('/:chatId', requireAuth, async (req, res, next) => {
+router.delete('/:chatId', requireAuth, requireLaunched, async (req, res, next) => {
   try {
     const chat = await Chat.findById(req.params.chatId);
     if (!chat || !chat.participants.some(p => p.toString() === req.userId)) {
@@ -247,7 +248,7 @@ router.delete('/:chatId', requireAuth, async (req, res, next) => {
 });
 
 // Reveal identity in anonymous chat — mutual consent, 48h request expiry (spec §2.4.3)
-router.post('/:chatId/reveal', requireAuth, async (req, res, next) => {
+router.post('/:chatId/reveal', requireAuth, requireLaunched, async (req, res, next) => {
   try {
     const chat = await Chat.findById(req.params.chatId);
     if (!chat || !chat.participants.some(p => p.toString() === req.userId)) {

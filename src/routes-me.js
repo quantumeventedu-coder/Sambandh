@@ -11,6 +11,7 @@ const Payment = require('./models/Payment');
 const Verification = require('./models/Verification');
 const Notification = require('./models/Notification');
 const { requireAuth } = require('./routes-auth');
+const { requireLaunched } = require('./services/site-mode');
 const eventsSvc = require('./services/events');
 const behavior = require('./services/behavior-engine');
 const world = require('./services/world-graph');
@@ -28,7 +29,7 @@ router.get('/behavior', requireAuth, async (req, res, next) => {
 
 // GET /api/me/network — your relationship graph: connection + community counts,
 // and friend-of-friend suggestions (people your matches have matched with).
-router.get('/network', requireAuth, async (req, res, next) => {
+router.get('/network', requireAuth, requireLaunched, async (req, res, next) => {
   try {
     const [ego, second] = await Promise.all([
       world.egoNetwork(req.userId),

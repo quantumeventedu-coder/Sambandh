@@ -5,6 +5,7 @@ const { z } = require('zod');
 const KarmaBook = require('./models/KarmaBook');
 const Payment = require('./models/Payment');
 const { requireAuth, requireAdmin } = require('./routes-auth');
+const { requireLaunched } = require('./services/site-mode');
 const {
   buildPublicKarmaSummary,
   escalateAndReveal,
@@ -14,7 +15,7 @@ const {
 const router = express.Router();
 
 // Get public karma summary for any user
-router.get('/profile/:userId', requireAuth, async (req, res, next) => {
+router.get('/profile/:userId', requireAuth, requireLaunched, async (req, res, next) => {
   try {
     const summary = await buildPublicKarmaSummary(req.params.userId, req.userId);
     res.json(summary);
