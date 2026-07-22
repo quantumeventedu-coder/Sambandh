@@ -62,11 +62,27 @@ router.get('/compat/:userId', requireAuth, async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
-// What another person's profile shows to you.
+// A member's active tier is pro/max (an unexpired paid Pro or Max membership).
+function proOrMaxActive(user) {
+  return !!user && ['pro', 'max'].includes(user.membership?.tier) &&
+    (!user.membership?.tierExpiresAt || new Date(user.membership.tierExpiresAt) > new Date());
+}
+
+// What another person's profile shows to you. The full Nature Dial reading (their
+// persona/energy/how-they-connect) is a Sambandh Pro feature — free/base members get
+// a locked teaser instead. Admins/moderators bypass for oversight.
 router.get('/:userId', requireAuth, async (req, res, next) => {
   try {
-    const user = await User.findById(req.params.userId);
+    const [me, user] = await Promise.all([
+      User.findById(req.userId),
+      User.findById(req.params.userId)
+    ]);
     if (!user) return res.status(404).json({ error: 'User not found' });
+
+    const privileged = proOrMaxActive(me) || ['admin', 'moderator'].includes(req.role);
+    if (!privileged) {
+      return res.json({ locked: true, requiredTier: 'pro' });
+    }
     const inputs = inputsFor(user);
     res.json({ line: engine.discoverLine(inputs), who: engine.read('who_you_are', inputs).answer });
   } catch (err) { next(err); }

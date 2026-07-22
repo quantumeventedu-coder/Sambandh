@@ -1394,10 +1394,18 @@ async function renderProfile(userId) {
       api('/reading/' + userId).catch(() => null)   // reading is a nicety — never break the profile
     ]);
     // Full plain-language reading for the viewed user (READING badge, jargon-guarded).
-    const readingBlock = rdg ? readingCardsHtml([
-      ['Their nature', rdg.line],
-      ['Who they are', rdg.who]
-    ], { note: 'Their reading — an insight, not a verified fact' }) : '';
+    // The full Nature Dial reading is a Sambandh Pro feature; free/base see a teaser.
+    const readingBlock = (rdg && rdg.locked)
+      ? `<div class="card" style="text-align:center;padding:20px 18px;background:linear-gradient(160deg,#fff8ec,#fdeef4);border:1px solid #f0d9a8">
+           <div style="font-size:24px">🔒</div>
+           <b style="display:block;margin:8px 0 4px;font-size:16px">Unlock their Nature Dial</b>
+           <p class="hint" style="margin:0 0 14px">See ${esc(p.firstName)}'s full nature — persona, energy, drive and how they connect — with Sambandh Pro.</p>
+           <button class="btn" onclick="buyTier('pro_subscription')">Upgrade to Pro · CHF 6/mo</button>
+         </div>`
+      : (rdg ? readingCardsHtml([
+          ['Their nature', rdg.line],
+          ['Who they are', rdg.who]
+        ], { note: 'Their reading — an insight, not a verified fact' }) : '');
     const photo = p.photos?.find(x => x.isPrimary)?.url || p.photos?.[0]?.url;
     ensureOmniCss();
     screen.innerHTML = `
