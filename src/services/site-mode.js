@@ -75,7 +75,7 @@ async function grantEarlyAccessTrials() {
   try {
     users = await User.find({ 'membership.earlyAccess': true, 'membership.trialGrantedAt': { $exists: false } });
   } catch (e) {
-    logger.error({ err: e && e.message }, 'early-access trial grant: query failed');
+    logger.error({ err: e instanceof Error ? e.message : String(e) }, 'early-access trial grant: query failed');
     return { granted: 0, failed: 0 };
   }
   for (const u of users) {
@@ -95,7 +95,7 @@ async function grantEarlyAccessTrials() {
       granted++;
     } catch (e) {
       failed++;
-      logger.error({ userId: String(u._id), err: e && e.message }, 'early-access trial grant: user failed');
+      logger.error({ userId: String(u._id), err: e instanceof Error ? e.message : String(e) }, 'early-access trial grant: user failed');
     }
   }
   if (failed) logger.warn({ granted, failed }, 'early-access trial grant: some members were not granted');
