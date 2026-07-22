@@ -279,7 +279,7 @@
     <p class="lead reveal">Nine things dating apps quietly skip — done properly, and honestly.</p>
     <div class="grid" style="text-align:left">
       <div class="feat reveal tilt"><span class="num">01</span><div class="ic rose">🛡️</div><h3>Everyone is verified</h3><p>A <b>live selfie face-check</b> — our own tech, right in your browser — confirms every member is a real, unique person, and becomes their first photo. Add a government ID or a registry-checked profession (doctors, lawyers, CAs, architects) for extra trust badges. Aadhaar numbers are never stored.</p></div>
-      <div class="feat reveal tilt d1"><span class="num">02</span><div class="ic gold">💳</div><h3>Nothing is free</h3><p>Membership is monthly — <b>CHF 1 men · CHF 5 women · CHF 3 non-binary</b>. It's a bot barrier, not a business model, and it's <b>fully refundable for 24 hours</b>, no questions asked.</p></div>
+      <div class="feat reveal tilt d1"><span class="num">02</span><div class="ic gold">💳</div><h3>Nothing is free</h3><p>Membership is monthly — <b>CHF 1 men · CHF 5 women · CHF 3 non-binary</b>. It's a bot barrier that keeps the community real — bots and time-wasters don't pay.</p></div>
       <div class="feat reveal tilt d2"><span class="num">03</span><div class="ic green">📖</div><h3>The Lakshan Book</h3><p>An AI honesty engine scores every member <b>0–100</b>. It reads what people <i>claim</i> and checks it against what they actually <i>do</i>. First slip: a private nudge. Repeat patterns: visible flags. Honesty heals — <b>+1 Lakshan per 30 clean days</b>.</p></div>
       <div class="feat reveal tilt"><span class="num">04</span><div class="ic violet">👁️</div><h3>Evidence, with guard-rails</h3><p>See a flag on a profile? Pay <b>CHF 0.50–1</b> to read the anonymised statements behind it. The flagged person learns <i>someone</i> looked — never who. Capped at 3/day. <b>Fraud &amp; safety alerts are always free.</b></p></div>
       <div class="feat reveal tilt d1"><span class="num">05</span><div class="ic gold">🎯</div><h3>Say what you want</h3><p>Four explicit intents — <b>marriage, dating, casual, friendship</b> (pick up to two). You only ever see people whose intent overlaps yours. No more mismatched expectations.</p></div>
@@ -327,109 +327,34 @@
   </div>
 </section>
 
-<!-- THE NATURE DIAL — showcase (below the trust story, above pricing). A realistic
-     member portrait (drop cut-out photos at /dial-full.jpg, /dial-woman.jpg,
-     /dial-man.jpg — an SVG silhouette stands in until then) inside a real 3-D
-     holographic orbit, with glass facet cards angled around it. Facets are READINGS
-     (never "verified"); only the identity line is a fact. No astrology terms. -->
+<!-- THE NATURE DIAL — showcase. Uses the finished design scenes directly
+     (public/dial-scene-woman.jpg / dial-scene-man.jpg); the toggle swaps them.
+     No CSS re-creation — the picture IS the design. External images, lazy-loaded. -->
 <style>
-  #nature-dial{position:relative;background:radial-gradient(70% 55% at 50% 40%,#3d260f 0%,#1a0f0a 44%,#080506 100%);color:#f3e9ec;padding:64px 0 66px;overflow:hidden}
-  #nd-head{text-align:center;position:relative;z-index:7}
-  #nd-head .eyebrow{color:var(--haldi);font-size:12px;font-weight:800;letter-spacing:.34em;text-transform:uppercase}
-  #nd-head h2{color:#fff;font-size:clamp(28px,4.4vw,48px);margin:8px 0 6px;line-height:1.06}
-  #nd-head .sub{color:#cab2bc;max-width:560px;margin:0 auto;font-size:15px}
-  #nd-toggle{display:inline-flex;gap:2px;background:rgba(18,10,8,.72);border:1px solid rgba(243,193,75,.32);border-radius:99px;padding:5px;margin-top:14px}
-  #nd-toggle button{font:inherit;font-size:13.5px;font-weight:700;color:#d9c2cb;background:transparent;border:0;padding:8px 18px;border-radius:99px;cursor:pointer;transition:.2s}
-  #nd-toggle button.on{background:linear-gradient(135deg,#ffd97a,var(--haldi));color:var(--deep);box-shadow:0 6px 18px rgba(243,193,75,.35)}
-
-  #nd-stage{position:relative;height:clamp(560px,60vw,780px);margin-top:6px}
-  .nd-orbit{position:absolute;left:50%;top:64%;transform:translate(-50%,-50%);border-radius:50%;pointer-events:none;
-    -webkit-mask:radial-gradient(farthest-side,transparent calc(100% - 7px),#000 calc(100% - 6px));
-            mask:radial-gradient(farthest-side,transparent calc(100% - 7px),#000 calc(100% - 6px))}
-  .nd-orbit.a{width:min(640px,66%);height:210px} .nd-orbit.b{width:min(760px,78%);height:262px}
-  .nd-orbit .fill{position:absolute;inset:0;border-radius:50%;
-    background:conic-gradient(from 256deg,#fff3d6,#ffd873 10%,#ffca67 24%,#ff96c2 40%,#ff3d8f 51%,#ffa6cf 61%,#ffd873 80%,#fff3d6);
-    filter:drop-shadow(0 0 6px #ffdca0) drop-shadow(0 0 16px rgba(255,190,110,.95)) drop-shadow(0 0 30px rgba(255,70,150,.75));
-    animation:ndspin 16s linear infinite}
-  .nd-orbit.b .fill{animation-duration:24s;animation-direction:reverse;opacity:.8}
-  @keyframes ndspin{to{transform:rotate(360deg)}}
-  #ring-back{z-index:1} #ring-front{z-index:4;clip-path:inset(44% 0 0 0)}
-  .nd-floor{position:absolute;left:50%;top:70%;transform:translate(-50%,-50%);width:min(760px,80%);height:150px;z-index:1;background:radial-gradient(50% 60% at 50% 50%,rgba(255,180,90,.32),transparent 70%);filter:blur(8px);pointer-events:none}
-  .nd-dot{position:absolute;border-radius:50%;background:radial-gradient(circle,rgba(255,224,150,.95),rgba(243,193,75,0) 70%);z-index:2;pointer-events:none;animation:ndfloat 8s ease-in-out infinite}
-  @keyframes ndfloat{0%,100%{transform:translateY(0);opacity:.3}50%{transform:translateY(-18px);opacity:.9}}
-  /* alpha-PNG figure: sized by the stage height so it's a big, prominent full figure.
-     Edges are transparent in the image itself — no CSS mask (which would clip). */
-  #nd-figure{position:absolute;left:50%;bottom:0;transform:translateX(-50%);width:min(560px,54vw);height:97%;z-index:3;background-position:bottom center;background-size:contain;background-repeat:no-repeat;filter:drop-shadow(0 22px 55px rgba(0,0,0,.7));
-    -webkit-mask:radial-gradient(74% 90% at 50% 42%,#000 66%,transparent 100%);mask:radial-gradient(74% 90% at 50% 42%,#000 66%,transparent 100%)}
-  .nd-card{position:absolute;z-index:5;width:186px;padding:15px 17px;border-radius:16px;background:linear-gradient(155deg,rgba(60,34,18,.34),rgba(14,8,6,.46));border:1px solid rgba(243,193,75,.4);backdrop-filter:blur(9px);-webkit-backdrop-filter:blur(9px);box-shadow:0 20px 46px rgba(0,0,0,.55),inset 0 1px 0 rgba(255,240,207,.12)}
-  .nd-card .lab{color:var(--haldi);font-size:10px;font-weight:800;letter-spacing:.16em;text-transform:uppercase}
-  .nd-card h4{font-family:Georgia,serif;color:#fff;font-size:20px;line-height:1.12;margin:5px 0 6px}
-  .nd-card p{color:#cbb3bd;font-size:12px;line-height:1.42;margin:0}
-  .nd-card svg{width:20px;height:20px;margin-top:9px;stroke:rgba(243,193,75,.75);fill:none;stroke-width:1.6}
-  .nd-card.L{transform:perspective(1100px) rotateY(19deg)} .nd-card.R{transform:perspective(1100px) rotateY(-19deg)}
-  .c-persona{left:1%;top:16%} .c-passions{left:15%;top:36%} .c-approach{left:6%;bottom:9%}
-  .c-energy{right:15%;top:19%} .c-world{right:0;top:33%} .c-drive{right:9%;bottom:10%}
-  #nd-connect{position:absolute;left:50%;bottom:-4px;transform:translateX(-50%);z-index:6;width:min(560px,78%);background:linear-gradient(160deg,rgba(43,20,12,.93),rgba(16,9,7,.96));border:1px solid rgba(243,193,75,.26);border-radius:18px;padding:18px 22px;box-shadow:0 26px 60px rgba(0,0,0,.6)}
-  #nd-connect .lab{color:var(--haldi);font-size:11px;font-weight:800;letter-spacing:.14em;text-transform:uppercase}
-  #nd-connect h4{font-family:Georgia,serif;color:#fff;font-size:24px;margin:6px 0 7px}
-  #nd-connect p{color:#cbb4bd;font-size:14px;margin:0 0 6px}
-  #nd-connect .note{color:#9c8590;font-size:12px;margin:0 0 11px}
+  #nature-dial{background:radial-gradient(80% 60% at 50% 26%,#241608 0%,#120a06 52%,#080506 100%);color:#f3e9ec;padding:54px 0 58px;overflow:hidden;text-align:center}
+  #nature-dial .eyebrow{color:var(--haldi);font-size:12px;font-weight:800;letter-spacing:.34em;text-transform:uppercase}
+  #nature-dial h2{color:#fff;font-size:clamp(28px,4.4vw,48px);margin:8px 0 6px;line-height:1.06}
+  #nature-dial .sub{color:#cab2bc;max-width:560px;margin:0 auto;font-size:15px}
+  #nd-toggle{display:inline-flex;gap:2px;background:rgba(18,10,8,.72);border:1px solid rgba(243,193,75,.32);border-radius:99px;padding:5px;margin:16px 0 2px}
+  #nd-toggle button{font:inherit;font-size:13.5px;font-weight:700;color:#d9c2cb;background:transparent;border:0;padding:8px 20px;border-radius:99px;cursor:pointer;transition:.2s}
+  #nd-toggle button.on{background:linear-gradient(135deg,#ffd97a,var(--haldi));color:var(--deep)}
+  #nd-scene{display:block;width:min(780px,96%);height:auto;margin:8px auto 0;border-radius:16px;box-shadow:0 30px 80px rgba(0,0,0,.5)}
+  #nd-foot{color:#9c8590;font-size:12.5px;margin-top:20px}
+  #nd-foot .pv{margin-top:9px;display:flex;gap:10px;justify-content:center;flex-wrap:wrap}
   .nd-badge-fact{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:800;color:#69d18e;background:rgba(31,122,77,.18);border:1px solid rgba(63,191,114,.5);border-radius:99px;padding:5px 13px}
   .nd-badge-read{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:800;color:#e7c04f;background:rgba(243,193,75,.12);border:1px solid rgba(243,193,75,.4);border-radius:99px;padding:4px 11px}
-  /* gold dial pedestal (turntable the figure stands on) */
-  #nd-pedestal{position:absolute;left:50%;bottom:4px;transform:translateX(-50%);width:min(760px,74%);height:220px;z-index:2;pointer-events:none}
-  #nd-pedestal .disc{position:absolute;left:50%;top:40%;transform:translate(-50%,-50%);border-radius:50%;border:2px solid rgba(243,193,75,.85);box-shadow:0 0 26px rgba(243,193,75,.7),inset 0 0 30px rgba(243,193,75,.22)}
-  #nd-pedestal .d1{width:100%;height:200px}
-  #nd-pedestal .d2{width:78%;height:150px}
-  #nd-pedestal .d3{width:56%;height:104px;border-color:rgba(255,120,170,.7);box-shadow:0 0 24px rgba(255,120,170,.65)}
-  #nd-pedestal .d4{width:34%;height:60px;border-color:rgba(255,235,180,.9)}
-  /* two counter-rotating bright arcs make the turntable clearly spin */
-  #nd-pedestal .sheen{position:absolute;left:50%;top:40%;transform:translate(-50%,-50%);width:100%;height:200px;border-radius:50%;
-    background:conic-gradient(from 0deg,transparent 0 3%,#fff3d6 10%,#ffcf72 18%,transparent 34% 52%,#ff9ec4 62%,#fff0cf 70%,transparent 86%);
-    -webkit-mask:radial-gradient(farthest-side,transparent calc(100% - 46px),#000 calc(100% - 40px));
-            mask:radial-gradient(farthest-side,transparent calc(100% - 46px),#000 calc(100% - 40px));
-    filter:blur(3px) drop-shadow(0 0 10px rgba(255,205,110,.9));animation:ndspin 9s linear infinite}
-  #nd-pedestal .sheen2{position:absolute;left:50%;top:40%;transform:translate(-50%,-50%);width:78%;height:150px;border-radius:50%;
-    background:conic-gradient(from 120deg,transparent 0 8%,#ffd873 20%,transparent 40% 70%,#ffb0d4 84%,transparent 96%);
-    -webkit-mask:radial-gradient(farthest-side,transparent calc(100% - 20px),#000 calc(100% - 16px));
-            mask:radial-gradient(farthest-side,transparent calc(100% - 20px),#000 calc(100% - 16px));
-    filter:blur(2px);animation:ndspin 6s linear infinite reverse}
-  #nd-pedestal .knob{position:absolute;left:50%;bottom:0;transform:translateX(-50%);width:96px;height:60px;border-radius:50%;
-    background:radial-gradient(62% 74% at 50% 26%,#fff6df,#e0a92e 50%,#8f5f10);box-shadow:0 12px 26px rgba(0,0,0,.65),0 0 34px rgba(243,193,75,.75)}
-  #nd-foot{position:relative;z-index:7;text-align:center;color:#9c8590;font-size:12.5px;margin-top:26px}
-  #nd-foot .pv{margin-top:9px;display:flex;gap:10px;justify-content:center;flex-wrap:wrap}
-  @media(max-width:920px){
-    #nd-stage{height:auto}
-    .nd-orbit,.nd-dot,.nd-floor{display:none}
-    #nd-figure{position:relative;left:auto;bottom:auto;transform:none;margin:16px auto 0;width:min(320px,82%);height:clamp(380px,90vw,460px)}
-    .nd-card{position:static;width:auto;transform:none!important}
-    #nd-cards{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:14px}
-    #nd-connect{position:static;transform:none;width:auto;margin:16px auto 0}
-  }
-  @media(prefers-reduced-motion:reduce){.nd-orbit .fill,.nd-dot{animation:none}}
 </style>
 <section id="nature-dial">
   <div class="wrap">
-    <div id="nd-head">
-      <div class="eyebrow">The Nature Dial</div>
-      <h2 class="serif">Turn the dial. See who they are.</h2>
-      <p class="sub">Each facet unfolds a part of who they are — in plain words, never jargon.</p>
-      <div id="nd-toggle">
-        <button type="button" data-p="woman" class="on">Woman</button>
-        <button type="button" data-p="man">Man</button>
-      </div>
+    <div class="eyebrow">The Nature Dial</div>
+    <h2 class="serif">Turn the dial. See who they are.</h2>
+    <p class="sub">Each facet unfolds a part of who they are — in plain words, never jargon.</p>
+    <div id="nd-toggle">
+      <button type="button" data-p="woman" class="on">Woman</button>
+      <button type="button" data-p="man">Man</button>
     </div>
-    <div id="nd-stage">
-      <div class="nd-floor"></div>
-      <div class="nd-orbit b" id="ring-back-b"><div class="fill"></div></div>
-      <div class="nd-orbit a" id="ring-back"><div class="fill"></div></div>
-      <div id="nd-dots"></div>
-      <div id="nd-pedestal" aria-hidden="true"><div class="sheen"></div><div class="sheen2"></div><div class="disc d1"></div><div class="disc d2"></div><div class="disc d3"></div><div class="disc d4"></div><div class="knob"></div></div>
-      <div id="nd-figure"></div>
-      <div class="nd-orbit a" id="ring-front"><div class="fill"></div></div>
-      <div id="nd-cards"></div>
-      <div id="nd-connect"></div>
-    </div>
+    <img id="nd-scene" alt="The Nature Dial — a member's nature unfolds in glass facet cards around them, on a glowing gold dial"
+         width="780" loading="lazy" decoding="async" src="/dial-scene-woman.jpg"/>
     <div id="nd-foot">
       Inside Sambandh this runs on a real member's photo and reading — this is a preview, not a real person.
       <div class="pv"><span class="nd-badge-fact">✓ Identity is what we verify (photo + ID)</span>
@@ -439,48 +364,14 @@
 </section>
 <script>
 (function(){
-  var ICON={
-    persona:'<svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 3.5-6 8-6s8 2 8 6"/></svg>',
-    passions:'<svg viewBox="0 0 24 24"><path d="M12 3a6 6 0 0 0-4 10c1 1 1 2 1 3h6c0-1 0-2 1-3a6 6 0 0 0-4-10z"/><path d="M9 20h6"/></svg>',
-    approach:'<svg viewBox="0 0 24 24"><path d="M12 21s-7-4.5-7-9a4 4 0 0 1 7-2 4 4 0 0 1 7 2c0 4.5-7 9-7 9z"/></svg>',
-    energy:'<svg viewBox="0 0 24 24"><path d="M7 3h10l-2 7 2 11H7l2-11z"/></svg>',
-    world:'<svg viewBox="0 0 24 24"><path d="M12 3l7 3v5c0 5-3.5 8-7 10-3.5-2-7-5-7-10V6z"/></svg>',
-    drive:'<svg viewBox="0 0 24 24"><path d="M4 20L20 4M14 4h6v6"/></svg>'
-  };
-  var FACETS=[
-    {k:'persona',cls:'c-persona L',lab:'PERSONA',title:'Grounded and calm',d:'{S} stays steady under pressure and brings stability to the people around {O}.'},
-    {k:'passions',cls:'c-passions L',lab:'PASSIONS',title:'Deep thinker',d:'{S} enjoys understanding how things work and why people think the way they do.'},
-    {k:'approach',cls:'c-approach L',lab:'APPROACH',title:'Thoughtful and kind',d:'{S} notices the small things that matter to the people {Sl} cares about.'},
-    {k:'energy',cls:'c-energy R',lab:'ENERGY',title:'Balanced and steady',d:'{S} brings calm to chaos and helps others feel at ease.'},
-    {k:'world',cls:'c-world R',lab:'WORLD',title:'Loyal and committed',d:'{S} values trust above everything and stands by {P} people.'},
-    {k:'drive',cls:'c-drive R',lab:'DRIVE',title:'Growth oriented',d:'Always learning, always evolving — steady forward motion.'}
-  ];
-  var PEOPLE={
-    woman:{img:'/dial-woman.jpg',fb:'/dial-woman.svg',pos:'HER',S:'She',Sl:'she',O:'her',P:'her',name:'Priya'},
-    man:{img:'/dial-man.png',fb:'/dial-man.svg',pos:'HIS',S:'He',Sl:'he',O:'him',P:'his',name:'Rohan'}
-  };
-  function fill(t,p){return t.replace(/{Sl}/g,p.Sl).replace(/{S}/g,p.S).replace(/{O}/g,p.O).replace(/{P}/g,p.P);}
-  function cap(s){return s.charAt(0).toUpperCase()+s.slice(1);}
-  function render(key){
-    var p=PEOPLE[key]; if(!p)return;
-    var fig=document.getElementById('nd-figure');
-    fig.style.backgroundImage='url('+p.img+'), url('+p.fb+')';   // real photo on top, silhouette behind
-    document.getElementById('nd-cards').innerHTML=FACETS.map(function(f){
-      return '<div class="nd-card '+f.cls+'"><div class="lab">'+p.pos+' '+f.lab+'</div><h4>'+f.title+'</h4><p>'+fill(f.d,p)+'</p>'+(ICON[f.k]||'')+'</div>';
-    }).join('');
-    var f0=FACETS[0];
-    document.getElementById('nd-connect').innerHTML=
-      '<div class="lab">'+p.pos+' '+f0.lab+' &middot; A reading</div><h4 class="serif">'+f0.title+'</h4>'+
-      '<p>'+fill(f0.d,p)+'</p><div class="note">'+cap(p.P)+' core nature — a reading, not a verified fact.</div>'+
-      '<span class="nd-badge-fact">✓ '+p.name+' — photo + ID verified</span>';
-  }
-  var dots='',seed=[[10,30,10],[24,58,7],[38,20,5],[62,26,6],[78,44,9],[88,64,6],[16,74,8],[70,72,7],[46,14,4],[54,80,5]];
-  seed.forEach(function(s,i){dots+='<span class="nd-dot" style="left:'+s[0]+'%;top:'+s[1]+'%;width:'+s[2]+'px;height:'+s[2]+'px;animation-delay:'+(i*0.6)+'s"></span>';});
-  var dz=document.getElementById('nd-dots'); if(dz)dz.innerHTML=dots;
+  var SCENE={woman:'/dial-scene-woman.jpg', man:'/dial-scene-man.jpg'};
+  var img=document.getElementById('nd-scene');
   Array.prototype.forEach.call(document.querySelectorAll('#nd-toggle button'),function(b){
-    b.addEventListener('click',function(){Array.prototype.forEach.call(document.querySelectorAll('#nd-toggle button'),function(x){x.classList.remove('on')});b.classList.add('on');render(b.getAttribute('data-p'));});
+    b.addEventListener('click',function(){
+      Array.prototype.forEach.call(document.querySelectorAll('#nd-toggle button'),function(x){x.classList.remove('on')});
+      b.classList.add('on'); if(img){ img.src=SCENE[b.getAttribute('data-p')]||SCENE.woman; }
+    });
   });
-  render('woman');
 })();
 </script>
 
@@ -488,7 +379,7 @@
 <section class="block" id="pricing">
   <div class="wrap center">
     <div class="kicker reveal">Pricing</div>
-    <h2 class="reveal">Monthly. Refundable. No games.</h2>
+    <h2 class="reveal">Monthly. Honest. No games.</h2>
     <p class="lead reveal">A small monthly fee keeps the bots and time-wasters out. Your base price is set by your verified profile.</p>
     <div class="prices" style="text-align:left">
       <div class="price reveal">
@@ -499,7 +390,7 @@
           <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 6L9 17l-5-5"/></svg> Full verified access</li>
           <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 6L9 17l-5-5"/></svg> Lakshan Book + safety alerts</li>
           <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 6L9 17l-5-5"/></svg> Astrology + compatibility</li>
-          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 6L9 17l-5-5"/></svg> 24-hour full refund</li>
+          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 6L9 17l-5-5"/></svg> Priority support</li>
         </ul>
         <a href="/app" class="btn primary" style="width:100%;justify-content:center">Get started</a>
       </div>
