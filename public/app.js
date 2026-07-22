@@ -1126,18 +1126,12 @@ function readingCardsHtml(pairs, { note = 'Your reading — an insight, not a ve
       <div style="margin-top:3px">${esc(plainOnly(a))}</div></div>`).join('');
 }
 
+// Discover is the Nature Dial: one verified member at a time, their nature unfolding
+// in facet cards around them; turn the dial (pass/like) to the next.
 async function renderDiscover() {
-  screen.innerHTML = `
-    ${headerBar()}
-    <div class="chips" id="intent-chips">
-      ${['all', ...INTENTS.map(i => i.v)].map(v => `<button class="chip ${S.filters.intent === v ? 'active' : ''}" onclick="S.filters.intent='${v}';renderDiscover()">${v === 'all' ? 'All' : INTENTS.find(i => i.v === v).t}</button>`).join('')}
-      <button class="chip ic-row" onclick="openFilters()">${ic('sliders')} Filters</button>
-    </div>
-    <div id="feed"><div class="empty">Loading profiles…</div></div>`;
+  screen.innerHTML = `<div class="dd"><div id="feed"><div class="dd-empty">Loading profiles…</div></div></div>`;
   loadNotifCount();
-  if (!S._locationGranted) captureLocation({ prompt: true }); // ensure precise distance
-  // Ask for notification permission LAST — only once the user is fully onboarded
-  // (registered + paid + browsing), so we don't add friction and lose signups.
+  if (!S._locationGranted) captureLocation({ prompt: true });
   if (!S._pushAsked) { S._pushAsked = true; registerWebPush(); }
   try {
     const q = new URLSearchParams({
@@ -1147,40 +1141,83 @@ async function renderDiscover() {
       onlineOnly: S.filters.onlineOnly
     });
     const r = await api('/discover?' + q);
-    const feed = $('#feed');
-    if (!r.profiles.length) {
-      feed.innerHTML = `<div class="empty"><div class="big" style="color:var(--sand-mid)">${ic('search', 'ic-xl')}</div>No profiles match your filters yet.<br>Try widening them (distance is set to ${esc(String(S.filters.maxKm))}) — or invite friends to the beta.</div>`;
-      return;
-    }
-    feed.innerHTML = r.profiles.map(p => `
-      <div class="pcard-wrap" id="pw-${p.userId}">
-      <div class="pcard" id="pc-${p.userId}" onclick="nav('#/profile/${p.userId}')">
-        ${p.anonymous
-          ? `<div class="anon-face" style="color:rgba(255,255,255,0.85)">${ic('ghost', 'ic-xl')}</div>`
-          : `<div class="pcard-ini" aria-hidden="true">${esc((p.firstName || '?')[0].toUpperCase())}</div>${p.photo ? `<img class="photo" src="${esc(p.photo)}" onerror="this.style.display='none'"/>` : ''}`}
-        <span class="badge-tl">${esc((p.intent[0] || 'dating'))}</span>
-        ${p.verificationLevel !== 'phone_only' ? `<span class="badge-tr ic-row">${ic('shieldCheck')} ${p.verificationLevel === 'fully_verified' ? 'FULLY VERIFIED' : 'VERIFIED'}</span>` : ''}
-        <div class="info">
-          <div class="name">${esc(p.firstName)}${p.age ? ', ' + p.age : ''} ${p.likesMe ? '<span style="font-size:11px;background:var(--haldi);color:var(--sindoor-deep);padding:2px 8px;border-radius:8px;vertical-align:middle">likes you</span>' : ''}</div>
-          <div class="meta ic-row">${ic('pin')} ${esc(p.city || '')}${p.distanceKm != null ? ' · ' + p.distanceKm + ' km' : ''}${p.profession ? ' · ' + esc(p.profession) : ''}${p.online ? ' · <i style="width:8px;height:8px;border-radius:50%;background:#4ADE80;display:inline-block"></i>' : ''}</div>
-          <div class="trow">
-            ${p.tagsPositive.map(t => `<span class="wtag">${esc(t)}</span>`).join('')}
-            ${p.tagsNegative.map(t => `<span class="wtag" style="color:var(--haldi)">${esc(t)}</span>`).join('')}
-            <span class="karma">Lakshan: ${p.karma.score} ${p.karma.grade}</span>
-          </div>
-          ${(p.reasons && p.reasons.length) ? `<div class="why">${ic('sparkle')} ${p.reasons.map(r => esc(r)).join(' · ')}</div>` : ''}
-          ${plainOnly(p.natureLine) ? `<div class="nature-line" style="margin-top:5px;display:flex;align-items:center;gap:6px;flex-wrap:wrap">${SBBadge.badgeHtml('reading', 'Reading')}<span style="font-size:12.5px;color:var(--plum,#8a5cc0)">${esc(plainOnly(p.natureLine))}</span></div>` : ''}
-        </div>
-      </div>
-      <div class="pcard-actions" id="pa-${p.userId}">
-        <button title="Pass" onclick="passUser('${p.userId}')">${ic('x', 'ic-lg')}</button>
-        <button class="act-msg" title="Message" onclick="startChat('${p.userId}', false)">${ic('message', 'ic-lg')}</button>
-        <button class="act-like" title="Like" onclick="likeUser('${p.userId}')">${p.likedByMe ? ic('heart', 'ic-lg fill') : ic('heart', 'ic-lg')}</button>
-      </div>
-      </div>`).join('');
+    S._dd = { profiles: r.profiles || [], i: 0 };
+    ddShow();
   } catch (e) {
-    $('#feed').innerHTML = `<div class="empty">${esc(e.message)}</div>`;
+    $('#feed').innerHTML = `<div class="dd-empty">${esc(e.message)}</div>`;
   }
+}
+
+// Render the current member on the dial.
+function ddShow() {
+  const dd = S._dd, feed = $('#feed');
+  if (!feed) return;
+  if (!dd || dd.i >= dd.profiles.length) {
+    feed.innerHTML = `<div class="dd-empty"><div style="font-size:34px">✦</div>
+      <b style="display:block;margin:10px 0 6px;font-size:18px;color:#fff">That's everyone for now</b>
+      <p style="margin:0 0 14px">Widen your filters or check back soon as more verified members join.</p>
+      <button class="up" style="background:linear-gradient(135deg,#ffd97a,var(--haldi));color:var(--deep);font-weight:800;border:none;border-radius:99px;padding:10px 18px;cursor:pointer" onclick="openFilters()">Adjust filters</button></div>`;
+    return;
+  }
+  const p = dd.profiles[dd.i];
+  const isPro = ['pro', 'max'].includes(S.user && S.user.membership && S.user.membership.tier);
+  const nature = plainOnly(p.natureLine);
+  const strengths = (p.tagsPositive || []).slice(0, 3).join(' · ');
+  const facet = (lab, h4, body) => `<div class="facet"><div class="lab">${lab}</div><h4>${h4}</h4>${body ? `<p>${body}</p>` : ''}</div>`;
+  const left = [
+    nature ? facet('Reading', esc(nature), 'A first read on their nature — not a verified fact.') : '',
+    p.intent && p.intent[0] ? facet('Intent', esc(p.intent[0].charAt(0).toUpperCase() + p.intent[0].slice(1)), 'What they\'re here for.') : ''
+  ].filter(Boolean).join('');
+  const right = [
+    strengths ? facet('Strengths', esc(strengths), 'What people consistently say about them.') : '',
+    isPro
+      ? `<div class="facet" style="cursor:pointer" onclick="nav('#/profile/${p.userId}')"><div class="lab">Nature Dial</div><h4>Open full reading →</h4><p>Persona, energy, drive & how they connect.</p></div>`
+      : `<div class="facet locked"><div class="lab">Nature Dial</div><h4>🔒 Unlock their full nature</h4><p>Persona, energy, drive & how they connect.</p><button class="up" onclick="buyTier('pro_subscription')">Upgrade to Pro · CHF 6/mo</button></div>`
+  ].filter(Boolean).join('');
+  const core = p.anonymous
+    ? `<div class="ini">${ic('ghost', 'ic-xl')}</div>`
+    : (p.photo ? `<img src="${esc(p.photo)}" onerror="this.replaceWith(Object.assign(document.createElement('div'),{className:'ini',textContent:'${esc((p.firstName || '?')[0].toUpperCase())}'}))"/>` : `<div class="ini">${esc((p.firstName || '?')[0].toUpperCase())}</div>`);
+  const verified = p.verificationLevel && p.verificationLevel !== 'phone_only';
+  feed.innerHTML = `
+    <div class="dd-top">
+      <div>
+        <div class="dd-name serif">${esc(p.firstName)}${p.age ? ', ' + p.age : ''}${p.likesMe ? ' <span class="likes">likes you</span>' : ''}</div>
+        <div class="dd-sub">${p.city ? '📍 ' + esc(p.city) : ''}${p.distanceKm != null ? ' · ' + p.distanceKm + ' km' : ''}
+          ${verified ? `<span class="dd-ver">✓ ${p.verificationLevel === 'fully_verified' ? 'Fully verified' : 'Verified'}</span>` : ''}
+          ${p.karma ? `<span class="dd-lak">Lakshan ${esc(p.karma.grade)}</span>` : ''}</div>
+      </div>
+      <button class="dd-close" onclick="openFilters()" title="Filters">${ic('sliders')}</button>
+    </div>
+    <div class="dd-stage">
+      <div class="dd-facets left">${left}</div>
+      <div class="dd-figure" onclick="nav('#/profile/${p.userId}')">
+        <div class="dd-ring"></div><div class="dd-ring r2"></div>${core}
+      </div>
+      <div class="dd-facets right">${right}</div>
+    </div>
+    <div class="dd-actions">
+      <button class="pass" title="Pass" onclick="ddPass()">${ic('x', 'ic-lg')}</button>
+      <button class="chat" title="Message" onclick="startChat('${p.userId}', false)">${ic('message', 'ic-lg')}</button>
+      <button class="like" title="Like" onclick="ddLike()">${ic('heart', 'ic-lg')}</button>
+    </div>`;
+}
+
+async function ddPass() {
+  const p = S._dd && S._dd.profiles[S._dd.i];
+  if (!p) return;
+  try { await api(`/discover/${p.userId}/pass`, { method: 'POST' }); } catch (e) { /* advance anyway */ }
+  S._dd.i++; ddShow();
+}
+
+async function ddLike() {
+  const p = S._dd && S._dd.profiles[S._dd.i];
+  if (!p) return;
+  try {
+    const r = await api(`/discover/${p.userId}/like`, { method: 'POST' });
+    if (r.matched && r.chatId) { toast(r.newMatch ? "It's a match! Opening your chat…" : 'You already matched'); return nav('#/chat/' + r.chatId); }
+    toast('Liked — if they like you back, it\'s a match');
+  } catch (e) { toast(e.message); }
+  S._dd.i++; ddShow();
 }
 
 async function likeUser(userId) {

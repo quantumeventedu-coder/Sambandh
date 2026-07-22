@@ -53,11 +53,13 @@ describe('the reading engine output is jargon-free on every surface (100 users)'
 describe('Verified/Reading split holds on the new SPA surfaces', () => {
   const app = fs.readFileSync(path.join(__dirname, '..', 'public', 'app.js'), 'utf8');
 
-  test('the discover card renders the nature line through the READING badge, never a fact', () => {
-    const block = app.match(/nature-line[\s\S]{0,260}/);
-    expect(block).toBeTruthy();
-    expect(block[0]).toMatch(/SBBadge\.badgeHtml\(\s*['"]reading['"]/);
-    expect(block[0]).not.toMatch(/badgeHtml\(\s*['"]fact['"]/);
+  test('the discover dial renders the nature line as a READING, never a verified fact', () => {
+    const fn = app.match(/function ddShow\(\)[\s\S]*?\n\}/);
+    expect(fn).toBeTruthy();
+    expect(fn[0]).toMatch(/plainOnly\(p\.natureLine\)/);   // precomputed line, jargon-guarded
+    expect(fn[0]).toMatch(/['"]Reading['"]/);              // shown under a Reading label
+    expect(fn[0]).toMatch(/not a verified fact/i);         // explicitly not a fact
+    expect(fn[0]).not.toMatch(/badgeHtml\(\s*['"]fact['"]/);
   });
 
   test('the shared reading-cards renderer is a reading, and both surfaces reuse it', () => {
@@ -82,12 +84,13 @@ describe('perf gate — discover line is precomputed server-side, no per-card fe
     // computed against the sliced page map, not inside the 400-candidate loop
     expect(disc).toMatch(/ranked\.slice\([\s\S]*?natureLineFor/);
   });
-  test('the SPA does not fetch a reading per discover card (no /reading call in renderDiscover)', () => {
+  test('the SPA does not fetch a reading per discover card (uses precomputed p.natureLine)', () => {
     const app = fs.readFileSync(path.join(__dirname, '..', 'public', 'app.js'), 'utf8');
-    // Whole renderDiscover body, up to the next top-level function.
-    const m = app.match(/async function renderDiscover\(\)[\s\S]*?\n(?:async )?function /);
+    // The discover flow: renderDiscover + ddShow, up to ddPass.
+    const m = app.match(/async function renderDiscover\(\)[\s\S]*?\nasync function ddPass/);
     expect(m).toBeTruthy();
-    expect(m[0]).not.toMatch(/\/reading/);              // uses precomputed p.natureLine, no fetch
+    expect(m[0]).toMatch(/p\.natureLine/);             // uses the precomputed line
+    expect(m[0]).not.toMatch(/\/reading/);             // no per-card reading fetch
     expect(m[0]).toMatch(/p\.natureLine/);
   });
 });
