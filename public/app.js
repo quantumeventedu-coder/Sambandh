@@ -348,19 +348,26 @@ function renderWaitingRoom() {
 function renderWelcome() {
   screen.innerHTML = `
   <div class="welcome">
-    <div class="wordmark">sambandh</div>
-    <div class="tagline">connections, made meaningful.</div>
-    <div class="points">
-      ${[['shieldCheck', 'Every member face-verified — a real, unique person'],
-         ['book', 'The Lakshan Book — honesty, tracked by AI'],
-         ['target', 'Say what you want: marriage, dating, casual, friendship'],
-         ['ghost', 'Anonymous-first chat with mutual reveal'],
-         ['star', 'Real Vedic astrology + engagement compatibility']]
-        .map(([i, t]) => `<div class="ic-row"><span style="color:var(--haldi);display:inline-flex">${ic(i)}</span><span style="color:rgba(255,255,255,0.85)">${t}</span></div>`).join('')}
+    <div class="welcome-inner">
+      <div class="welcome-hero">
+        <div class="wordmark">sambandh</div>
+        <div class="tagline">connections, made meaningful.</div>
+        <div class="points">
+          ${[['shieldCheck', 'Every member face-verified — a real, unique person'],
+             ['book', 'The Lakshan Book — honesty, tracked by AI'],
+             ['target', 'Say what you want: marriage, dating, casual, friendship'],
+             ['ghost', 'Anonymous-first chat with mutual reveal'],
+             ['star', 'Real Vedic astrology + engagement compatibility']]
+            .map(([i, t]) => `<div class="ic-row"><span style="color:var(--haldi);display:inline-flex">${ic(i)}</span><span style="color:rgba(255,255,255,0.85)">${t}</span></div>`).join('')}
+        </div>
+      </div>
+      <div class="welcome-panel">
+        <div class="wp-h">Real people. Real intent.</div>
+        <button class="btn" style="background:var(--haldi);color:var(--sindoor-deep)" onclick="nav('#/login')">Get started</button>
+        <button class="btn" style="background:transparent;color:rgba(255,255,255,0.9);border:1px solid rgba(255,255,255,0.35);margin-top:10px" onclick="nav('#/features')">See how it works</button>
+        <p style="font-size:11px;opacity:0.5;margin-top:18px">18+ only · By continuing you agree to our Terms.<br>A quick face check verifies you before chatting.</p>
+      </div>
     </div>
-    <button class="btn" style="background:var(--haldi);color:var(--sindoor-deep)" onclick="nav('#/login')">Get started</button>
-    <button class="btn" style="background:transparent;color:rgba(255,255,255,0.9);border:1px solid rgba(255,255,255,0.35);margin-top:10px" onclick="nav('#/features')">See how it works</button>
-    <p style="font-size:11px;opacity:0.5;margin-top:18px">18+ only · By continuing you agree to our Terms.<br>A quick face check verifies you before chatting.</p>
   </div>`;
 }
 
