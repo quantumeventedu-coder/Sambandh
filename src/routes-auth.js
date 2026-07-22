@@ -24,7 +24,13 @@ const events = require('./services/events');
 
 const router = express.Router();
 
-const DEV_MODE = process.env.DEV_MODE === 'true' || !process.env.FIREBASE_PROJECT_ID;
+const { isProduction } = require('./config/require-secrets');
+const IS_PROD = isProduction(process.env);
+// DEV_MODE is an EXPLICIT opt-in that is impossible in production. Never infer it
+// from a missing OTP provider (FIREBASE_PROJECT_ID) — absence of config must fail
+// CLOSED, not silently downgrade prod to "reveal the login code on screen" (that
+// was an unauthenticated account-takeover fail-open).
+const DEV_MODE = process.env.DEV_MODE === 'true' && !IS_PROD;
 const OTP_MAX_PER_HOUR = DEV_MODE ? 100 : 3;
 const OTP_WRONG_LIMIT = 5;                   // then 30-minute lock
 const OTP_LOCK_MS = 30 * 60 * 1000;
@@ -235,14 +241,19 @@ router.post('/request-otp', ipLimit, async (req, res, next) => {
     // EMAIL path: always server-generate the code and email it (dev transport
     // logs it + we return devOtp for convenience; prod emails only).
     if (email) {
+      const { sendOtpEmail, emailConfigured } = require('./services/notify');
+      // Fail CLOSED in production: if we can't actually deliver the code, refuse
+      // rather than echo it in the response body (that was an account-takeover hole).
+      if (IS_PROD && !emailConfigured()) {
+        return res.status(503).json({ error: 'Email sign-in is temporarily unavailable. Please use Google or a passkey, or try again later.' });
+      }
       entry.code = String(Math.floor(100000 + Math.random() * 900000));
       entry.channel = 'email';
       entry.expiresAt = now + 5 * 60 * 1000;   // 5-minute email OTP
       entry.wrongAttempts = 0;
       otpStore.set(id, entry);
-      const { sendOtpEmail, emailConfigured } = require('./services/notify');
       await sendOtpEmail(email, entry.code).catch(e => console.error('[EMAIL OTP] send failed:', e.message));
-      const devReveal = DEV_MODE || !emailConfigured();  // reveal in dev / when no SMTP yet
+      const devReveal = DEV_MODE;              // ONLY in explicit dev mode, never in prod
       return res.json({ ok: true, channel: 'email', devMode: devReveal, validSeconds: 300,
         ...(devReveal ? { devOtp: entry.code } : {}) });
     }

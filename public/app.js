@@ -393,7 +393,7 @@ function renderFeatures() {
 
     ${section('card', 'Nothing is free',
       `Membership is monthly — <b>CHF 1 men · CHF 5 women · CHF 3 non-binary</b> — and that's what
-       keeps bots out. First payment refundable for 24 hours. Upgrades: <b>Pro, CHF 6/month</b> for
+       keeps bots out. Upgrades: <b>Pro, CHF 6/month</b> for
        unlimited messaging; <b>Max, CHF 15/month</b> for the rest — who liked you, advanced filters, priority.`)}
 
     ${section('book', 'The Lakshan Book',
@@ -439,7 +439,7 @@ function renderFeatures() {
       <div class="kv"><span>Sambandh Max</span><b>CHF 15 / month</b></div>
       <div class="kv"><span>Lakshan evidence reveal</span><b>CHF 0.50–1</b></div>
       <div class="kv"><span>Fraud alerts</span><b>Free, always</b></div>
-      <p class="hint" style="margin-top:8px">Your base price is set by your verified profile — first payment refundable within 24 hours.</p>
+      <p class="hint" style="margin-top:8px">Your base price is set by your verified profile. Membership is monthly — cancel anytime.</p>
     </div>
 
     <button class="btn mt" onclick="nav('${S.token ? '#/discover' : '#/login'}')">${S.token ? 'Back to the app' : 'Get started'}</button>
@@ -974,7 +974,7 @@ function obPay() {
       <div class="hint">Men ${p.sym}${p.base.male} · Women ${p.sym}${p.base.female} · Non-binary ${p.sym}${p.base.non_binary} per month — your price is set by your verified profile, not by this page.</div>
     </div>
     <button class="btn" onclick="obPayNow()">Pay with UPI / Card</button>
-    <p class="hint center mt">Powered by Razorpay · Secure payment · Full refund within 24 hours, no questions asked</p>
+    <p class="hint center mt">Powered by Razorpay · Secure payment · Monthly membership, cancel anytime</p>
   </div>`;
 }
 

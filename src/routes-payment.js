@@ -283,22 +283,32 @@ async function activateTier(userId, purpose, payment) {
   const tier = purpose === 'max_subscription' ? 'max'
     : purpose === 'pro_subscription' ? 'pro' : 'base';
   const user = await User.findById(userId);
-  const from = user.membership?.tierExpiresAt && user.membership.tierExpiresAt > new Date() &&
-    user.membership.tier === tier
-    ? user.membership.tierExpiresAt.getTime() : Date.now();
+  // Never DOWNGRADE an active higher tier or SHORTEN paid time. Rank the tiers and
+  // keep the better of {current active, purchased}: a same-or-lower purchase stacks
+  // onto the current expiry; an upgrade starts now but never ends before the current
+  // one. (Previously, buying base while an active max ran silently discarded the max.)
+  const { tierRank } = require('./services/membership');
+  const m = user.membership || {};
+  const active = !!(m.tierExpiresAt && new Date(m.tierExpiresAt) > new Date());
+  const curRank = active ? tierRank(m.tier) : 0;
+  const curEnd = active ? new Date(m.tierExpiresAt).getTime() : 0;
+  const purchasedRank = tierRank(tier);
+  const effectiveTier = curRank > purchasedRank ? m.tier : tier;
+  const from = (active && curRank >= purchasedRank) ? curEnd : Date.now();
+  const newEnd = Math.max(from + 30 * 86400000, curEnd);
   // Paying during pre-launch → early-access member. Their 30 days will be (re)started
   // at launch so gated time isn't burned (site-mode.setPrelaunch grants the trial).
   let earlyAccess = false;
   try { earlyAccess = await require('./services/site-mode').isPrelaunch(); } catch { /* default false */ }
   await User.findByIdAndUpdate(userId, {
-    'membership.tier': tier,
-    'membership.tierExpiresAt': new Date(from + 30 * 86400000),
+    'membership.tier': effectiveTier,
+    'membership.tierExpiresAt': new Date(newEnd),
     'membership.joinFeePaid': true,
     'membership.paidAt': new Date(),
     ...(earlyAccess ? { 'membership.earlyAccess': true } : {}),
     ...(payment ? { 'membership.joinFeePaymentId': payment._id, 'membership.joinFeeAmountCHF': payment.amountCHF } : {})
   });
-  require('./services/analytics').track('tier_activated', userId, { tier, earlyAccess });
+  require('./services/analytics').track('tier_activated', userId, { tier: effectiveTier, purchased: tier, earlyAccess });
 }
 
 /**
@@ -325,8 +335,10 @@ router.get('/history', requireAuth, async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
-// 4. Admin refund (spec §2.2.5: 24h no-questions window, or verification failure).
-// Executed by a moderator; Razorpay refund API in production, simulated in dev.
+// 4. Admin refund — a moderator-only tool for exceptional cases (a failed/rejected
+// verification, a duplicate charge, or a payment-provider chargeback). This is NOT a
+// user-facing money-back guarantee: membership is monthly and non-refundable, and no
+// refund is promised anywhere in the product. Razorpay refund API in prod, simulated in dev.
 router.post('/admin/:paymentId/refund', requireAdmin, async (req, res, next) => {
   try {
     const payment = await Payment.findById(req.params.paymentId);

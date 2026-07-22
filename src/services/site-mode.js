@@ -114,6 +114,25 @@ async function gatedFor(role) {
   return isPrelaunch();
 }
 
+/**
+ * Express middleware: block the request while the site is pre-launch, unless the
+ * caller is an admin/moderator. The single authority every interactive/other-member
+ * route uses so containment can't drift per-router. MUST run AFTER requireAuth
+ * (needs req.role). Gated callers get 403 { code: 'prelaunch' } — the SPA shows the
+ * early-access waiting room on that code.
+ * @param {{role?: string}} req
+ * @param {import('express').Response} res
+ * @param {import('express').NextFunction} next
+ */
+async function requireLaunched(req, res, next) {
+  try {
+    if (await gatedFor(req.role)) {
+      return res.status(403).json({ error: "Sambandh opens soon — you're on the early-access list.", code: 'prelaunch' });
+    }
+    next();
+  } catch (e) { next(e); }
+}
+
 function _clearCacheForTests() { _cache = { at: 0, on: true }; }
 
-module.exports = { isPrelaunch, setPrelaunch, gatedFor, grantEarlyAccessTrials, roleBypasses, BYPASS_ROLES, _clearCacheForTests };
+module.exports = { isPrelaunch, setPrelaunch, gatedFor, requireLaunched, grantEarlyAccessTrials, roleBypasses, BYPASS_ROLES, _clearCacheForTests };

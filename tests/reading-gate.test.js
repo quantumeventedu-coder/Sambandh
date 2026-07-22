@@ -22,9 +22,11 @@ const CHART = { birthDate: '1992-04-10', birthTime: '08:30', birthPlace: { lat: 
 const mkUser = (over = {}) => User.create({ phone: '+91' + (seq++), astrology: CHART, ...over });
 const tier = (t) => ({ membership: { tier: t, joinFeePaid: true, tierExpiresAt: new Date(Date.now() + 30 * 86400000) } });
 
+const { launch } = require('./helpers/launch');
 beforeAll(db.start);
 afterAll(db.stop);
 afterEach(db.clear);
+beforeEach(launch);   // these test the POST-launch tier gate; site is pre-launch by default
 
 describe('the full reading is gated to Pro/Max', () => {
   test('a FREE viewer gets a locked teaser (no reading content)', async () => {

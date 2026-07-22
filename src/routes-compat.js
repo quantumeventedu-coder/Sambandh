@@ -12,13 +12,14 @@ const Message = require('./models/Message');
 const Reputation = require('./models/Reputation');
 const Compatibility = require('./models/Compatibility');
 const { requireAuth } = require('./routes-auth');
+const { requireLaunched } = require('./services/site-mode');
 const world = require('./services/world-graph');
 
 const router = express.Router();
 
 // GET /api/compat/:userId/connection — how you two are connected in the graph:
 // mutual connections, shared communities, shared language/intent/city + a label.
-router.get('/:userId/connection', requireAuth, async (req, res, next) => {
+router.get('/:userId/connection', requireAuth, requireLaunched, async (req, res, next) => {
   try {
     if (req.params.userId === req.userId) return res.json({ label: null, mutualConnections: [], sharedCommunities: [] });
     res.json(await world.between(req.userId, req.params.userId));
@@ -163,7 +164,7 @@ async function buildCompat(meId, otherId, { refresh = false } = {}) {
   return out;
 }
 
-router.get('/:userId', requireAuth, async (req, res, next) => {
+router.get('/:userId', requireAuth, requireLaunched, async (req, res, next) => {
   try {
     const result = await buildCompat(req.userId, req.params.userId, { refresh: req.query.refresh === 'true' });
     if (!result) return res.status(404).json({ error: 'User not found' });
@@ -171,7 +172,7 @@ router.get('/:userId', requireAuth, async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
-router.get('/:userId/astrology', requireAuth, async (req, res, next) => {
+router.get('/:userId/astrology', requireAuth, requireLaunched, async (req, res, next) => {
   try {
     const result = await buildCompat(req.userId, req.params.userId);
     if (!result) return res.status(404).json({ error: 'User not found' });
@@ -179,7 +180,7 @@ router.get('/:userId/astrology', requireAuth, async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
-router.get('/:userId/engagement', requireAuth, async (req, res, next) => {
+router.get('/:userId/engagement', requireAuth, requireLaunched, async (req, res, next) => {
   try {
     const result = await buildCompat(req.userId, req.params.userId, { refresh: true });
     if (!result) return res.status(404).json({ error: 'User not found' });
@@ -191,7 +192,7 @@ router.get('/:userId/engagement', requireAuth, async (req, res, next) => {
 // astrology + psychology (from the shared chat) + engagement + karma safety.
 const intelligence = require('./services/intelligence');
 const KarmaBook = require('./models/KarmaBook');
-router.get('/:userId/intelligence', requireAuth, async (req, res, next) => {
+router.get('/:userId/intelligence', requireAuth, requireLaunched, async (req, res, next) => {
   try {
     const [me, other] = await Promise.all([User.findById(req.userId), User.findById(req.params.userId)]);
     if (!other) return res.status(404).json({ error: 'User not found' });

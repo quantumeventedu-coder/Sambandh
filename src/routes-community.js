@@ -11,6 +11,7 @@ const RoomMessage = require('./models/RoomMessage');
 const RoomMember = require('./models/RoomMember');
 const Report = require('./models/Report');
 const { requireAuth } = require('./routes-auth');
+const { requireLaunched } = require('./services/site-mode');
 const flagEngine = require('./services/flag-engine');
 const events = require('./services/events');
 
@@ -41,7 +42,7 @@ async function requireMember(req, res, next) {
 }
 
 // GET /community/rooms — public rooms + private rooms you've joined
-router.get('/rooms', requireAuth, requireMember, async (req, res, next) => {
+router.get('/rooms', requireAuth, requireLaunched, requireMember, async (req, res, next) => {
   try {
     const mine = await RoomMember.find({ userId: req.userId }).select('roomId');
     const joinedIds = mine.map(m => m.roomId);
@@ -62,7 +63,7 @@ router.get('/rooms', requireAuth, requireMember, async (req, res, next) => {
 });
 
 // POST /community/rooms — create a public or private room
-router.post('/rooms', requireAuth, requireMember, async (req, res, next) => {
+router.post('/rooms', requireAuth, requireLaunched, requireMember, async (req, res, next) => {
   try {
     const name = String(req.body.name || '').trim().slice(0, 60);
     if (name.length < 3) return res.status(400).json({ error: 'Room name must be at least 3 characters.' });
@@ -82,7 +83,7 @@ router.post('/rooms', requireAuth, requireMember, async (req, res, next) => {
 });
 
 // POST /community/join-by-code — join a private room with its invite code
-router.post('/join-by-code', requireAuth, requireMember, async (req, res, next) => {
+router.post('/join-by-code', requireAuth, requireLaunched, requireMember, async (req, res, next) => {
   try {
     const code = String(req.body.code || '').trim().toLowerCase();
     if (!code) return res.status(400).json({ error: 'Enter an invite code.' });
@@ -98,7 +99,7 @@ router.post('/join-by-code', requireAuth, requireMember, async (req, res, next) 
 });
 
 // POST /community/rooms/:slug/join
-router.post('/rooms/:slug/join', requireAuth, requireMember, async (req, res, next) => {
+router.post('/rooms/:slug/join', requireAuth, requireLaunched, requireMember, async (req, res, next) => {
   try {
     const room = await Room.findOne({ slug: req.params.slug });
     if (!room) return res.status(404).json({ error: 'Room not found' });
@@ -114,7 +115,7 @@ router.post('/rooms/:slug/join', requireAuth, requireMember, async (req, res, ne
 });
 
 // GET /community/rooms/:slug/messages?after=<iso> — recent messages (poll-friendly)
-router.get('/rooms/:slug/messages', requireAuth, requireMember, async (req, res, next) => {
+router.get('/rooms/:slug/messages', requireAuth, requireLaunched, requireMember, async (req, res, next) => {
   try {
     const room = await Room.findOne({ slug: req.params.slug });
     if (!room) return res.status(404).json({ error: 'Room not found' });
@@ -135,7 +136,7 @@ router.get('/rooms/:slug/messages', requireAuth, requireMember, async (req, res,
 });
 
 // POST /community/rooms/:slug/messages — post (moderated)
-router.post('/rooms/:slug/messages', requireAuth, requireMember, async (req, res, next) => {
+router.post('/rooms/:slug/messages', requireAuth, requireLaunched, requireMember, async (req, res, next) => {
   try {
     const text = String(req.body.text || '').trim();
     if (!text) return res.status(400).json({ error: 'Message is empty' });
@@ -177,7 +178,7 @@ router.post('/rooms/:slug/messages', requireAuth, requireMember, async (req, res
 });
 
 // POST /community/messages/:id/report
-router.post('/messages/:id/report', requireAuth, requireMember, async (req, res, next) => {
+router.post('/messages/:id/report', requireAuth, requireLaunched, requireMember, async (req, res, next) => {
   try {
     const msg = await RoomMessage.findById(req.params.id);
     if (!msg) return res.status(404).json({ error: 'Message not found' });

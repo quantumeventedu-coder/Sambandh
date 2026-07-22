@@ -1,6 +1,10 @@
 module.exports = {
   testEnvironment: 'node',
 
+  // Runs before every test file: puts the suite in EXPLICIT dev mode so the auth
+  // dev-OTP path is available (DEV_MODE is no longer inferred from a missing Firebase).
+  setupFiles: ['<rootDir>/tests/helpers/env-setup.js'],
+
   // src/ must be in `roots` or collectCoverageFrom('src/**') matches NOTHING and
   // coverage silently reports only the files tests happened to import — which is
   // how routes-payment.js sat at zero coverage without anyone noticing.
