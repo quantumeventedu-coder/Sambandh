@@ -1190,9 +1190,7 @@ function ddShow() {
     </div>
     <div class="dd-stage">
       <div class="dd-facets left">${left}</div>
-      <div class="dd-figure" onclick="nav('#/profile/${p.userId}')">
-        <div class="dd-ring"></div><div class="dd-ring r2"></div>${core}
-      </div>
+      <div class="dd-figure" onclick="nav('#/profile/${p.userId}')">${core}</div>
       <div class="dd-facets right">${right}</div>
     </div>
     <div class="dd-actions">
