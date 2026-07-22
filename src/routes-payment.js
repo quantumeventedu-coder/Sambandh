@@ -390,3 +390,4 @@ router.post('/webhook', async (req, res, next) => {
 });
 
 module.exports = router;
+module.exports.activateTier = activateTier;   // exported for tests (early-access flag integration)
