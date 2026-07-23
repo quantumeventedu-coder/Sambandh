@@ -1,0 +1,282 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<meta name="robots" content="noindex,nofollow"/>
+<title>Sambandh — Staff Console</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='30' fill='none' stroke='%23F3C14B' stroke-width='10'/></svg>"/>
+<style>
+  :root { --gold:#F3C14B; --deep:#140b12; --card:#1d121a; --line:rgba(243,193,75,.22); --txt:#eadfe6; --dim:#b39aa6; --ok:#8fe9b4; --bad:#ff8a9c; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:radial-gradient(1100px 640px at 50% -10%,#2a1420,#140b12 60%,#0c0709); color:var(--txt); font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif; }
+  a { color:var(--gold); }
+  .wrap { max-width:1100px; margin:0 auto; padding:22px 18px 90px; }
+  h1 { font-family:Georgia,serif; font-size:26px; margin:0; } h1 b { color:var(--gold); }
+  .sub { color:var(--dim); font-size:13px; margin:4px 0 0; }
+  .card { background:linear-gradient(155deg,rgba(60,34,18,.35),rgba(14,8,6,.55)); border:1px solid var(--line); border-radius:16px; padding:18px; margin-top:16px; }
+  input,select,textarea { width:100%; background:#120a10; border:1px solid var(--line); color:var(--txt); border-radius:10px; padding:10px 12px; font-size:14px; font-family:inherit; }
+  textarea { min-height:90px; resize:vertical; }
+  label { display:block; font-size:12px; color:var(--dim); margin:10px 0 4px; }
+  button { background:linear-gradient(135deg,#ffd97a,var(--gold)); color:var(--deep); font-weight:800; border:none; border-radius:10px; padding:10px 16px; cursor:pointer; font-size:14px; }
+  button.ghost { background:none; color:var(--txt); border:1px solid var(--line); font-weight:600; }
+  button.danger { background:none; color:var(--bad); border:1px solid rgba(255,120,150,.4); font-weight:700; }
+  .row { display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
+  .chip { display:inline-block; font-size:11px; font-weight:700; border-radius:99px; padding:3px 10px; border:1px solid var(--line); color:var(--gold); }
+  .chip.ok { color:var(--ok); border-color:rgba(120,240,140,.4); } .chip.bad { color:var(--bad); border-color:rgba(255,120,150,.4); }
+  .status { font-size:12px; font-weight:700; padding:4px 10px; border-radius:99px; }
+  .status.dis { color:var(--bad); background:rgba(255,120,150,.12); } .status.con { color:var(--ok); background:rgba(120,240,140,.12); }
+  .tabs { display:flex; gap:6px; flex-wrap:wrap; margin-top:16px; }
+  .tab { padding:8px 14px; border-radius:99px; border:1px solid var(--line); background:none; color:var(--dim); font-weight:700; font-size:13px; cursor:pointer; }
+  .tab.active { color:var(--deep); background:var(--gold); border-color:var(--gold); }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  th,td { text-align:left; padding:8px 10px; border-bottom:1px solid rgba(255,255,255,.06); vertical-align:top; }
+  th { color:var(--dim); font-weight:700; font-size:11px; text-transform:uppercase; letter-spacing:.08em; }
+  .kv { display:grid; grid-template-columns:1fr auto; gap:6px 16px; font-size:14px; }
+  .kv .k { color:var(--dim); } .kv .v { font-weight:700; text-align:right; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:10px; }
+  .stat { background:#120a10; border:1px solid var(--line); border-radius:12px; padding:12px; }
+  .stat .n { font-family:Georgia,serif; font-size:24px; color:#fff; } .stat .l { color:var(--dim); font-size:12px; }
+  pre { background:#0c0709; border:1px solid var(--line); border-radius:10px; padding:12px; overflow:auto; font-size:12px; max-height:340px; }
+  .muted { color:var(--dim); font-size:13px; }
+  .hidden { display:none; }
+  .err { color:var(--bad); font-size:13px; margin-top:8px; min-height:16px; }
+  .swatch { height:34px; border-radius:8px; border:1px solid rgba(255,255,255,.15); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="row" style="justify-content:space-between">
+    <div><h1>sambandh / <b>staff console</b></h1><p class="sub">Internal. Scope-gated. Every sensitive action is audit-logged.</p></div>
+    <div id="who" class="hidden row"><span id="whoName" class="chip"></span><button class="ghost" onclick="logout()">Sign out</button></div>
+  </div>
+
+  <!-- LOGIN -->
+  <div id="login" class="card" style="max-width:440px">
+    <label>Work email</label><input id="li-email" type="email" autocomplete="username" placeholder="you@sambandh.online"/>
+    <label>Password</label><input id="li-pass" type="password" autocomplete="current-password"/>
+    <div id="li-2fa" class="hidden"><label>2FA code (or a backup code)</label><input id="li-totp" inputmode="numeric" placeholder="123456"/></div>
+    <div class="row" style="margin-top:14px"><button onclick="login()">Sign in</button><span id="li-status" class="status dis">not signed in</span></div>
+    <div id="li-err" class="err"></div>
+    <p class="muted" style="margin-top:12px"><a href="#" onclick="bootstrapOwner();return false">Owner? Set up the first staff with your super-admin key →</a></p>
+  </div>
+
+  <!-- CONSOLE -->
+  <div id="console" class="hidden">
+    <div id="tabs" class="tabs"></div>
+    <div id="view"></div>
+  </div>
+</div>
+
+<script>
+const API = '/api/developer';
+let TOKEN = sessionStorage.getItem('sb_staff_token') || '';
+let SUPERKEY = '';                    // owner bootstrap (roster only)
+let ME = null;
+
+async function api(path, opts={}) {
+  const r = await fetch(API+path, Object.assign({ headers: Object.assign(
+    { 'Content-Type':'application/json' }, TOKEN ? { 'X-Staff-Token': TOKEN } : {}, SUPERKEY ? { 'X-Super-Key': SUPERKEY } : {}) }, opts));
+  let body = {}; try { body = await r.json(); } catch {}
+  if (r.status === 401) { if (TOKEN) logout(); }
+  return { ok:r.ok, status:r.status, body };
+}
+const esc = s => String(s==null?'':s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const has = s => ME && (ME.scopes||[]).includes(s);
+
+// ---------- auth ----------
+async function login() {
+  const email = document.getElementById('li-email').value.trim();
+  const password = document.getElementById('li-pass').value;
+  const totp = document.getElementById('li-totp').value.trim();
+  const err = document.getElementById('li-err'); err.textContent='';
+  const body = { email, password };
+  if (totp) { if (/^\d{6}$/.test(totp)) body.totp = totp; else body.backupCode = totp; }
+  const r = await api('/login', { method:'POST', body: JSON.stringify(body) });
+  if (r.body && r.body.twoFactorRequired) { document.getElementById('li-2fa').classList.remove('hidden'); err.textContent='Enter your 2FA code.'; return; }
+  if (!r.ok) { err.textContent = (r.body && r.body.error) || 'Sign-in failed'; return; }
+  TOKEN = r.body.token; sessionStorage.setItem('sb_staff_token', TOKEN);
+  ME = r.body.staff; boot(r.body.tab);
+}
+function logout() { TOKEN=''; SUPERKEY=''; ME=null; sessionStorage.removeItem('sb_staff_token'); location.reload(); }
+
+// Owner bootstrap: with the SUPER_ADMIN_KEY, open the Roster tab directly (no staff
+// account needed) to create the first employees. The key stays in memory only.
+window.bootstrapOwner = function(){
+  const k = prompt('Enter your SUPER_ADMIN_KEY to manage staff:'); if(!k) return;
+  SUPERKEY = k.trim();
+  ME = { name:'Owner', roleLabel:'Super Admin', scopes:['roster:manage'], twoFactor:true, mustChangePassword:false };
+  document.getElementById('login').classList.add('hidden');
+  document.getElementById('console').classList.remove('hidden');
+  document.getElementById('who').classList.remove('hidden');
+  document.getElementById('whoName').textContent = 'Owner · bootstrap';
+  const nav = document.getElementById('tabs'); nav.innerHTML='';
+  const b=document.createElement('button'); b.className='tab active'; b.textContent='Roster'; b.dataset.id='roster'; b.onclick=()=>select('roster'); nav.appendChild(b);
+  select('roster');
+};
+
+// tab registry: {id,label,scope} — scope null = always visible
+const TABS = [
+  { id:'ops', label:'Overview', scope:'ops:read' },
+  { id:'metrics', label:'Metrics', scope:'metrics:read' },
+  { id:'db', label:'Database', scope:'db:read' },
+  { id:'logs', label:'Logs', scope:'logs:read' },
+  { id:'prompt', label:'Prompt Lab', scope:'prompt:run' },
+  { id:'ai', label:'AI / Keys', scope:'ai:read' },
+  { id:'flags', label:'Flags', scope:'flags:read' },
+  { id:'design', label:'Design', scope:'design:read' },
+  { id:'support', label:'Support', scope:'support:read' },
+  { id:'roster', label:'Roster', scope:'roster:manage' },
+  { id:'security', label:'My Security', scope:null }
+];
+
+function boot(startTab) {
+  document.getElementById('login').classList.add('hidden');
+  document.getElementById('console').classList.remove('hidden');
+  document.getElementById('who').classList.remove('hidden');
+  document.getElementById('whoName').textContent = ME.name + ' · ' + ME.roleLabel;
+  const visible = TABS.filter(t => t.scope===null || has(t.scope));
+  const nav = document.getElementById('tabs'); nav.innerHTML='';
+  visible.forEach(t => { const b=document.createElement('button'); b.className='tab'; b.textContent=t.label; b.onclick=()=>select(t.id); b.dataset.id=t.id; nav.appendChild(b); });
+  const first = visible.find(t=>t.id===startTab) ? startTab : (visible[0] && visible[0].id);
+  if (ME.mustChangePassword) { select('security'); alert('Please set a new password (temporary password in use).'); }
+  else select(first);
+}
+function select(id) {
+  document.querySelectorAll('.tab').forEach(b=>b.classList.toggle('active', b.dataset.id===id));
+  const v = document.getElementById('view'); v.innerHTML='<div class="card muted">Loading…</div>';
+  (RENDER[id]||(()=>v.innerHTML='<div class="card muted">Nothing here.</div>'))();
+}
+
+// ---------- renderers ----------
+const RENDER = {};
+RENDER.ops = async () => {
+  const r = await api('/ops/overview'); const v=document.getElementById('view');
+  if(!r.ok) return v.innerHTML=card('Overview', err(r));
+  const s=r.body.system;
+  v.innerHTML = card('System', `<div class="kv">
+    <div class="k">Environment</div><div class="v">${esc(s.env)}</div>
+    <div class="k">Deploy</div><div class="v">${esc(s.deploy)}</div>
+    <div class="k">Pre-launch</div><div class="v">${s.prelaunch?'<span class="chip">gated</span>':'<span class="chip ok">launched</span>'}</div>
+    <div class="k">Database</div><div class="v">${r.body.db.connected?'<span class="chip ok">connected</span>':'<span class="chip bad">down</span>'}</div>
+    <div class="k">Node</div><div class="v">${esc(s.node)}</div>
+    <div class="k">Uptime</div><div class="v">${Math.round(s.uptimeSec/60)} min</div></div>`);
+};
+RENDER.metrics = async () => {
+  const r = await api('/ops/metrics'); const v=document.getElementById('view');
+  if(!r.ok) return v.innerHTML=card('Metrics', err(r));
+  const b=r.body; const t=b.byTier||{};
+  v.innerHTML = card('Product metrics', `<div class="grid">
+    ${stat(b.users,'Users')}${stat(b.verified,'Verified')}${stat(b.waitlist,'Waitlist')}
+    ${stat(b.signups7d,'Signups · 7d')}${stat(b.chats,'Chats')}
+    ${stat(t.base||0,'Base')}${stat(t.pro||0,'Pro')}${stat(t.max||0,'Max')}</div>
+    <p class="muted" style="margin-top:12px">Aggregate counts only — no member PII.</p>`);
+};
+RENDER.db = async () => {
+  const r = await api('/ops/db'); const v=document.getElementById('view');
+  if(!r.ok) return v.innerHTML=card('Database', err(r));
+  const rows = Object.entries(r.body.collections).map(([k,n])=>`<tr><td>${esc(k)}</td><td>${n==null?'—':n}</td></tr>`).join('');
+  v.innerHTML = card('Collection counts', `<table><thead><tr><th>Collection</th><th>Rows</th></tr></thead><tbody>${rows}</tbody></table>`);
+};
+RENDER.logs = async () => {
+  const r = await api('/ops/logs'); const v=document.getElementById('view');
+  if(!r.ok) return v.innerHTML=card('Logs', err(r));
+  const rows = (r.body.audit||[]).map(a=>`<tr><td>${esc(new Date(a.createdAt).toLocaleString())}</td><td>${esc(a.actor)}</td><td>${esc(a.action)}</td><td>${esc(a.targetType||'')}</td></tr>`).join('');
+  v.innerHTML = card('Audit log (last 100)', `<table><thead><tr><th>When</th><th>Actor</th><th>Action</th><th>Target</th></tr></thead><tbody>${rows||'<tr><td colspan=4 class=muted>No entries yet.</td></tr>'}</tbody></table>`);
+};
+RENDER.prompt = async () => {
+  const v=document.getElementById('view');
+  v.innerHTML = card('Prompt Lab', `<label>System (optional)</label><textarea id="pl-sys" placeholder="You are…"></textarea>
+    <label>Prompt</label><textarea id="pl-prompt" placeholder="Ask the model…"></textarea>
+    <div class="row" style="margin-top:10px"><button onclick="runPrompt()">Run</button><span class="muted">Max ~2000 tokens · rate-limited · audit-logged</span></div>
+    <div id="pl-out"></div>`);
+};
+window.runPrompt = async () => {
+  const out=document.getElementById('pl-out'); out.innerHTML='<p class="muted">Running…</p>';
+  const r = await api('/ai/prompt', { method:'POST', body: JSON.stringify({ system:document.getElementById('pl-sys').value, prompt:document.getElementById('pl-prompt').value }) });
+  if(!r.ok) return out.innerHTML='<div class="err">'+esc((r.body&&r.body.error)||'Failed')+(r.body&&r.body.detail?': '+esc(r.body.detail):'')+'</div>';
+  const o=r.body.output; const text = o&&(o.text||o.answer||o.content)||JSON.stringify(o,null,2);
+  out.innerHTML = '<label>Output</label><pre>'+esc(text)+'</pre>';
+};
+RENDER.ai = async () => {
+  const r = await api('/ai/status'); const v=document.getElementById('view');
+  if(!r.ok) return v.innerHTML=card('AI', err(r));
+  const keys=(r.body.keys||[]).map(k=>`<tr><td>${esc(k.name)}</td><td>${esc(k.prefix||'')}…</td><td>${k.disabled?'<span class="chip bad">off</span>':'<span class="chip ok">on</span>'}</td><td>${k.calls||0}</td><td>${(k.inputTokens||0)+(k.outputTokens||0)}</td></tr>`).join('');
+  v.innerHTML = card('LLM', `<div class="kv"><div class="k">Model</div><div class="v">${esc(r.body.llm.model)}</div><div class="k">API key set</div><div class="v">${r.body.llm.keyConfigured?'<span class="chip ok">yes</span>':'<span class="chip bad">no</span>'}</div></div>`)
+    + card('API keys', `<table><thead><tr><th>Name</th><th>Prefix</th><th>State</th><th>Calls</th><th>Tokens</th></tr></thead><tbody>${keys||'<tr><td colspan=5 class=muted>None.</td></tr>'}</tbody></table>`);
+};
+RENDER.flags = async () => {
+  const r = await api('/flags'); const v=document.getElementById('view');
+  if(!r.ok) return v.innerHTML=card('Flags', err(r));
+  const canW = has('flags:write');
+  v.innerHTML = card('Feature flags', `<div class="kv"><div class="k">Pre-launch (dating gated)</div><div class="v">${r.body.prelaunch?'<span class="chip">ON</span>':'<span class="chip ok">OFF (launched)</span>'}</div></div>
+    ${canW?`<div class="row" style="margin-top:14px"><button class="ghost" onclick="setFlag(true)">Set pre-launch ON</button><button class="danger" onclick="setFlag(false)">LAUNCH (open dating)</button></div><p class="muted">Launching grants 30-day early-access trials — this is the real switch.</p>`:'<p class="muted">You have read-only access to flags.</p>'}`);
+};
+window.setFlag = async (on) => {
+  if(!on && !confirm('LAUNCH the platform for everyone? This grants trials and opens dating features.')) return;
+  const r = await api('/flags/prelaunch', { method:'PUT', body: JSON.stringify({ prelaunch:on }) });
+  if(!r.ok) return alert((r.body&&r.body.error)||'Failed'); select('flags');
+};
+RENDER.design = async () => {
+  const r = await api('/design/tokens'); const v=document.getElementById('view');
+  if(!r.ok) return v.innerHTML=card('Design', err(r));
+  const toks=Object.entries(r.body.tokens||{}).map(([k,val])=>`<tr><td><code>${esc(k)}</code></td><td>${/#|rgb|hsl/.test(val)?`<div class="swatch" style="background:${esc(val)}"></div>`:''}</td><td>${esc(val)}</td></tr>`).join('');
+  const prev=(r.body.previews||[]).map(p=>`<a href="${esc(p.url)}" target="_blank">${esc(p.name)}</a>`).join(' · ');
+  v.innerHTML = card('Design tokens', `<table><thead><tr><th>Token</th><th></th><th>Value</th></tr></thead><tbody>${toks}</tbody></table>`)
+    + card('Previews', prev||'<span class="muted">—</span>');
+};
+RENDER.support = async () => {
+  const r = await api('/support/reports'); const v=document.getElementById('view');
+  if(!r.ok) return v.innerHTML=card('Support', err(r));
+  const reps=(r.body.reports||[]).map(x=>`<tr><td>${esc(new Date(x.createdAt).toLocaleDateString())}</td><td>${esc(x.reason||x.type||'')}</td><td>${esc(x.status||'open')}</td></tr>`).join('');
+  let lookup = card('Member lookup', `<div class="row"><input id="su-id" placeholder="member id" style="max-width:280px"/>${has('support:act')?'<button onclick="lookupUser()">Look up</button>':'<span class="muted">needs support:act</span>'}</div><div id="su-out"></div>`);
+  v.innerHTML = card('Reports & escalations', `<table><thead><tr><th>When</th><th>Reason</th><th>Status</th></tr></thead><tbody>${reps||'<tr><td colspan=3 class=muted>None.</td></tr>'}</tbody></table>`) + lookup;
+};
+window.lookupUser = async () => {
+  const id=document.getElementById('su-id').value.trim(); const out=document.getElementById('su-out');
+  const r = await api('/support/user/'+encodeURIComponent(id));
+  if(!r.ok) return out.innerHTML='<div class="err">'+esc((r.body&&r.body.error)||'Not found')+'</div>';
+  const u=r.body.user;
+  out.innerHTML = '<div class="kv" style="margin-top:10px"><div class="k">Name</div><div class="v">'+esc(u.firstName)+'</div><div class="k">City</div><div class="v">'+esc(u.city||'—')+'</div><div class="k">Verification</div><div class="v">'+esc(u.verificationLevel||'—')+'</div><div class="k">Tier</div><div class="v">'+esc(u.tier||'free')+'</div></div><p class="muted">Lookup is audit-logged. No contact details or chats are shown.</p>';
+};
+RENDER.roster = async () => {
+  const r = await api('/roster'); const v=document.getElementById('view');
+  if(!r.ok) return v.innerHTML=card('Roster', err(r));
+  const tx=r.body.taxonomy;
+  const opts=(arr)=>arr.map(x=>`<option value="${esc(x)}">${esc((tx.labels&&tx.labels[x])||x)}</option>`).join('');
+  const rows=(r.body.staff||[]).map(s=>`<tr><td>${esc(s.name)}<div class="muted">${esc(s.email)}</div></td><td>${esc(s.roleLabel)}<div class="muted">${esc(s.department)} · ${esc(s.level)}</div></td><td>${s.twoFactor?'<span class="chip ok">2FA</span>':'<span class="chip bad">no 2FA</span>'} ${s.active?'':'<span class="chip bad">inactive</span>'}</td><td class="muted">${(s.scopes||[]).join(', ')||'—'}</td><td><button class="ghost" onclick="resetPw('${s.id}')">Reset pw</button> <button class="ghost" onclick="toggleActive('${s.id}',${!s.active})">${s.active?'Deactivate':'Reactivate'}</button></td></tr>`).join('');
+  v.innerHTML = card('Add staff', `<div class="row"><div style="flex:1;min-width:180px"><label>Name</label><input id="rc-name"/></div><div style="flex:1;min-width:180px"><label>Email</label><input id="rc-email" type="email"/></div></div>
+    <div class="row"><div style="flex:1"><label>Department</label><select id="rc-dept">${opts(tx.departments)}</select></div><div style="flex:1"><label>Role</label><select id="rc-role">${opts(tx.roles)}</select></div><div style="flex:1"><label>Level</label><select id="rc-level">${opts(tx.levels)}</select></div></div>
+    <div class="row" style="margin-top:12px"><button onclick="createStaff()">Create (default scopes for role)</button></div><div id="rc-out"></div>`)
+    + card('Team', `<table><thead><tr><th>Person</th><th>Role</th><th>Status</th><th>Scopes</th><th></th></tr></thead><tbody>${rows||'<tr><td colspan=5 class=muted>No staff yet.</td></tr>'}</tbody></table>`);
+};
+window.createStaff = async () => {
+  const out=document.getElementById('rc-out');
+  const b={ name:document.getElementById('rc-name').value.trim(), email:document.getElementById('rc-email').value.trim(), department:document.getElementById('rc-dept').value, role:document.getElementById('rc-role').value, level:document.getElementById('rc-level').value };
+  const r = await api('/roster', { method:'POST', body: JSON.stringify(b) });
+  if(!r.ok) return out.innerHTML='<div class="err">'+esc((r.body&&r.body.error)||'Failed')+(r.body&&r.body.issues?': '+esc(r.body.issues.join(', ')):'')+'</div>';
+  out.innerHTML = '<div class="card"><b>Created '+esc(r.body.staff.email)+'</b><p>Temporary password (shown once — share securely):</p><pre>'+esc(r.body.tempPassword)+'</pre></div>';
+  setTimeout(()=>select('roster'), 4000);
+};
+window.resetPw = async (id) => { if(!confirm('Reset this person\'s password?'))return; const r=await api('/roster/'+id+'/reset-password',{method:'POST',body:'{}'}); if(!r.ok)return alert((r.body&&r.body.error)||'Failed'); alert('New temporary password (share securely):\n\n'+r.body.tempPassword); };
+window.toggleActive = async (id,active) => { const r=await api('/roster/'+id,{method:'PATCH',body:JSON.stringify({active})}); if(!r.ok)return alert((r.body&&r.body.error)||'Failed'); select('roster'); };
+RENDER.security = async () => {
+  const v=document.getElementById('view');
+  v.innerHTML = card('Change password', `<label>Current password</label><input id="cp-cur" type="password"/><label>New password (min 10)</label><input id="cp-new" type="password"/><div class="row" style="margin-top:12px"><button onclick="changePw()">Update password</button></div><div id="cp-out" class="err"></div>`)
+    + card('Two-factor (TOTP)', `<p class="muted">${ME.twoFactor?'2FA is <b class="chip ok">enabled</b>.':'2FA is <b class="chip bad">off</b>. Enable it — it protects the whole console.'}</p><div id="tf"></div><div class="row" style="margin-top:10px">${ME.twoFactor?'<button class="danger" onclick="disable2fa()">Disable 2FA</button>':'<button onclick="setup2fa()">Set up 2FA</button>'}</div>`);
+};
+window.changePw = async () => { const out=document.getElementById('cp-out'); const r=await api('/change-password',{method:'POST',body:JSON.stringify({currentPassword:document.getElementById('cp-cur').value,newPassword:document.getElementById('cp-new').value})}); if(!r.ok)return out.textContent=(r.body&&r.body.error)||'Failed'; out.style.color='var(--ok)'; out.textContent='Password updated.'; ME.mustChangePassword=false; };
+window.setup2fa = async () => { const r=await api('/2fa/setup',{method:'POST',body:'{}'}); if(!r.ok)return alert('Failed'); document.getElementById('tf').innerHTML='<div class="card"><p>Add this secret to your authenticator app:</p><pre>'+esc(r.body.secret)+'</pre><p class="muted">'+esc(r.body.otpauth)+'</p><label>Enter the 6-digit code to confirm</label><input id="tf-code" inputmode="numeric"/><div class="row" style="margin-top:10px"><button onclick="enable2fa()">Confirm & enable</button></div></div>'; };
+window.enable2fa = async () => { const r=await api('/2fa/enable',{method:'POST',body:JSON.stringify({totp:document.getElementById('tf-code').value.trim()})}); if(!r.ok)return alert((r.body&&r.body.error)||'Code did not verify'); alert('2FA enabled. Save these backup codes:\n\n'+r.body.backupCodes.join('\n')); ME.twoFactor=true; select('security'); };
+window.disable2fa = async () => { const code=prompt('Enter a current 2FA code to disable:'); if(!code)return; const r=await api('/2fa/disable',{method:'POST',body:JSON.stringify({totp:code})}); if(!r.ok)return alert((r.body&&r.body.error)||'Failed'); ME.twoFactor=false; select('security'); };
+
+// ---------- helpers ----------
+function card(title, html){ return '<div class="card"><h3 style="margin:0 0 12px;font-family:Georgia,serif;color:#fff">'+esc(title)+'</h3>'+html+'</div>'; }
+function stat(n,l){ return '<div class="stat"><div class="n">'+esc(n)+'</div><div class="l">'+esc(l)+'</div></div>'; }
+function err(r){ return '<div class="err">'+esc((r.body&&r.body.error)||('HTTP '+r.status))+'</div>'; }
+
+// resume a session
+(async function(){ if(TOKEN){ const r=await api('/me'); if(r.ok){ ME=r.body.staff; boot(r.body.tab); } else { TOKEN=''; sessionStorage.removeItem('sb_staff_token'); } } })();
+</script>
+</body>
+</html>

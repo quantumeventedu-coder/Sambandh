@@ -164,6 +164,7 @@ async function completeLogin(req, res, user) {
     if (!ok) { res.status(401).json({ error: 'Invalid 2FA code', twoFactorRequired: true }); return true; }
   }
   await User.findByIdAndUpdate(user._id, { lastActiveAt: new Date() });
+  await require('./services/comp').applyComp(user);   // waive the join fee for allowlisted test accounts (COMP_MEMBER_EMAILS)
   const token = issueToken(res, user);
   res.json({
     token,
