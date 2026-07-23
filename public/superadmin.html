@@ -166,6 +166,7 @@ async function renderOverview() {
             ${launched ? 'Return to pre-launch' : 'Open the doors — LAUNCH'}
           </button>
           <button onclick="purgeTestData()" class="ghost" style="white-space:nowrap;font-size:12px">Purge demo/test accounts</button>
+          <button onclick="resetCleanSlate()" class="ghost" style="white-space:nowrap;font-size:12px;border-color:var(--pink);color:var(--pink)">Reset to clean slate</button>
         </div>
       </div>
     </div>
@@ -192,6 +193,16 @@ async function purgeTestData() {
     alert(r.message || ('Deleted ' + r.deleted + ', kept ' + r.kept));
     renderOverview();
   } catch (e) { alert('Purge failed: ' + e.message); }
+}
+
+async function resetCleanSlate() {
+  const ok = prompt('FULL RESET — permanently deletes ALL accounts (except admin/staff), payments, chats, training data, waitlist. Real zero.\n\nType  WIPE ALL  to confirm:');
+  if (ok !== 'WIPE ALL') { if (ok !== null) alert('Not confirmed — nothing was deleted.'); return; }
+  try {
+    const r = await apiPost('/reset-clean-slate', { confirm: 'WIPE ALL' });
+    alert(r.message || ('Wiped. Kept ' + r.keptUsers + ' admin/staff account(s).'));
+    renderOverview();
+  } catch (e) { alert('Reset failed: ' + e.message); }
 }
 
 async function togglePrelaunch(launching) {

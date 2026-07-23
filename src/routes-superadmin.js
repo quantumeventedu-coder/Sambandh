@@ -144,6 +144,41 @@ router.post('/purge-test-data', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+// FULL clean slate — wipe ALL test/dev data to a true zero. Keeps only admin/
+// moderator/super_admin accounts (+ Employee staff, Rooms, config, keys, audit).
+// Irreversible → requires the exact phrase, and PRE-LAUNCH ONLY (never wipe a live
+// membership base). This also clears the stale, ownerless TrainingExamples that the
+// per-user purge can't reach.
+router.post('/reset-clean-slate', async (req, res, next) => {
+  try {
+    if (!req.body || req.body.confirm !== 'WIPE ALL') {
+      return res.status(400).json({ error: 'Type WIPE ALL to confirm — this permanently deletes all test data.' });
+    }
+    const { isPrelaunch } = require('./services/site-mode');
+    if (!(await isPrelaunch())) {
+      return res.status(409).json({ error: 'Clean-slate reset is only allowed in pre-launch mode.' });
+    }
+    const KEEP_ROLES = ['admin', 'moderator', 'super_admin'];
+    const all = await User.find({}).lean();
+    const delIds = all.filter(u => !KEEP_ROLES.includes(u.role)).map(u => u._id);
+    await User.deleteMany({ _id: { $in: delIds } });
+    const keptUsers = all.length - delIds.length;
+
+    // In pre-launch everything in these collections is test/dev data → wipe entirely.
+    const WIPE = ['Payment', 'Chat', 'Message', 'Like', 'Pass', 'Report', 'Escalation', 'KarmaBook',
+      'Reputation', 'Verification', 'Notification', 'TrainingExample', 'Waitlist', 'AnalyticsEvent',
+      'Event', 'RoomMember', 'RoomMessage', 'Compatibility', 'Claim', 'Dispute'];
+    const wiped = {};
+    for (const n of WIPE) {
+      try { const r = await require('./models/' + n).deleteMany({}); wiped[n] = (r && r.deletedCount) || 0; }
+      catch { wiped[n] = null; }
+    }
+    await audit('reset_clean_slate', 'system', 'bulk', { deletedUsers: delIds.length, keptUsers, wiped });
+    res.json({ ok: true, deletedUsers: delIds.length, keptUsers, wiped,
+      message: `Clean slate: removed ${delIds.length} accounts and all test data. ${keptUsers} admin/staff account(s) kept.` });
+  } catch (err) { next(err); }
+});
+
 // ---- User search & inspection ---------------------------------------------
 router.get('/users', async (req, res, next) => {
   try {
