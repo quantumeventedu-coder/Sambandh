@@ -29,6 +29,7 @@ const EmployeeSchema = new mongoose.Schema({
   scopes: { type: [String], default: [] },              // fine-grained perms (services/staff.js SCOPES)
   active: { type: Boolean, default: true },             // deactivate = revoke all access, keep audit trail
 
+  preview: { type: Boolean },                           // owner "experience as" account (impersonation)
   hrmsId: { type: String, index: true },                // Phase 2: link to external HRMS record
   createdBy: String,                                    // 'super-admin' or the staff id that provisioned
   createdAt: { type: Date, default: Date.now },

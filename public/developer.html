@@ -275,6 +275,8 @@ function card(title, html){ return '<div class="card"><h3 style="margin:0 0 12px
 function stat(n,l){ return '<div class="stat"><div class="n">'+esc(n)+'</div><div class="l">'+esc(l)+'</div></div>'; }
 function err(r){ return '<div class="err">'+esc((r.body&&r.body.error)||('HTTP '+r.status))+'</div>'; }
 
+// Owner "experience as" — impersonation token arrives as ?imp=<jwt>; adopt + clean URL.
+try { const imp = new URLSearchParams(location.search).get('imp'); if (imp) { TOKEN = imp; sessionStorage.setItem('sb_staff_token', imp); history.replaceState(null, '', location.pathname); } } catch { /* ignore */ }
 // resume a session
 (async function(){ if(TOKEN){ const r=await api('/me'); if(r.ok){ ME=r.body.staff; boot(r.body.tab); } else { TOKEN=''; sessionStorage.removeItem('sb_staff_token'); } } })();
 </script>
