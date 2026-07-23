@@ -695,13 +695,18 @@ function obId() {
     <p class="sub">You're already photo-verified. Add a government ID for an extra trust badge on your profile. Fully automated — no waiting, no human review.</p>
     <div class="card mt">
       <div class="field"><label>ID type</label><select id="ob-idtype">
-        <option value="aadhaar">Aadhaar</option><option value="pan">PAN</option><option value="driving_licence">Driving Licence</option></select></div>
+        <option value="passport">Passport (any country)</option>
+        <option value="national_id">National ID card</option>
+        <option value="driving_licence">Driving Licence</option>
+        <option value="residence_permit">Residence permit</option>
+        <option value="aadhaar">Aadhaar (India)</option>
+        <option value="pan">PAN (India)</option></select></div>
       <div class="field"><label>Photo of your ID</label><input id="ob-idfile" type="file" accept="image/*"/></div>
       <button class="btn" onclick="obUploadId()">Add ID badge</button>
       <button class="btn ghost" onclick="S.user._skippedId=true;renderOnboarding()">Skip for now</button>
       <div id="ob-id-area"></div>
     </div>
-    <div class="notice forest ic-row" style="display:flex">${ic('lock')} <span>We store only your name and date of birth. Your ID document is auto-deleted after 30 days. Aadhaar numbers are never stored.</span></div>
+    <div class="notice forest ic-row" style="display:flex">${ic('lock')} <span>We store only your name and date of birth. Your ID document is auto-deleted after 30 days. Full ID/document numbers are never stored.</span></div>
   </div>`;
 }
 
@@ -2548,4 +2553,16 @@ async function saveEditProfile() {
 }
 
 // ---------------- Boot ----------------
+// Owner "experience as": a super-admin impersonation token arrives as ?imp=<jwt>.
+// Adopt it as the session, then clean the URL so it isn't shared/bookmarked.
+(function () {
+  try {
+    const imp = new URLSearchParams(location.search).get('imp');
+    if (imp) {
+      localStorage.setItem('sb_token', imp);
+      S.token = imp; S.user = null;
+      history.replaceState(null, '', location.pathname + (location.hash || '#/discover'));
+    }
+  } catch { /* ignore */ }
+})();
 route();

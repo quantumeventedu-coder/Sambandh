@@ -182,8 +182,26 @@ async function renderOverview() {
       <div class="stat"><b>${s.moderation.reportsEscalated}</b><span>AUTO-ESCALATED</span></div>
       <div class="stat"><b>CHF ${s.revenue.totalCHF}</b><span>REVENUE (${s.revenue.capturedPayments} PAYMENTS)</span></div>
     </div>
+    <div class="card" style="margin-top:14px">
+      <b style="color:var(--gold)">Experience the product as…</b>
+      <div class="notice" style="margin:6px 0 10px">Opens a preview seat in a new tab. Preview accounts are excluded from every count and removed by Reset to clean slate.</div>
+      <div class="bar">
+        <button class="ghost" onclick="experienceAs('user')">User · the app</button>
+        <button class="ghost" onclick="experienceAs('admin')">Admin</button>
+        <button class="ghost" onclick="experienceAs('moderator')">Moderator</button>
+        <button class="ghost" onclick="experienceAs('developer')">Developer</button>
+        <button class="ghost" onclick="experienceAs('support')">Customer Support</button>
+      </div>
+    </div>
     <div class="notice" style="margin-top:14px">Chat content access lives under <b>Users &amp; Chats</b> and always
       requires a written reason. Admins/moderators cannot see message content at all — only you can, and it's logged.</div>`;
+}
+
+async function experienceAs(as) {
+  try {
+    const r = await apiPost('/impersonate', { as });
+    window.open(r.url + '?imp=' + encodeURIComponent(r.token), '_blank');
+  } catch (e) { alert('Could not start preview: ' + e.message); }
 }
 
 async function purgeTestData() {

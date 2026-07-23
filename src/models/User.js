@@ -103,6 +103,7 @@ const UserSchema = new mongoose.Schema({
     }
   },
   role: { type: String, enum: ['user', 'moderator', 'admin'], default: 'user' },
+  preview: { type: Boolean },   // owner "experience as" account — excluded from counts/feed, wiped on reset
   blockedUsers: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
   incognitoBlockList: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
   security: {

@@ -39,14 +39,14 @@ router.get('/stats', async (req, res, next) => {
     const [users, verified, paid, base, pro, max, suspended, banned,
       chats, messages, messages24h, reportsPending, reportsEscalated,
       payments, escalations] = await Promise.all([
-      User.countDocuments({}),
-      User.countDocuments({ 'verification.idVerified': true }),
-      User.countDocuments({ 'membership.joinFeePaid': true }),
-      User.countDocuments({ 'membership.tier': 'base' }),
-      User.countDocuments({ 'membership.tier': 'pro' }),
-      User.countDocuments({ 'membership.tier': 'max' }),
-      User.countDocuments({ 'status.suspended': true }),
-      User.countDocuments({ 'status.banned': true }),
+      User.countDocuments({ preview: { $ne: true } }),
+      User.countDocuments({ preview: { $ne: true }, 'verification.idVerified': true }),
+      User.countDocuments({ preview: { $ne: true }, 'membership.joinFeePaid': true }),
+      User.countDocuments({ preview: { $ne: true }, 'membership.tier': 'base' }),
+      User.countDocuments({ preview: { $ne: true }, 'membership.tier': 'pro' }),
+      User.countDocuments({ preview: { $ne: true }, 'membership.tier': 'max' }),
+      User.countDocuments({ preview: { $ne: true }, 'status.suspended': true }),
+      User.countDocuments({ preview: { $ne: true }, 'status.banned': true }),
       Chat.countDocuments({}),
       Message.countDocuments({}),
       Message.countDocuments({ createdAt: { $gt: dayStart } }),
@@ -75,9 +75,9 @@ router.get('/prelaunch', async (req, res, next) => {
     const Waitlist = require('./models/Waitlist');
     const [on, registered, paid, verified, emailWaitlist] = await Promise.all([
       isPrelaunch(),
-      User.countDocuments({}),
-      User.countDocuments({ 'membership.joinFeePaid': true }),
-      User.countDocuments({ 'verification.selfieVerified': true }),
+      User.countDocuments({ preview: { $ne: true } }),
+      User.countDocuments({ preview: { $ne: true }, 'membership.joinFeePaid': true }),
+      User.countDocuments({ preview: { $ne: true }, 'verification.selfieVerified': true }),
       Waitlist.countDocuments({}).catch(() => 0)
     ]);
     res.json({ prelaunch: on, registered, paid, verified, emailWaitlist });
@@ -160,8 +160,10 @@ router.post('/reset-clean-slate', async (req, res, next) => {
     }
     const KEEP_ROLES = ['admin', 'moderator', 'super_admin'];
     const all = await User.find({}).lean();
-    const delIds = all.filter(u => !KEEP_ROLES.includes(u.role)).map(u => u._id);
+    // Remove everyone except real admins/mods — and always remove preview ("experience as") accounts.
+    const delIds = all.filter(u => u.preview || !KEEP_ROLES.includes(u.role)).map(u => u._id);
     await User.deleteMany({ _id: { $in: delIds } });
+    await require('./models/Employee').deleteMany({ preview: true }).catch(() => {});
     const keptUsers = all.length - delIds.length;
 
     // In pre-launch everything in these collections is test/dev data → wipe entirely.
@@ -176,6 +178,50 @@ router.post('/reset-clean-slate', async (req, res, next) => {
     await audit('reset_clean_slate', 'system', 'bulk', { deletedUsers: delIds.length, keptUsers, wiped });
     res.json({ ok: true, deletedUsers: delIds.length, keptUsers, wiped,
       message: `Clean slate: removed ${delIds.length} accounts and all test data. ${keptUsers} admin/staff account(s) kept.` });
+  } catch (err) { next(err); }
+});
+
+// Owner "experience as" — mint a short-lived PREVIEW token for a role so the owner
+// can walk the product from that seat. Preview accounts are flagged preview:true,
+// excluded from every dashboard count/feed, and removed by the clean-slate reset.
+const jwtLib = require('jsonwebtoken');
+router.post('/impersonate', async (req, res, next) => {
+  try {
+    const as = String((req.body && req.body.as) || '');
+    const APP_ROLES = { user: 'user', admin: 'admin', moderator: 'moderator' };
+    const STAFF = {
+      developer: { department: 'engineering', role: 'software', scopes: ['ops:read', 'metrics:read', 'db:read', 'logs:read', 'ai:read', 'prompt:run', 'flags:read', 'design:read'] },
+      support: { department: 'support', role: 'customer_support', scopes: ['support:read', 'support:act', 'metrics:read'] }
+    };
+    if (APP_ROLES[as]) {
+      const role = APP_ROLES[as];
+      const email = `preview-${as}@sambandh.local`;
+      let u = await User.findOne({ email });
+      if (!u) {
+        u = await User.create({
+          email, role, preview: true,
+          profile: { firstName: 'Preview ' + as, gender: 'other', age: 28, city: 'Bengaluru', location: { lat: 12.97, lng: 77.59 } },
+          membership: { joinFeePaid: true, tier: 'base', earlyAccess: true, tierExpiresAt: new Date(Date.now() + 365 * 86400000) },
+          verification: { level: 'photo_verified', selfieVerified: true }, status: { active: true }, createdAt: new Date()
+        });
+      } else if (u.role !== role) { await User.findByIdAndUpdate(u._id, { role }); }
+      const token = jwtLib.sign({ userId: String(u._id), role }, process.env.JWT_SECRET, { expiresIn: '2h' });
+      await audit('impersonate', 'user', u._id, { as });
+      return res.json({ token, url: '/app', as });
+    }
+    if (STAFF[as]) {
+      const Employee = require('./models/Employee');
+      const { signStaffToken } = require('./services/dev-auth');
+      const spec = STAFF[as];
+      const email = `preview-${as}@sambandh.local`;
+      let e = await Employee.findOne({ email });
+      if (!e) e = await Employee.create({ email, name: 'Preview ' + as, department: spec.department, role: spec.role, level: 'mid', scopes: spec.scopes, preview: true, active: true, mustChangePassword: false, createdBy: 'super-admin' });
+      else { await Employee.findByIdAndUpdate(e._id, { scopes: spec.scopes, active: true }); e.scopes = spec.scopes; }
+      const token = signStaffToken(e);
+      await audit('impersonate', 'employee', e._id, { as });
+      return res.json({ token, url: '/developer.html', as });
+    }
+    return res.status(400).json({ error: 'Unknown role to experience' });
   } catch (err) { next(err); }
 });
 

@@ -44,7 +44,7 @@ async function attemptsToday(userId, type) {
 const idSchema = z.object({
   method: z.enum(['digilocker', 'upload']),
   digilockerToken: z.string().optional(),
-  idType: z.enum(['aadhaar', 'pan', 'driving_licence', 'passport']).optional(),
+  idType: z.enum(['passport', 'national_id', 'driving_licence', 'residence_permit', 'aadhaar', 'pan', 'voter_id']).optional(),
   document: z.object({ base64: z.string(), filename: z.string() }).optional()
 });
 
