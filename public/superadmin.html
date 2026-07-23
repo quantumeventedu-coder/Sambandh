@@ -254,6 +254,7 @@ ID ${u.verification?.idVerified?'✓':'✗'} · Selfie ${u.verification?.selfieV
           <button class="ghost" onclick="act('${u._id}','suspend_24h')">Suspend 24h</button>
           <button class="ghost" onclick="act('${u._id}','suspend_7d')">Suspend 7d</button>
           <button class="red" onclick="act('${u._id}','ban')">Ban</button>
+          ${u.membership?.joinFeePaid?'':`<button class="gold" onclick="act('${u._id}','waive_fee')">Waive fee</button>`}
           ${u.status?.suspended?`<button class="gold" onclick="act('${u._id}','unsuspend')">Unsuspend</button>`:''}
           ${u.status?.banned?`<button class="gold" onclick="act('${u._id}','unban')">Unban</button>`:''}
         </div>

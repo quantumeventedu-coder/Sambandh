@@ -297,6 +297,15 @@ router.post('/users/:id/action', async (req, res, next) => {
       await User.findByIdAndUpdate(user._id, { 'status.suspended': false, suspension: null });
     } else if (action === 'unban') {
       await User.findByIdAndUpdate(user._id, { 'status.banned': false, 'status.active': true });
+    } else if (action === 'waive_fee') {
+      // Owner-only: approve/comp a member's join fee so they skip the pay gate.
+      // Keeps any paid tier above 'free'; grants a year so it doesn't lapse mid-review.
+      const keepTier = user.membership && user.membership.tier && user.membership.tier !== 'free' ? user.membership.tier : 'base';
+      await User.findByIdAndUpdate(user._id, {
+        'membership.joinFeePaid': true, 'membership.tier': keepTier,
+        'membership.tierExpiresAt': new Date(Date.now() + 365 * 86400000)
+      });
+      await notify('system', 'Membership approved', 'Your Sambandh membership fee has been waived by the team — welcome in.', 'info');
     } else {
       return res.status(400).json({ error: 'Unknown action' });
     }
