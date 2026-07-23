@@ -432,7 +432,7 @@ router.post('/ai/train', async (req, res, next) => {
     // on the SAME organic swipe data and reports both, plus which now serves.
     const mode = req.body?.mode || 'both';
     const out = {};
-    if (mode === 'logistic' || mode === 'both') out.logistic = await trainer.train({ minExamples: 40 });
+    if (mode === 'logistic' || mode === 'both') out.logistic = await trainer.train({ minExamples: 40 }).catch(e => ({ trained: false, reason: e.message }));
     if (mode === 'neural' || mode === 'both') {
       out.neural = await trainer.trainNeural({ minExamples: 60 }).catch(e => ({ trained: false, reason: e.message }));
     }
