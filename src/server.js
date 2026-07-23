@@ -105,6 +105,7 @@ app.use('/api/astro', require('./routes-astro'));         // full astrology / ku
 app.use('/api/reading', require('./routes-reading'));     // plain-language readings (no jargon)
 app.use('/api/ai', require('./routes-ai')); // reusable AI API (per-app X-AI-Key)
 app.use('/api/superadmin', require('./routes-superadmin')); // owner-only, SUPER_ADMIN_KEY
+app.use('/api/developer', require('./routes-developer')); // internal STAFF console (own accounts + 2FA + scopes)
 
 // Analytics summary for the admin panel (event counts, last 7 days)
 app.get('/api/analytics/admin/summary', authRoutes.requireAdmin, async (req, res, next) => {
