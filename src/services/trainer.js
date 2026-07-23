@@ -115,17 +115,20 @@ function fit(X, y, { epochs = 300, lr = 0.3, l2 = 0.001 } = {}) {
 // Stores the model + metadata in AppConfig.learnedModel.
 async function train({ minExamples = 40 } = {}) {
   const rows = await TrainingExample.find({ kind: 'swipe' }).sort({ createdAt: -1 }).limit(20000).lean();
-  if (rows.length < minExamples) {
-    return { trained: false, reason: `need at least ${minExamples} examples, have ${rows.length}`, examples: rows.length };
+  // Only examples whose feature vector matches the CURRENT schema are usable. Count
+  // THOSE (not raw rows) so a pile of stale/incompatible examples honestly reports
+  // "have 0" — same as the neural trainer — instead of crashing on an empty fit.
+  const data = rows.filter(r => Array.isArray(r.features) && r.features.length === FEATURE_NAMES.length);
+  if (data.length < minExamples) {
+    return { trained: false, reason: `need at least ${minExamples} examples, have ${data.length}`, examples: data.length };
   }
   // shuffle deterministically-ish then split
-  const data = rows.filter(r => Array.isArray(r.features) && r.features.length === FEATURE_NAMES.length);
   for (let i = data.length - 1; i > 0; i--) { const j = (i * 1103515245 + 12345) % (i + 1); [data[i], data[j]] = [data[j], data[i]]; }
   const split = Math.max(1, Math.floor(data.length * 0.8));
   const trainSet = data.slice(0, split), test = data.slice(split);
   const { w, b } = fit(trainSet.map(r => r.features), trainSet.map(r => r.label));
 
-  const evalSet = test.length ? test : train;
+  const evalSet = test.length ? test : trainSet;
   let correct = 0;
   for (const r of evalSet) {
     const p = sigmoid(b + dot(w, r.features));
