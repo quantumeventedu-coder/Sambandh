@@ -38,9 +38,14 @@ async function evaluateDocument(buf, ctx = {}) {
     signals.push({ name: 'metadata', risk: meta.risk, weight: 2 });
   }
 
-  // Layers 2/11/1 — external detectors (fail-secure unknown until a vendor is wired).
+  // Layers 2/11/1 — in-house detectors (fail-secure unknown if a slot is unwired).
+  // ai-image / malware are primary fraud gates, weighted so structural checks can't
+  // out-vote them; ip-intel is a lighter corroborating signal.
+  /** @type {Record<string, number>} */
+  const CAP_WEIGHT = { 'ai-image': 2, 'malware': 2, 'ip-intel': 1 };
   for (const cap of ['ai-image', 'malware', 'ip-intel']) {
-    signals.push(await providers.run(cap, { buf, ctx }));
+    const sig = await providers.run(cap, { buf, ctx });
+    signals.push({ ...sig, weight: CAP_WEIGHT[cap] });
   }
 
   const res = riskEngine.score(signals);
