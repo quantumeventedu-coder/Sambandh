@@ -252,6 +252,9 @@ function ready() {
       if (!process.env.JWT_SECRET) {
         throw new Error('JWT_SECRET is not set — configure it in the environment before the app can issue logins.');
       }
+      // Arm the in-house AAV Trust Engine detectors (ai-image / malware / ip-intel)
+      // so document verification decides with no third party. Idempotent; pure.
+      require('./services/trust/detectors').registerBuiltins();
       await connectDatabase();
 
       // Demo profiles are NEVER seeded in production, whatever SEED_DEMO says — the

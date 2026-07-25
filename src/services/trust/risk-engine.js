@@ -14,6 +14,11 @@
 const BANDS = { AUTO: 900, SECONDARY: 700, MANUAL: 500 };
 /** Unknown signals are treated as at least this risky (0–100). */
 const UNKNOWN_FLOOR = 45;
+/** AUTO also requires EVERY contributing signal below this per-signal risk ceiling —
+ * so a single elevated fraud signal can never be out-voted into auto by other clean,
+ * higher-weight signals (the blocking-direction complement of "no single clean
+ * signal auto-approves"). */
+const AUTO_SIGNAL_CEILING = 25;
 
 /**
  * @typedef {{ name: string, risk?: number, weight?: number, unknown?: boolean, hardFail?: boolean }} Signal
@@ -25,7 +30,7 @@ function score(signals) {
     // No evidence at all → maximum risk (fail-secure), never a pass.
     return { score: 0, decision: 'reject', anyUnknown: true, hardFail: false, factors: {} };
   }
-  let weighted = 0, totalWeight = 0, anyUnknown = false, hardFail = false;
+  let weighted = 0, totalWeight = 0, anyUnknown = false, hardFail = false, maxRisk = 0;
   /** @type {Record<string, {risk:number, unknown:boolean}>} */ const factors = {};
   for (const s of signals) {
     if (s.hardFail) hardFail = true;
@@ -33,6 +38,7 @@ function score(signals) {
     const raw = Math.max(0, Math.min(100, s.risk || 0));
     const r = s.unknown ? Math.max(raw, UNKNOWN_FLOOR) : raw;
     if (s.unknown) anyUnknown = true;
+    if (r > maxRisk) maxRisk = r;
     weighted += r * w; totalWeight += w;
     factors[s.name] = { risk: r, unknown: !!s.unknown };
   }
@@ -44,10 +50,11 @@ function score(signals) {
   if (hardFail) decision = 'reject';
   else if (trust < BANDS.MANUAL) decision = 'reject';
   else if (trust < BANDS.SECONDARY) decision = 'manual';
-  else if (trust < BANDS.AUTO || anyUnknown) decision = 'secondary'; // any unknown blocks auto
+  // any unknown, OR any single elevated signal, blocks auto even if the aggregate is high
+  else if (trust < BANDS.AUTO || anyUnknown || maxRisk >= AUTO_SIGNAL_CEILING) decision = 'secondary';
   else decision = 'auto';
 
   return { score: trust, decision, anyUnknown, hardFail, factors };
 }
 
-module.exports = { score, BANDS, UNKNOWN_FLOOR };
+module.exports = { score, BANDS, UNKNOWN_FLOOR, AUTO_SIGNAL_CEILING };

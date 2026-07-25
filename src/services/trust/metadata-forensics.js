@@ -12,8 +12,6 @@
 
 const AI_TOOL_RE = /(stable[\s-]?diffusion|midjourney|dall[\s-]?e|adobe firefly|firefly|black forest labs|flux\.1|imagen|gpt[\s-]?image|leonardo\.ai|comfyui|automatic1111|invokeai|generative fill|craiyon|playground\s?ai|nightcafe|dreamstudio)/i;
 const EDITOR_RE = /(adobe photoshop|gimp|affinity photo|pixelmator|snapseed|facetune|remini|topaz|luminar|picsart|canva)/i;
-// The EXIF APP1 marker: the ASCII "Exif" followed by two NUL bytes (0x00 0x00).
-const EXIF_MARKER = Buffer.from([0x45, 0x78, 0x69, 0x66, 0x00, 0x00]);
 
 /** Read the leading region where EXIF/XMP/C2PA live (first 256 KB is plenty). @param {Buffer} buf */
 function head(buf) { return buf.slice(0, Math.min(buf.length, 262144)).toString('latin1'); }
@@ -41,9 +39,10 @@ function analyzeImage(buf, type) {
   const edits = (text.match(/stEvt:action/gi) || []).length;
   if (edits >= 3) { reasons.push('multiple-edit-history'); risk += 15; }
 
-  // Missing camera origin on a JPEG (real captures carry the EXIF marker or tags).
-  const hasExif = buf.includes(EXIF_MARKER) ||
-    /(\bMake\b|\bModel\b|DateTimeOriginal|\bAPP1\b|FNumber|ExposureTime)/i.test(text);
+  // Missing camera origin on a JPEG. A bare "Exif\0\0" marker is NOT provenance
+  // (it is trivially forgeable and carries no camera tags) — require real EXIF tag
+  // names, so an empty/forged marker cannot cancel the penalty.
+  const hasExif = /(\bMake\b|\bModel\b|DateTimeOriginal|GPSLatitude|GPSInfo|FNumber|ExposureTime|ISOSpeedRatings|LensModel)/i.test(text);
   if (type === 'jpeg' && !hasExif) { reasons.push('no-camera-metadata'); risk += 20; }
   // Metadata entirely stripped (common in generated / re-exported images).
   const hasAnyMeta = hasExif || /(xmlns|<x:xmpmeta|photoshop:|xpacket|tEXt|iTXt)/i.test(text);
