@@ -97,9 +97,11 @@ const profileSchema = z.object({
     filename: z.string(),
     isPrimary: z.boolean().optional(),
     // NSFWJS class scores computed in the browser (content moderation)
+    // Best-effort browser moderation. `null` = classification unavailable (CDN
+    // hiccup / undecodable image) — accept it so a bonus layer never blocks onboarding.
     nsfw: z.object({
       neutral: z.number(), drawing: z.number(), sexy: z.number(), hentai: z.number(), porn: z.number()
-    }).partial().optional()
+    }).partial().nullable().optional()
   })).max(6).optional()
 });
 
@@ -452,7 +454,12 @@ router.get('/me', requireAuth, async (req, res, next) => {
 router.patch('/profile', requireAuth, async (req, res, next) => {
   try {
     const parsed = profileSchema.safeParse(req.body);
-    if (!parsed.success) return res.status(400).json({ error: 'Invalid profile data (intent: max 2)' });
+    if (!parsed.success) {
+      // Report the ACTUAL failing field instead of a fixed, misleading hint.
+      const i = parsed.error.issues[0];
+      const where = i.path.join('.') || 'profile';
+      return res.status(400).json({ error: `Invalid profile data: ${where} — ${i.message}` });
+    }
     const d = parsed.data;
 
     const before = await User.findById(req.userId);

@@ -205,5 +205,5 @@ async function addReview({ userId, order, rating, text }) {
 
 module.exports = {
   DEFAULT_COMMISSION, FALLBACK_COMMISSION, TRANSITIONS,
-  quote, createOrder, transition, rank, distanceKm, addReview, round2
+  quote, createOrder, transition, rank, distanceKm, addReview, round2, atomicUpdate
 };
