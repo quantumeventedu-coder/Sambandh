@@ -62,24 +62,41 @@ router.post('/id', requireAuth, async (req, res, next) => {
 
     if (d.method === 'digilocker') {
       if (!d.digilockerToken) return res.status(400).json({ error: 'digilockerToken required' });
-      // Production: verify DigiLocker JWT signature, extract verified name + DOB.
-      // Aadhaar number is NEVER stored — only the verification token reference.
+      // A DigiLocker token is government-issued, but until its JWT signature is
+      // verified against the DigiLocker public key it is NOT proof. Fail secure —
+      // route to human review instead of trusting an unverified token (no mock pass).
       documents.push({ type: 'digilocker_token', value: 'token_ref_' + Date.now(), uploadedAt: new Date() });
-      decision = { approved: true, checks: [{ check: 'digilocker_signature', pass: true, detail: 'Government-signed token verified' }], reason: 'DigiLocker verified' };
+      decision = { approved: false, review: true, checks: [{ check: 'digilocker_token_received', pass: true, detail: 'Awaiting government-signature verification' }], reason: 'DigiLocker verification is under review' };
     } else {
       if (!d.document || !d.idType) return res.status(400).json({ error: 'idType and document required' });
 
       if (await attemptsToday(req.userId, 'id') >= MAX_ATTEMPTS_PER_DAY) {
-        return res.status(429).json({ error: 'Too many attempts today. Try DigiLocker — it verifies in 30 seconds.' });
+        return res.status(429).json({ error: 'Too many attempts today. Please try again tomorrow.' });
       }
 
       const buffer = Buffer.from(d.document.base64, 'base64');
-      const key = `verification/${req.userId}/id/${d.idType}_${Date.now()}.jpg`;
-      const url = await uploadToR2(key, buffer, 'image/jpeg');
-      documents.push({ type: d.idType, url, uploadedAt: new Date() });
 
-      // Automated: OCR → match fields against profile → instant decision
-      decision = await decideIdDocument(user, buffer, d.idType, d.document.filename);
+      // AAV Trust Engine — evaluate BEFORE trusting the document (Layers 3/11/12/15).
+      const trust = await require('./services/trust').evaluateDocument(buffer, { filename: d.document.filename, ip: req.ip, userId: req.userId });
+      await require('./models/AuditLog').create({
+        actor: 'aav-trust-engine', action: 'id_document_evaluated', targetType: 'user', targetId: String(req.userId),
+        detail: { decision: trust.decision, score: trust.score, hardFail: trust.hardFail, fileType: trust.fileType, evidenceHash: trust.evidenceHash, signals: trust.signals }
+      }).catch(() => { /* audit must not break the request */ });
+
+      if (trust.decision === 'reject') {
+        // Dangerous or clearly inauthentic file — refuse. Do NOT leak which check failed.
+        decision = { approved: false, checks: [{ check: 'authenticity', pass: false, detail: 'Automated authenticity check failed' }], reason: 'This document could not be verified. Please upload a clear photo of an original government ID.' };
+      } else {
+        const key = `verification/${req.userId}/id/${d.idType}_${Date.now()}.jpg`;
+        const url = await uploadToR2(key, buffer, 'image/jpeg');
+        documents.push({ type: d.idType, url, uploadedAt: new Date() });
+
+        decision = await decideIdDocument(user, buffer, d.idType, d.document.filename);
+        // Fail secure: auto-approve ONLY when the Trust Engine is confident (band
+        // 'auto', which requires real detectors present and clean). Anything less
+        // goes to human review — never auto-verified on a single signal.
+        if (decision.approved && trust.decision !== 'auto') { decision.approved = false; decision.review = true; }
+      }
     }
 
     const verification = await Verification.create({
@@ -87,10 +104,10 @@ router.post('/id', requireAuth, async (req, res, next) => {
       type: 'id',
       claim: { idType: d.idType || 'aadhaar', method: d.method, checks: decision.checks, ...decision.fields },
       documents,
-      status: decision.approved ? 'approved' : 'rejected',
+      status: decision.approved ? 'approved' : (decision.review ? 'in_review' : 'rejected'),
       submittedAt: new Date(),
-      reviewedAt: new Date(),
-      reviewedBy: 'auto-verify-engine',
+      reviewedAt: decision.review ? undefined : new Date(),
+      reviewedBy: decision.review ? 'aav-trust-engine' : 'auto-verify-engine',
       reviewMethod: d.method === 'digilocker' ? 'digilocker' : 'automated',
       rejectionReason: decision.approved ? undefined : decision.reason,
       // Original ID images auto-deleted after 30 days (cleanup cron)
@@ -100,6 +117,12 @@ router.post('/id', requireAuth, async (req, res, next) => {
     if (decision.approved) {
       await applyApproval(verification);
       track('id_verified', req.userId, { method: d.method });
+    } else if (decision.review) {
+      await Notification.create({
+        userId: req.userId, type: 'verification_pending', severity: 'info',
+        title: 'ID received — under review',
+        body: 'Your document was received and is being verified. We\'ll notify you as soon as it\'s done.'
+      });
     } else {
       // Spec: a document proving under-18 flags the account immediately
       if (decision.underage) {
