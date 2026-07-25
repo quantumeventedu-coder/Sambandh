@@ -17,6 +17,11 @@ const ListingSchema = new mongoose.Schema({
   category: { type: String, index: true },     // mirrors Partner.category for direct filtering
   kind: { type: String, enum: LISTING_KINDS, default: 'product' },
   priceCHF: { type: Number, required: true },   // charged amount, same currency as Payment
+  // Consultation billing (kind 'booking'): 'flat' uses priceCHF; 'per_minute' charges
+  // ratePerMinuteCHF × durationMin (the booked slot length) — a known amount at booking.
+  billing: { type: String, enum: ['flat', 'per_minute'], default: 'flat' },
+  ratePerMinuteCHF: { type: Number, default: null },
+  durationMin: { type: Number, default: null },   // default session length for this offering
   tierBand: { type: String, enum: TIER_BANDS, default: 'essential', index: true },
   city: { type: String, index: true },
   location: { lat: Number, lng: Number },

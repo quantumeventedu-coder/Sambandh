@@ -1097,7 +1097,8 @@ async function obAddPhotos(files) {
       const base64 = await fileToResizedBase64(f);
       const nsfw = await classifyImageNSFW(base64);         // client-side ML content check
       if (nsfw && (nsfw.porn + nsfw.hentai >= 0.6 || nsfw.porn >= 0.55)) { toast(f.name + ' looks explicit — profile photos must be safe-for-work.'); continue; }
-      S.onboardPhotos.push({ base64, filename: f.name, nsfw });
+      // Omit nsfw when classification was unavailable (null) — never send null.
+      S.onboardPhotos.push(nsfw ? { base64, filename: f.name, nsfw } : { base64, filename: f.name });
     } catch { toast('Could not read ' + f.name); }
   }
   obDrawGrid();
