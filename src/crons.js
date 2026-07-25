@@ -156,6 +156,14 @@ async function nightlyBatch() {
     if (r && r.deletedCount) console.log('[CRON] pruned', r.deletedCount, 'old events');
   } catch (e) { console.error('[CRON] event prune:', e.message); }
 
+  // 10. Verification-services reconciliation: refund cases stranded by an expired
+  // consent (subject never acted) or a payment that captured after a decline — so no
+  // captured charge is ever kept without a delivered report (idempotent CAS).
+  try {
+    const r = await require('./services/verification-service').sweepStaleCases();
+    if (r && (r.expired || r.reclaimed)) console.log('[CRON] verification sweep:', r.expired, 'expired-refunded,', r.reclaimed, 'late-capture-refunded');
+  } catch (e) { console.error('[CRON] verification sweep:', e.message); }
+
   console.log('[CRON] Nightly batch complete');
 }
 

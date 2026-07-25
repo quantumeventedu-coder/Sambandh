@@ -108,6 +108,7 @@ app.use('/api/superadmin', require('./routes-superadmin')); // owner-only, SUPER
 app.use('/api/developer', require('./routes-developer')); // internal STAFF console (own accounts + 2FA + scopes)
 app.use('/api/marketplace', require('./routes-marketplace')); // native partner/listing/order marketplace (in-house escrow + commission)
 app.use('/api/consultation', require('./routes-consultation')); // bookable consultations (slots + sessions) on the marketplace core
+app.use('/api/verification-services', require('./routes-verification-services')); // consent-gated verification product on the AAV Trust Engine
 
 // Analytics summary for the admin panel (event counts, last 7 days)
 app.get('/api/analytics/admin/summary', authRoutes.requireAdmin, async (req, res, next) => {
