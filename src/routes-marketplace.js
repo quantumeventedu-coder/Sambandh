@@ -138,10 +138,13 @@ router.post('/orders/:id/confirm-payment', requireAuth, async (req, res, next) =
   } catch (err) { return res.status(409).json({ error: msg(err) }); }
 });
 
-// Buyer confirms the partner fulfilled → payout released from escrow.
+// Buyer confirms the partner fulfilled → payout released from escrow. Must be
+// 'fulfilled' first: this blocks the paid→disputed→completed self-release exploit —
+// a disputed order can only be closed by staff via /resolve-dispute.
 router.post('/orders/:id/complete', requireAuth, async (req, res, next) => {
   try {
     const order = await myOrder(req, res); if (!order) return;
+    if (order.status !== 'fulfilled') return res.status(409).json({ error: 'Order is not awaiting your confirmation' });
     const updated = await market.transition(order, 'completed');
     res.json({ order: pubOrder(updated) });
   } catch (err) { return res.status(409).json({ error: msg(err) }); }
@@ -205,7 +208,7 @@ router.patch('/partners/:id', staff, async (req, res, next) => {
     if (typeof b.verified === 'boolean') { set.verified = b.verified; if (b.verified) set.verifiedAt = new Date(); }
     if (typeof b.active === 'boolean') set.active = b.active;
     if (b.tier && Partner.PARTNER_TIERS.includes(b.tier)) set.tier = b.tier;
-    if (b.commissionRate != null && b.commissionRate >= 0 && b.commissionRate <= 0.9) set.commissionRate = b.commissionRate;
+    if (typeof b.commissionRate === 'number' && b.commissionRate >= 0 && b.commissionRate <= 0.9) set.commissionRate = b.commissionRate;
     if (!Object.keys(set).length) return res.status(400).json({ error: 'Nothing to update' });
     await Partner.findByIdAndUpdate(req.params.id, set);
     res.json({ ok: true, updated: Object.keys(set) });
@@ -215,9 +218,9 @@ router.patch('/partners/:id', staff, async (req, res, next) => {
 const listingSchema = z.object({
   title: z.string().min(1), description: z.string().max(4000).optional(),
   kind: z.enum(/** @type {any} */ (Listing.LISTING_KINDS)).optional(),
-  priceCHF: z.number().positive(), tierBand: z.enum(/** @type {any} */ (Listing.TIER_BANDS)).optional(),
+  priceCHF: z.number().positive().max(10000000), tierBand: z.enum(/** @type {any} */ (Listing.TIER_BANDS)).optional(),
   city: z.string().optional(), location: z.object({ lat: z.number(), lng: z.number() }).optional(),
-  deliveryRadiusKm: z.number().positive().optional(), stock: z.number().int().nonnegative().optional()
+  deliveryRadiusKm: z.number().positive().max(20000).optional(), stock: z.number().int().nonnegative().max(1000000).optional()
 });
 
 router.post('/partners/:id/listings', staff, async (req, res, next) => {
@@ -240,10 +243,11 @@ router.patch('/listings/:id', staff, async (req, res, next) => {
   try {
     /** @type {Record<string, any>} */ const set = {};
     const b = req.body || {};
-    if (b.priceCHF != null && b.priceCHF > 0) set.priceCHF = b.priceCHF;
+    // Strict types (parity with create): reject "0"/floats that would corrupt money/stock.
+    if (typeof b.priceCHF === 'number' && b.priceCHF > 0 && b.priceCHF <= 10000000) set.priceCHF = b.priceCHF;
     if (typeof b.active === 'boolean') set.active = b.active;
     if (typeof b.featured === 'boolean') { set.featured = b.featured; if (b.featured && b.featuredUntil) set.featuredUntil = new Date(b.featuredUntil); }
-    if (b.stock != null && b.stock >= 0) set.stock = b.stock;
+    if (Number.isInteger(b.stock) && b.stock >= 0 && b.stock <= 1000000) set.stock = b.stock;
     if (b.tierBand && Listing.TIER_BANDS.includes(b.tierBand)) set.tierBand = b.tierBand;
     if (!Object.keys(set).length) return res.status(400).json({ error: 'Nothing to update' });
     await Listing.findByIdAndUpdate(req.params.id, set);

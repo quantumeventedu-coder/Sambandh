@@ -173,3 +173,90 @@ describe('routes: full escrow lifecycle end-to-end', () => {
     expect([401, 403]).toContain(noKey.status);
   });
 });
+
+describe('hardening: fixes from the adversarial money-review', () => {
+  test('atomic stock reservation prevents oversell under concurrency', async () => {
+    const { partner, listing } = await seedPartnerListing({ listing: { stock: 1 } });
+    const u1 = await mkUser(), u2 = await mkUser();
+    const results = await Promise.allSettled([
+      market.createOrder({ userId: u1._id, listing, partner }),
+      market.createOrder({ userId: u2._id, listing, partner })
+    ]);
+    expect(results.filter(r => r.status === 'fulfilled').length).toBe(1);
+    const failed = results.filter(r => r.status === 'rejected');
+    expect(failed.length).toBe(1);
+    expect(failed[0].reason.message).toMatch(/stock/i);
+    expect((await Listing.findById(listing._id)).stock).toBe(0);
+    expect(await Order.countDocuments({ listingId: listing._id })).toBe(1);   // no oversell
+  });
+
+  test('compare-and-set: only one concurrent transition from a status wins', async () => {
+    const { partner, listing } = await seedPartnerListing();
+    const user = await mkUser();
+    const order = await market.createOrder({ userId: user._id, listing, partner });
+    const results = await Promise.allSettled([market.transition(order, 'paid'), market.transition(order, 'paid')]);
+    expect(results.filter(r => r.status === 'fulfilled').length).toBe(1);
+    expect(results.filter(r => r.status === 'rejected').length).toBe(1);
+    expect((await Order.findById(order._id)).status).toBe('paid');
+  });
+
+  test('concurrent cancel + refund restocks exactly once', async () => {
+    const { partner, listing } = await seedPartnerListing({ listing: { stock: 1 } });
+    const user = await mkUser();
+    const order = await market.createOrder({ userId: user._id, listing, partner });   // stock 1→0, reserved
+    await market.transition(order, 'paid');
+    const paidOrder = await Order.findById(order._id);
+    const results = await Promise.allSettled([market.transition(paidOrder, 'cancelled'), market.transition(paidOrder, 'refunded')]);
+    expect(results.filter(r => r.status === 'fulfilled').length).toBe(1);   // only one terminal move wins
+    expect((await Listing.findById(listing._id)).stock).toBe(1);            // restored once, not twice
+  });
+
+  test('cancelling a paid order reverses the captured Payment (no stranded funds)', async () => {
+    const { partner, listing } = await seedPartnerListing();
+    const user = await mkUser();
+    const order = await market.createOrder({ userId: user._id, listing, partner });
+    const payment = await Payment.create({ userId: user._id, purpose: 'marketplace_order', amountCHF: order.amountCHF, status: 'captured' });
+    await market.transition(order, 'paid', { paymentId: payment._id });
+    await market.transition(await Order.findById(order._id), 'cancelled');
+    expect((await Payment.findById(payment._id)).status).toBe('refunded');
+  });
+
+  test('buyer cannot self-release the payout via paid → disputed → complete', async () => {
+    const pRes = await request(app).post('/api/marketplace/partners').set(SK).send({ name: 'Coach Co', category: 'coach' });
+    const partnerId = pRes.body.partner.id;
+    const lRes = await request(app).post(`/api/marketplace/partners/${partnerId}/listings`).set(SK).send({ title: 'Session', kind: 'service', priceCHF: 100 });
+    const listingId = lRes.body.listing.id;
+    const buyer = await mkUser();
+    const oRes = await request(app).post('/api/marketplace/orders').set(auth(buyer)).send({ listingId });
+    const orderId = oRes.body.order.id, paymentId = oRes.body.payment.id;
+    await Payment.findByIdAndUpdate(paymentId, { status: 'captured' });
+    await request(app).post(`/api/marketplace/orders/${orderId}/confirm-payment`).set(auth(buyer));
+    await request(app).post(`/api/marketplace/orders/${orderId}/dispute`).set(auth(buyer)).send({ reason: 'stalling' });
+    const escape = await request(app).post(`/api/marketplace/orders/${orderId}/complete`).set(auth(buyer));
+    expect(escape.status).toBe(409);                       // cannot complete a disputed order
+    const o = await Order.findById(orderId);
+    expect(o.status).toBe('disputed');
+    expect(o.escrowHeld).toBe(true);                       // payout NOT released
+    const resolved = await request(app).post(`/api/marketplace/orders/${orderId}/resolve-dispute`).set(SK).send({ outcome: 'complete' });
+    expect(resolved.body.order.status).toBe('completed');  // only staff can close it
+  });
+
+  test('sponsored, over-budget listing cannot outrank an at-budget one (hard gate)', () => {
+    const sponsored = { category: 'gift', tier: 'enterprise', verified: true, ratingCount: 10, ratingAvg: 5 };
+    const plain = { category: 'gift', tier: 'standard', verified: false, ratingCount: 0 };
+    const ranked = market.rank([
+      { listing: { priceCHF: 120, location: null, featured: true }, partner: sponsored }, // 20% over, featured+enterprise
+      { listing: { priceCHF: 100, location: null }, partner: plain }                      // at budget, plain
+    ], { budgetMaxCHF: 100 });
+    expect(ranked[0].listing.priceCHF).toBe(100);   // the affordable one wins regardless of sponsorship
+  });
+
+  test('PATCH rejects string/float stock and string price (parity with create)', async () => {
+    const { listing } = await seedPartnerListing({ listing: { stock: 5, priceCHF: 100 } });
+    await request(app).patch(`/api/marketplace/listings/${listing._id}`).set(SK).send({ stock: '0', priceCHF: '50' });
+    let after = await Listing.findById(listing._id);
+    expect(after.stock).toBe(5); expect(after.priceCHF).toBe(100);    // strings ignored
+    await request(app).patch(`/api/marketplace/listings/${listing._id}`).set(SK).send({ stock: 2.5 });
+    expect((await Listing.findById(listing._id)).stock).toBe(5);      // float stock ignored
+  });
+});
