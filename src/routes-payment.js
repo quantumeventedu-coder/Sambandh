@@ -22,6 +22,7 @@ const router = express.Router();
 const DEV_PAYMENTS = process.env.DEV_PAYMENTS === 'true' ||
   !process.env.RAZORPAY_KEY_ID || process.env.RAZORPAY_KEY_ID.startsWith('rzp_test_xxx');
 
+/** @type {any} */
 let razorpay = null;
 if (!DEV_PAYMENTS) {
   const Razorpay = require('razorpay');
@@ -401,5 +402,40 @@ router.post('/webhook', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+/**
+ * Create a Payment + order for a product priced DIRECTLY in CHF (marketplace,
+ * consultation, verification services — NOT the gender-priced membership tiers).
+ * Dev mode simulates the order id ('order_dev_…', captured by the normal /verify
+ * dev path); prod creates a real Razorpay order. The returned payment is 'created'.
+ * `metadata` (e.g. { caseId }) binds the payment to what it pays for, so a later
+ * confirm step can verify purpose + amount + ownership before granting anything.
+ * @param {{ userId:any, purpose:string, amountCHF:number, currency?:string, metadata?:Record<string,any> }} args
+ * @returns {Promise<{ devMode:boolean, orderId:string, key?:string, payment:any }>}
+ */
+async function createDirectOrder({ userId, purpose, amountCHF, currency = 'CHF', metadata = {} }) {
+  const amt = Math.round((Number(amountCHF) || 0) * 100) / 100;
+  if (!(amt > 0)) throw new Error('Invalid order amount');
+  if (DEV_PAYMENTS) {
+    const orderId = 'order_dev_' + crypto.randomBytes(8).toString('hex');
+    const payment = await Payment.create({
+      userId, purpose, amountCHF: amt, currency, razorpayOrderId: orderId,
+      status: 'created', createdAt: new Date(), metadata: { ...metadata, dev: true }
+    });
+    return { devMode: true, orderId, payment };
+  }
+  if (!razorpay) throw new Error('Payments are not configured');
+  const order = await razorpay.orders.create({
+    amount: Math.round(amt * 100), currency,
+    receipt: `sb_${Date.now().toString(36)}_${String(userId).slice(-6)}`,
+    notes: { userId: String(userId), purpose }
+  });
+  const payment = await Payment.create({
+    userId, purpose, amountCHF: amt, currency, razorpayOrderId: order.id,
+    status: 'created', createdAt: new Date(), metadata
+  });
+  return { devMode: false, orderId: order.id, key: process.env.RAZORPAY_KEY_ID, payment };
+}
+
 module.exports = router;
 module.exports.activateTier = activateTier;   // exported for tests (early-access flag integration)
+module.exports.createDirectOrder = createDirectOrder;
