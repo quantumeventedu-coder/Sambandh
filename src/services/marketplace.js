@@ -11,6 +11,16 @@ const Order = require('../models/Order');
 const Listing = require('../models/Listing');
 const Partner = require('../models/Partner');
 const Review = require('../models/Review');
+const Payment = require('../models/Payment');
+
+/** Atomic conditional update across both ODM backends: pg-odm exposes our atomic
+ * SQL primitive; Mongoose's native findOneAndUpdate applies the filter at write
+ * time (also atomic). Returns the updated doc or null if the guard did not hold.
+ * @param {any} Model @param {any} filter @param {any} update */
+async function atomicUpdate(Model, filter, update) {
+  if (typeof Model.atomicUpdate === 'function') return Model.atomicUpdate(filter, update);
+  return Model.findOneAndUpdate(filter, update, { new: true });
+}
 
 /** Category → default commission (0..1). A partner may override via commissionRate.
  * @type {Record<string, number>} */
@@ -62,16 +72,20 @@ function quote(listing, partner) {
 async function createOrder({ userId, listing, partner, scheduledFor, notes }) {
   if (!listing || !listing.active) throw new Error('Listing unavailable');
   if (!partner || !partner.active) throw new Error('Partner unavailable');
-  if (typeof listing.stock === 'number') {
-    if (listing.stock <= 0) throw new Error('Out of stock');
-    await Listing.findByIdAndUpdate(listing._id, { stock: listing.stock - 1 });
+  const tracksStock = typeof listing.stock === 'number';
+  if (tracksStock) {
+    // Atomic conditional decrement — the ONLY defence against oversell under
+    // concurrent orders. If the guard (stock > 0) fails, nothing was reserved.
+    const reserved = await atomicUpdate(Listing, { _id: listing._id, stock: { $gt: 0 } }, { $inc: { stock: -1 } });
+    if (!reserved) throw new Error('Out of stock');
   }
   const q = quote(listing, partner);
   return Order.create({
     userId, listingId: listing._id, partnerId: partner._id, kind: listing.kind,
     amountCHF: q.amountCHF, commissionRate: q.commissionRate,
     commissionCHF: q.commissionCHF, partnerPayoutCHF: q.partnerPayoutCHF,
-    status: 'created', escrowHeld: false, scheduledFor, notes, createdAt: new Date(), updatedAt: new Date()
+    status: 'created', stockReserved: tracksStock, escrowHeld: false,
+    scheduledFor, notes, createdAt: new Date(), updatedAt: new Date()
   });
 }
 
@@ -91,24 +105,29 @@ async function transition(order, to, opts = {}) {
 
   /** @type {Record<string, any>} */
   const set = { status: to, updatedAt: new Date() };
-
   if (to === 'paid') { set.escrowHeld = true; if (opts.paymentId) set.paymentId = opts.paymentId; }
   if (to === 'completed') { set.escrowHeld = false; set.escrowReleasedAt = new Date(); }   // payout released to partner
   if (to === 'disputed') { set.disputeReason = String(opts.disputeReason || 'unspecified'); }
 
-  // Money returns to the buyer — escrow drops without releasing a payout — and the
-  // reserved stock is restored.
+  let restock = false;
   if (to === 'cancelled' || to === 'refunded') {
     set.escrowHeld = false;
-    if (typeof order.listingId !== 'undefined') {
-      const listing = await Listing.findById(order.listingId);
-      if (listing && typeof listing.stock === 'number') {
-        await Listing.findByIdAndUpdate(listing._id, { stock: listing.stock + 1 });
-      }
-    }
+    if (order.stockReserved) { set.stockReserved = false; restock = true; }   // release only the unit we reserved
   }
 
-  await Order.findByIdAndUpdate(order._id, set);
+  // Atomic compare-and-set on the CURRENT status: only the move that still sees
+  // `order.status` wins, so two concurrent transitions can't both apply side effects.
+  const won = await atomicUpdate(Order, { _id: order._id, status: order.status }, { $set: set });
+  if (!won) throw new Error('Order was modified concurrently');
+
+  // Side effects run exactly once — after this process won the CAS.
+  if (restock) await atomicUpdate(Listing, { _id: order.listingId }, { $inc: { stock: 1 } });
+  if ((to === 'cancelled' || to === 'refunded') && order.paymentId) {
+    const pay = await Payment.findById(order.paymentId);
+    if (pay && pay.status === 'captured') {
+      await Payment.findByIdAndUpdate(pay._id, { status: 'refunded', refundedAt: new Date() });   // reverse buyer money on the rail
+    }
+  }
   return { ...order, ...set };
 }
 
@@ -135,17 +154,16 @@ function distanceKm(a, b) {
 function rank(items, ctx = {}) {
   const now = ctx.now || new Date();
   const scored = items.map(({ listing, partner }) => {
-    // budget fit: 1 at/under budget, decaying above, ~0 beyond 1.5×.
+    // budget: HARD gate (in/over) + a soft fit used only to order within a gate band.
+    const budget = (ctx.budgetMaxCHF != null && ctx.budgetMaxCHF > 0) ? ctx.budgetMaxCHF : null;
+    const inBudget = budget == null || listing.priceCHF <= budget;
     let budgetFit = 1;
-    if (ctx.budgetMaxCHF != null && ctx.budgetMaxCHF > 0) {
-      const over = listing.priceCHF / ctx.budgetMaxCHF;
-      budgetFit = over <= 1 ? 1 : Math.max(0, 1 - (over - 1) / 0.5);
-    }
-    // proximity: 1 nearby, decaying with distance; out of delivery radius → 0.
-    let proximity = 0.5; // neutral when no location known
+    if (budget != null) { const over = listing.priceCHF / budget; budgetFit = over <= 1 ? 1 : Math.max(0, 1 - (over - 1) / 0.5); }
+    // proximity: HARD gate (deliverable) + a soft distance score.
+    let proximity = 0.5, deliverable = true; // neutral when no location is known
     const dist = distanceKm(ctx.at, listing.location);
     if (dist != null) {
-      if (listing.deliveryRadiusKm != null && dist > listing.deliveryRadiusKm) proximity = 0;
+      if (listing.deliveryRadiusKm != null && dist > listing.deliveryRadiusKm) { proximity = 0; deliverable = false; }
       else proximity = Math.max(0, 1 - dist / 50); // full within same city, fades by ~50km
     }
     const ratingScore = (partner.ratingCount > 0) ? (partner.ratingAvg / 5) : 0.5;
@@ -154,11 +172,14 @@ function rank(items, ctx = {}) {
     const placement = Math.min(0.15, (isFeatured ? 0.05 : 0) + (PARTNER_TIER_BONUS[partner.tier] || 0));
 
     const factors = { budgetFit, proximity, rating: ratingScore, trust, placement };
-    // Weights: relevance (budget+proximity) dominates; placement is a small nudge.
-    const score = round2(0.35 * budgetFit + 0.30 * proximity + 0.15 * ratingScore + 0.10 * trust + 1.0 * placement);
-    return { listing, partner, score, factors };
+    // HARD compliance tier: deliverable & in-budget items ALWAYS outrank
+    // undeliverable / over-budget ones. Paid placement can never override the
+    // plan's affordability/range guardrails — it only nudges WITHIN a tier.
+    const tier = (deliverable ? 0 : 2) + (inBudget ? 0 : 1);
+    const score = round2(0.35 * budgetFit + 0.30 * proximity + 0.15 * ratingScore + 0.10 * trust + placement);
+    return { listing, partner, score, tier, factors };
   });
-  return scored.sort((a, b) => b.score - a.score);
+  return scored.sort((a, b) => (a.tier - b.tier) || (b.score - a.score));
 }
 
 /**

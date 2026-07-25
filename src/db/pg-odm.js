@@ -572,6 +572,35 @@ function model(name, schema) {
       return Model._instance(options.new ? doc : revive(before));
     }
 
+    // Genuinely-atomic conditional update: ONE `update … where … returning` whose
+    // WHERE both selects the row and guards on doc fields, so concurrent callers
+    // serialise on the Postgres row lock and re-evaluate the guard against the
+    // committed row. Returns the updated doc, or null if the guard did not hold —
+    // so a stale read can never win a decrement or a state transition twice.
+    // filter: { _id, <path>: value | { $gt:n } } · update: { $set:{…}, $inc:{path:n} }
+    static async atomicUpdate(filter, update) {
+      await ensureTable(Model);
+      const conds = []; const params = [];
+      for (const [k, v] of Object.entries(filter)) {
+        if (k === '_id') { params.push(String(v)); conds.push(`id = $${params.length}`); continue; }
+        const { text } = jsonExpr(k);
+        if (v && typeof v === 'object' && '$gt' in v) { params.push(Number(v.$gt)); conds.push(`(${text})::numeric > $${params.length}`); }
+        else { params.push(scalarStr(v)); conds.push(`${text} = $${params.length}`); }
+      }
+      let expr = 'doc';
+      if (update.$set && Object.keys(update.$set).length) {
+        params.push(JSON.stringify(toStorable(update.$set)));
+        expr = `(${expr} || $${params.length}::jsonb)`;
+      }
+      for (const [field, delta] of Object.entries(update.$inc || {})) {
+        assertSafePath(field);
+        params.push(Number(delta));
+        expr = `jsonb_set(${expr}, '{${field}}', to_jsonb(coalesce((${expr}->>'${field}')::numeric, 0) + $${params.length}))`;
+      }
+      const r = await pool.query(`update ${Model.table} set doc = ${expr} where ${conds.join(' AND ')} returning doc`, params);
+      return r.rows[0] ? Model._instance(revive(r.rows[0].doc)) : null;
+    }
+
     static async updateMany(filter, update) {
       const docs = await loadDocs(Model, filter);
       for (const doc of docs) {

@@ -25,6 +25,7 @@ const OrderSchema = new mongoose.Schema({
   commissionCHF: Number,                      // Sambandh revenue
   partnerPayoutCHF: Number,                    // held in escrow, released on completion
   status: { type: String, enum: ORDER_STATES, default: 'created', index: true },
+  stockReserved: { type: Boolean, default: false },   // true iff createOrder atomically decremented finite stock
   escrowHeld: { type: Boolean, default: false },
   escrowReleasedAt: Date,
   paymentId: { type: mongoose.Schema.Types.ObjectId, ref: 'Payment' },
