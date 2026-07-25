@@ -179,7 +179,12 @@ async function confirmPayment(caseId, requesterId) {
   if (!kase) throw new Error('Case not found');
   if (String(kase.requesterId) !== String(requesterId)) throw new Error('Not your case');
   if (kase.paid) return await runCaseIfReady(kase._id);   // idempotent
-  if (kase.status !== 'pending') throw new Error('This case can no longer be paid');
+  if (kase.status !== 'pending') {
+    // The case already ended (e.g. the subject declined) before/while the payment
+    // captured — reverse a late capture rather than stranding it, then return.
+    await refundCasePayment(kase._id);
+    return kase;
+  }
 
   const pay = kase.paymentId ? await Payment.findById(kase.paymentId) : null;
   if (!pay) throw new Error('Payment not found');
@@ -226,32 +231,39 @@ async function runCaseIfReady(caseId) {
     return await VerificationCase.findById(kase._id);
   }
 
-  // Authorized. Execute the checks.
+  // Authorized. Execute the checks. A deleted subject, or any engine error, must
+  // never strand a paid case in 'processing' — halt + refund on any failure.
   const subject = await User.findById(kase.subjectId);
-  const consent = kase.consentId ? await Consent.findById(kase.consentId) : null;
-  const scope = consent ? (consent.scope || []) : (kase.checks || []);
-  const pre = kase.precomputed || {};
-  const results = [];
-  for (const name of kase.checks) {
-    if (kase.mode === 'other' && SELF_ONLY.includes(name)) {
-      results.push({ name, kind: 'fact', status: 'not_applicable', label: 'Not available for third-party verification' });
-    } else if (pre[name]) {
-      results.push(coarse(pre[name]));
-    } else {
-      results.push(coarse(await checkEngine.runCheck(name, { subject, scope, mode: kase.mode })));
+  if (!subject) { await haltAndRefund(kase._id); return await VerificationCase.findById(kase._id); }
+  try {
+    const consent = kase.consentId ? await Consent.findById(kase.consentId) : null;
+    const scope = consent ? (consent.scope || []) : (kase.checks || []);
+    const pre = kase.precomputed || {};
+    const results = [];
+    for (const name of kase.checks) {
+      if (kase.mode === 'other' && SELF_ONLY.includes(name)) {
+        results.push({ name, kind: 'fact', status: 'not_applicable', label: 'Not available for third-party verification' });
+      } else if (pre[name]) {
+        results.push(coarse(pre[name]));
+      } else {
+        results.push(coarse(await checkEngine.runCheck(name, { subject, scope, mode: kase.mode })));
+      }
     }
-  }
-  const report = buildReport(kase, results);
-  const evidenceHash = crypto.createHash('sha256').update(JSON.stringify(report) + PEPPER).digest('hex');
+    const report = buildReport(kase, results);
+    const evidenceHash = crypto.createHash('sha256').update(JSON.stringify(report) + PEPPER).digest('hex');
 
-  // Completion contends with revocation on ONE field. A mid-run revoke flips
-  // subjectConsentRevoked → this CAS matches nothing → discard the report.
-  const done = await market.atomicUpdate(
-    VerificationCase,
-    { _id: kase._id, status: 'processing', subjectConsentRevoked: false },
-    { $set: { status: 'completed', report, evidenceHash, completedAt: new Date() } }
-  );
-  return done || await VerificationCase.findById(kase._id);
+    // Completion contends with revocation on ONE field. A mid-run revoke flips
+    // subjectConsentRevoked → this CAS matches nothing → discard the report.
+    const done = await market.atomicUpdate(
+      VerificationCase,
+      { _id: kase._id, status: 'processing', subjectConsentRevoked: false },
+      { $set: { status: 'completed', report, evidenceHash, completedAt: new Date() } }
+    );
+    return done || await VerificationCase.findById(kase._id);
+  } catch (err) {
+    await haltAndRefund(kase._id);   // never leave a paid case stuck in 'processing'
+    throw err;
+  }
 }
 
 /** @param {any} kase @param {any[]} results */
@@ -300,8 +312,9 @@ async function revokeConsent(consentId, subjectId) {
   const won = await market.atomicUpdate(Consent, { _id: c._id, status: 'granted' }, { $set: { status: 'revoked', revokedAt: new Date() } });
   if (!won) return { consent: c, refunded: false };
 
-  // Flag UNCONDITIONALLY so any in-flight completion CAS fails.
-  await VerificationCase.findByIdAndUpdate(c.caseId, { subjectConsentRevoked: true });
+  // Flag UNCONDITIONALLY so any in-flight completion CAS fails. Atomic $set merge —
+  // a whole-doc write here could clobber a concurrently-committed completion.
+  await market.atomicUpdate(VerificationCase, { _id: c.caseId }, { $set: { subjectConsentRevoked: true } });
   // Refund iff we can move the case OUT of a pre-completed state (else it completed → block).
   let moved = await market.atomicUpdate(VerificationCase, { _id: c.caseId, status: 'processing' }, { $set: { status: 'declined' } });
   if (!moved) moved = await market.atomicUpdate(VerificationCase, { _id: c.caseId, status: 'pending' }, { $set: { status: 'declined' } });
@@ -326,6 +339,34 @@ async function refundCasePayment(caseId) {
   // automated flows only reverse the ledger here — consistent with marketplace.transition().
 }
 
+/**
+ * Periodic reconciliation (nightly cron). Closes the two "money-in / nothing-out"
+ * gaps that pure subject inaction or a late capture can open, both via idempotent CAS:
+ *  (1) a paid, pending other-mode case whose consent has EXPIRED → mark the consent
+ *      expired, decline the case, and refund;
+ *  (2) any captured payment still bound to an already-DECLINED case (a capture that
+ *      landed after the decline) → refund.
+ * @param {Date} [now]
+ */
+async function sweepStaleCases(now = new Date()) {
+  let expired = 0, reclaimed = 0;
+  const stalePaid = await VerificationCase.find({ mode: 'other', status: 'pending', paid: true }).limit(1000);
+  for (const kase of stalePaid) {
+    const c = kase.consentId ? await Consent.findById(kase.consentId) : null;
+    if (c && c.status === 'pending' && c.expiresAt && new Date(c.expiresAt) < now) {
+      await market.atomicUpdate(Consent, { _id: c._id, status: 'pending' }, { $set: { status: 'expired' } });
+      if (await haltAndRefund(kase._id)) expired++;
+    }
+  }
+  const declined = await VerificationCase.find({ status: 'declined' }).limit(2000);
+  for (const kase of declined) {
+    if (!kase.paymentId) continue;
+    const won = await market.atomicUpdate(Payment, { _id: kase.paymentId, status: 'captured' }, { $set: { status: 'refunded', refundedAt: new Date() } });
+    if (won) reclaimed++;
+  }
+  return { expired, reclaimed };
+}
+
 // ---- read models -----------------------------------------------------------
 
 /** Requester-facing DTO — coarse report only, never internal Case fields or evidenceHash. @param {any} kase */
@@ -348,6 +389,7 @@ async function canViewReport(kase) {
     const c = kase.consentId ? await Consent.findById(kase.consentId) : null;
     if (!c || c.status !== 'granted') return false;
     if (c.expiresAt && new Date(c.expiresAt) < new Date()) return false;
+    if (await blockedBetween(kase.requesterId, kase.subjectId)) return false;   // a block also cuts off access
   }
   return true;
 }
@@ -363,6 +405,6 @@ function tiersPublic() {
 module.exports = {
   TIERS, FIRST_PARTY, SELF_ONLY, isTier, priceForTier, tiersPublic,
   createCase, confirmPayment, runCaseIfReady,
-  grantConsent, denyConsent, revokeConsent, haltAndRefund, refundCasePayment,
+  grantConsent, denyConsent, revokeConsent, haltAndRefund, refundCasePayment, sweepStaleCases,
   consentSatisfied, blockedBetween, sharesActiveMatch, reportDTO, canViewReport
 };

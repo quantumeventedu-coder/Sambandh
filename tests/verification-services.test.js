@@ -199,6 +199,64 @@ describe('money + consent lifecycle', () => {
   });
 });
 
+describe('review-hardening (money never stranded)', () => {
+  test('a capture landing AFTER a decline is refunded, not stranded', async () => {
+    const requester = await plainUser();
+    const subject = await verifiedSubject();
+    await match(requester, subject);
+    const create = await request(app).post('/api/verification-services/cases').set(auth(requester)).send({ tier: 'dating_lite', subjectId: String(subject._id) });
+    const { case: { id }, order, payment } = create.body;
+    // subject denies while the payment is still 'created'
+    const reqs = await request(app).get('/api/verification-services/consent-requests').set(auth(subject));
+    await request(app).post(`/api/verification-services/consent-requests/${reqs.body.requests[0].id}/deny`).set(auth(subject));
+    expect((await VerificationCase.findById(id)).status).toBe('declined');
+    // payment captures late via the shared rail
+    await request(app).post('/api/payment/verify').set(auth(requester)).send({ razorpay_order_id: order.orderId });
+    expect((await Payment.findById(payment.id)).status).toBe('captured');
+    // requester confirms → late charge reversed, clean declined state, no error
+    const confirm = await request(app).post(`/api/verification-services/cases/${id}/confirm-payment`).set(auth(requester));
+    expect(confirm.status).toBe(200);
+    expect(confirm.body.case.status).toBe('declined');
+    expect((await Payment.findById(payment.id)).status).toBe('refunded');
+  });
+
+  test('a subject deleted after granting → case refunded, never stuck in processing', async () => {
+    const requester = await plainUser();
+    const subject = await verifiedSubject();
+    await match(requester, subject);
+    const create = await request(app).post('/api/verification-services/cases').set(auth(requester)).send({ tier: 'dating_lite', subjectId: String(subject._id) });
+    const { case: { id }, order, payment } = create.body;
+    const reqs = await request(app).get('/api/verification-services/consent-requests').set(auth(subject));
+    await request(app).post(`/api/verification-services/consent-requests/${reqs.body.requests[0].id}/grant`).set(auth(subject));
+    expect((await VerificationCase.findById(id)).status).toBe('pending');   // not run (unpaid)
+    await User.deleteOne({ _id: subject._id });                            // subject vanishes
+    await request(app).post('/api/payment/verify').set(auth(requester)).send({ razorpay_order_id: order.orderId });
+    const confirm = await request(app).post(`/api/verification-services/cases/${id}/confirm-payment`).set(auth(requester));
+    expect(confirm.body.case.status).toBe('declined');
+    expect((await Payment.findById(payment.id)).status).toBe('refunded');
+  });
+
+  test('nightly sweep refunds a paid case whose consent expired unactioned', async () => {
+    const requester = await plainUser();
+    const subject = await verifiedSubject();
+    await match(requester, subject);
+    const create = await request(app).post('/api/verification-services/cases').set(auth(requester)).send({ tier: 'dating_lite', subjectId: String(subject._id) });
+    const { case: { id }, order, payment } = create.body;
+    await request(app).post('/api/payment/verify').set(auth(requester)).send({ razorpay_order_id: order.orderId });
+    await request(app).post(`/api/verification-services/cases/${id}/confirm-payment`).set(auth(requester));
+    const kase = await VerificationCase.findById(id);
+    expect(kase.status).toBe('pending');
+    expect(kase.paid).toBe(true);
+    await Consent.findByIdAndUpdate(kase.consentId, { expiresAt: new Date(Date.now() - 1000) }); // force expiry
+
+    const r = await require('../src/services/verification-service').sweepStaleCases();
+    expect(r.expired).toBeGreaterThanOrEqual(1);
+    expect((await VerificationCase.findById(id)).status).toBe('declined');
+    expect((await Payment.findById(payment.id)).status).toBe('refunded');
+    expect((await Consent.findById(kase.consentId)).status).toBe('expired');
+  });
+});
+
 describe('access control', () => {
   test('only the requester can view a case; the subject cannot', async () => {
     const requester = await plainUser();
