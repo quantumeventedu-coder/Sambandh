@@ -39,6 +39,7 @@ const SCOPES = [
   'support:read', 'support:act',   // reports/escalations + scoped, audited user lookup
   'metrics:read',      // product/business metrics + cohort export (aggregate)
   'roster:manage',     // create/edit/deactivate staff (privileged)
+  'market:manage',     // onboard marketplace partners + manage their listings
   'hrms:read'          // Phase 2 — read HRMS records
 ];
 
@@ -70,13 +71,13 @@ function defaultScopesFor(role) {
     qa: ['ops:read', 'flags:read', 'logs:read'],
     designer: ['design:read'],
     customer_support: ['support:read'],
-    account_manager: ['support:read', 'metrics:read'],
+    account_manager: ['support:read', 'metrics:read', 'market:manage'],
     marketing: ['metrics:read'],
     product_manager: ['metrics:read', 'flags:read'],
-    operations: ['ops:read', 'metrics:read'],
-    manager: ['ops:read', 'metrics:read', 'flags:read', 'support:read'],
-    director: ['ops:read', 'metrics:read', 'flags:read', 'support:read', 'roster:manage'],
-    executive: ['ops:read', 'metrics:read', 'flags:read', 'roster:manage', 'hrms:read']
+    operations: ['ops:read', 'metrics:read', 'market:manage'],
+    manager: ['ops:read', 'metrics:read', 'flags:read', 'support:read', 'market:manage'],
+    director: ['ops:read', 'metrics:read', 'flags:read', 'support:read', 'roster:manage', 'market:manage'],
+    executive: ['ops:read', 'metrics:read', 'flags:read', 'roster:manage', 'hrms:read', 'market:manage']
   };
   return Array.from(new Set([...(byRole[role] || base)]));
 }
