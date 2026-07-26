@@ -1,0 +1,210 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Sambandh — Partner Onboarding</title>
+<style>
+  :root { --bg:#1a1013; --card:#241519; --line:#3a2530; --ink:#f3e7ec; --mut:#b393a3; --pink:#c14d78; --pink2:#8f2f52; --forest:#2e7d46; --haldi:#b8860b; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font:14px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif; }
+  .wrap { max-width:920px; margin:0 auto; padding:20px 16px 60px; }
+  h1 { font-family:Georgia,serif; font-size:26px; margin:0 0 2px; }
+  .sub { color:var(--mut); margin:0 0 18px; }
+  .bar { display:flex; gap:8px; align-items:center; margin-bottom:18px; flex-wrap:wrap; }
+  input, select, textarea, button { font:inherit; }
+  input, select, textarea { background:#160c0f; border:1px solid var(--line); color:var(--ink); border-radius:9px; padding:9px 11px; }
+  input:focus, select:focus, textarea:focus { outline:none; border-color:var(--pink); }
+  button { background:var(--pink); border:1px solid var(--pink); color:#fff; border-radius:9px; padding:9px 14px; font-weight:600; cursor:pointer; }
+  button.ghost { background:transparent; color:var(--ink); }
+  button.mini { padding:5px 10px; font-size:12px; }
+  button:disabled { opacity:.5; cursor:default; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:14px 16px; margin-bottom:12px; }
+  .grid2 { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+  .field { display:flex; flex-direction:column; gap:4px; margin-bottom:10px; }
+  .field label { font-size:12px; color:var(--mut); }
+  .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+  .between { display:flex; justify-content:space-between; align-items:flex-start; gap:10px; }
+  .pill { font-size:11px; font-weight:700; padding:3px 9px; border-radius:99px; }
+  .pill.g { background:rgba(46,125,70,.2); color:#7fe0a2; }
+  .pill.h { background:rgba(184,134,11,.2); color:#e8c46a; }
+  .pill.r { background:rgba(193,77,120,.2); color:#e79bb6; }
+  .hint { color:var(--mut); font-size:12.5px; }
+  h2 { font-family:Georgia,serif; font-size:19px; margin:22px 0 8px; }
+  #toast { position:fixed; left:50%; bottom:24px; transform:translateX(-50%); background:#000; color:#fff; padding:10px 16px; border-radius:10px; display:none; z-index:9; }
+  a { color:var(--pink); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>sambandh · partner onboarding</h1>
+  <p class="sub">Owner console — add shops, photographers, astrologers, coaches &amp; more. They appear in the app's Services (shop) and Astro/Consultation sections.</p>
+
+  <div class="bar">
+    <input id="key" type="password" placeholder="Super admin key" style="flex:1;max-width:340px"/>
+    <button onclick="connect()">Connect</button>
+    <span id="conn" class="pill r">disconnected</span>
+  </div>
+
+  <div id="panel" style="display:none">
+    <h2>Add a partner</h2>
+    <div class="card">
+      <div class="grid2">
+        <div class="field"><label>Business name</label><input id="p-name" placeholder="e.g. Grand Palace Banquets"/></div>
+        <div class="field"><label>Category</label><select id="p-cat"></select></div>
+        <div class="field"><label>City</label><input id="p-city" placeholder="e.g. Mumbai"/></div>
+        <div class="field"><label>Partner tier</label><select id="p-tier"></select></div>
+        <div class="field"><label>Email (optional)</label><input id="p-email" placeholder="contact@business.com"/></div>
+        <div class="field"><label>Commission override 0–0.9 (optional)</label><input id="p-comm" type="number" step="0.01" min="0" max="0.9" placeholder="category default"/></div>
+      </div>
+      <div class="row"><button onclick="addPartner()">Add partner</button>
+        <label class="row" style="gap:6px"><input id="p-verify" type="checkbox" style="width:auto"/> <span class="hint">verify immediately (grants the trust badge)</span></label></div>
+    </div>
+
+    <h2>Partners</h2>
+    <div id="list"><div class="hint">Loading…</div></div>
+  </div>
+</div>
+<div id="toast"></div>
+
+<script>
+let KEY = null;
+const CONSULT = new Set(['astrologer','coach','counselor','lawyer','financial_advisor','fitness','nutritionist']);
+const CATEGORIES = ['venue','photographer','makeup','wedding_planner','jewellery','clothing','hotel','travel','gift','florist','caterer','decor','invitations','restaurant','coach','counselor','astrologer','lawyer','financial_advisor','fitness','nutritionist','home','furniture','other'];
+const TIERS = ['standard','gold','platinum','enterprise'];
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const label = s => String(s||'').replace(/_/g,' ');
+function toast(m){ const t=$('#toast'); t.textContent=m; t.style.display='block'; setTimeout(()=>t.style.display='none', 3200); }
+
+async function req(method, path, body){
+  const r = await fetch('/api'+path, { method, headers: { 'X-Super-Key': KEY, ...(body?{'Content-Type':'application/json'}:{}) }, body: body?JSON.stringify(body):undefined });
+  const j = await r.json().catch(()=>({}));
+  if (!r.ok) throw new Error(j.error || ('HTTP '+r.status));
+  return j;
+}
+const get = p => req('GET', p);
+const post = (p,b) => req('POST', p, b);
+const patch = (p,b) => req('PATCH', p, b);
+
+async function connect(){
+  KEY = $('#key').value.trim();
+  if (!KEY) return toast('Enter the super admin key');
+  try {
+    await get('/marketplace/partners');
+    $('#conn').className = 'pill g'; $('#conn').textContent = 'connected';
+    $('#panel').style.display = 'block';
+    $('#p-cat').innerHTML = CATEGORIES.map(c=>`<option value="${c}">${label(c)}</option>`).join('');
+    $('#p-tier').innerHTML = TIERS.map(t=>`<option value="${t}">${t}</option>`).join('');
+    renderPartners();
+  } catch(e){ $('#conn').className='pill r'; $('#conn').textContent='denied'; toast(e.message); }
+}
+
+async function addPartner(){
+  const name = $('#p-name').value.trim();
+  if (name.length < 2) return toast('Enter a business name');
+  const body = { name, category: $('#p-cat').value, city: $('#p-city').value.trim() || undefined, tier: $('#p-tier').value };
+  const email = $('#p-email').value.trim(); if (email) body.email = email;
+  const comm = parseFloat($('#p-comm').value); if (!isNaN(comm)) body.commissionRate = comm;
+  try {
+    const r = await post('/marketplace/partners', body);
+    if ($('#p-verify').checked) { try { await patch('/marketplace/partners/'+r.partner.id, { verified:true }); } catch(_){} }
+    toast('Partner added ✓');
+    $('#p-name').value=''; $('#p-city').value=''; $('#p-email').value=''; $('#p-comm').value=''; $('#p-verify').checked=false;
+    renderPartners();
+  } catch(e){ toast(e.message); }
+}
+
+async function renderPartners(){
+  const el = $('#list');
+  try {
+    const r = await get('/marketplace/partners');
+    if (!r.partners.length) { el.innerHTML = '<div class="hint">No partners yet — add your first above.</div>'; return; }
+    el.innerHTML = r.partners.map(p => `
+      <div class="card">
+        <div class="between">
+          <div><b style="font-size:15px">${esc(p.name)}</b>
+            ${p.verified?'<span class="pill g" style="margin-left:6px">verified</span>':'<span class="pill h" style="margin-left:6px">unverified</span>'}
+            ${p.active===false?'<span class="pill r" style="margin-left:6px">inactive</span>':''}
+            <div class="hint">${esc(label(p.category))}${p.city?' · '+esc(p.city):''} · tier ${esc(p.tier||'standard')}${p.ratingCount?' · ★ '+p.ratingAvg+' ('+p.ratingCount+')':''}</div></div>
+          <div class="row">
+            ${p.verified?'':`<button class="mini ghost" onclick="verifyPartner('${p._id}')">Verify</button>`}
+            <button class="mini" onclick="toggleListingForm('${p._id}','${esc(p.category)}')">+ Listing</button>
+            <button class="mini ghost" onclick="viewListings('${p._id}','${esc(p.category)}')">Listings</button>
+          </div>
+        </div>
+        <div id="lf-${p._id}"></div>
+        <div id="ll-${p._id}"></div>
+      </div>`).join('');
+  } catch(e){ el.innerHTML = `<div class="hint">${esc(e.message)}</div>`; }
+}
+
+async function verifyPartner(id){ try { await patch('/marketplace/partners/'+id, { verified:true }); toast('Verified ✓'); renderPartners(); } catch(e){ toast(e.message); } }
+
+function toggleListingForm(id, cat){
+  const box = document.getElementById('lf-'+id);
+  if (box.innerHTML) { box.innerHTML=''; return; }
+  const isConsult = CONSULT.has(cat);
+  box.innerHTML = `<div class="card" style="margin-top:10px;background:#160c0f">
+    <div class="grid2">
+      <div class="field"><label>Listing title</label><input id="l-title-${id}" placeholder="${isConsult?'e.g. 30-min astrology consultation':'e.g. Wedding photography package'}"/></div>
+      <div class="field"><label>Price (CHF)</label><input id="l-price-${id}" type="number" min="1" step="1" placeholder="${isConsult?'40':'500'}"/></div>
+      <div class="field"><label>Kind</label><select id="l-kind-${id}"><option value="${isConsult?'booking':'service'}">${isConsult?'booking (session)':'service'}</option><option value="product">product</option><option value="service">service</option><option value="booking">booking</option></select></div>
+      <div class="field"><label>Stock (optional, products)</label><input id="l-stock-${id}" type="number" min="0" step="1" placeholder="unlimited"/></div>
+    </div>
+    <div class="field"><label>Description (optional)</label><textarea id="l-desc-${id}" rows="2" placeholder="What's included…"></textarea></div>
+    <button onclick="addListing('${id}','${cat}')">Create listing</button>
+  </div>`;
+}
+
+async function addListing(id, cat){
+  const title = document.getElementById('l-title-'+id).value.trim();
+  const price = parseFloat(document.getElementById('l-price-'+id).value);
+  if (title.length < 2) return toast('Enter a listing title');
+  if (!(price > 0)) return toast('Enter a positive price');
+  const body = { title, priceCHF: price, kind: document.getElementById('l-kind-'+id).value };
+  const desc = document.getElementById('l-desc-'+id).value.trim(); if (desc) body.description = desc;
+  const stock = parseInt(document.getElementById('l-stock-'+id).value, 10); if (!isNaN(stock)) body.stock = stock;
+  try {
+    await post('/marketplace/partners/'+id+'/listings', body);
+    toast('Listing created ✓');
+    document.getElementById('lf-'+id).innerHTML = '';
+    viewListings(id, cat);
+  } catch(e){ toast(e.message); }
+}
+
+async function viewListings(id, cat){
+  const box = document.getElementById('ll-'+id);
+  box.innerHTML = '<div class="hint" style="margin-top:8px">Loading listings…</div>';
+  try {
+    const r = await get('/marketplace/partners/'+id+'/listings');
+    if (!r.listings.length) { box.innerHTML = '<div class="hint" style="margin-top:8px">No listings yet.</div>'; return; }
+    const isConsult = CONSULT.has(cat);
+    box.innerHTML = r.listings.map(l => `<div class="card" style="margin-top:8px;background:#160c0f">
+      <div class="between"><div><b>${esc(l.title)}</b><div class="hint">${esc(l.kind||'')} · CHF ${l.priceCHF}${l.city?' · '+esc(l.city):''}</div></div>
+        ${isConsult ? `<button class="mini ghost" onclick="toggleSlotForm('${l.id||l._id}')">+ Slot</button>` : ''}</div>
+      <div id="sf-${l.id||l._id}"></div></div>`).join('');
+  } catch(e){ box.innerHTML = `<div class="hint" style="margin-top:8px">${esc(e.message)}</div>`; }
+}
+
+function toggleSlotForm(listingId){
+  const box = document.getElementById('sf-'+listingId);
+  if (box.innerHTML) { box.innerHTML=''; return; }
+  box.innerHTML = `<div class="row" style="margin-top:8px">
+    <input id="s-when-${listingId}" type="datetime-local"/>
+    <input id="s-dur-${listingId}" type="number" min="10" max="600" step="5" value="30" style="width:90px"/> <span class="hint">min</span>
+    <button class="mini" onclick="publishSlot('${listingId}')">Publish slot</button></div>`;
+}
+async function publishSlot(listingId){
+  const when = document.getElementById('s-when-'+listingId).value;
+  const dur = parseInt(document.getElementById('s-dur-'+listingId).value, 10) || 30;
+  if (!when) return toast('Pick a date & time');
+  try {
+    await post('/consultation/listings/'+listingId+'/slots', { startsAt: new Date(when).toISOString(), durationMin: dur });
+    toast('Slot published ✓');
+    document.getElementById('s-when-'+listingId).value = '';
+  } catch(e){ toast(e.message); }
+}
+</script>
+</body>
+</html>
