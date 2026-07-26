@@ -28,17 +28,30 @@ const MIME_FOR = { jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp', pdf
 // derived key so documents stay decryptable. Not a credential.
 const KDF_SALT = 'sambandh-vault-v1'; // gitleaks:allow (public scrypt salt, not a secret)
 
-/** @returns {{ key:Buffer, version:string }} */
-function keyInfo() {
+/** The key to encrypt NEW documents with (prefers a dedicated VAULT_KEY). @returns {{ key:Buffer, version:string }} */
+function currentKeyInfo() {
   const hex = process.env.VAULT_KEY;
   if (hex && /^[0-9a-fA-F]{64}$/.test(hex)) return { key: Buffer.from(hex, 'hex'), version: 'env-v1' };
   const secret = process.env.JWT_SECRET || 'sambandh-dev-secret';
   return { key: crypto.scryptSync(secret, KDF_SALT, 32), version: 'jwt-v1' };
 }
 
+/** Resolve the key a document was ENCRYPTED under, by its stored keyVersion — so
+ * introducing or rotating VAULT_KEY never orphans older documents. A blob with no
+ * recorded version is legacy jwt-v1. @param {string} [version] @returns {Buffer} */
+function keyForVersion(version) {
+  if (version === 'env-v1') {
+    const hex = process.env.VAULT_KEY;
+    if (hex && /^[0-9a-fA-F]{64}$/.test(hex)) return Buffer.from(hex, 'hex');
+    throw new Error('VAULT_KEY is required to read this document but is not set');
+  }
+  const secret = process.env.JWT_SECRET || 'sambandh-dev-secret';
+  return crypto.scryptSync(secret, KDF_SALT, 32);   // jwt-v1 / legacy
+}
+
 /** @param {Buffer} buf @returns {{ blob:Buffer, keyVersion:string }} */
 function encrypt(buf) {
-  const { key, version } = keyInfo();
+  const { key, version } = currentKeyInfo();
   const iv = crypto.randomBytes(12);
   const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
   const ct = Buffer.concat([cipher.update(buf), cipher.final()]);
@@ -46,14 +59,18 @@ function encrypt(buf) {
   return { blob: Buffer.concat([iv, tag, ct]), keyVersion: version };
 }
 
-/** @param {Buffer} blob @returns {Buffer} */
-function decrypt(blob) {
+/** Decrypt using the key that matches the blob's stored version. A GCM auth-tag
+ * failure (tamper / wrong key) is normalised so the route returns 422, not 500.
+ * @param {Buffer} blob @param {string} [keyVersion] @returns {Buffer} */
+function decrypt(blob, keyVersion) {
   if (!Buffer.isBuffer(blob) || blob.length < 28) throw new Error('Corrupt vault blob');
-  const { key } = keyInfo();
+  const key = keyForVersion(keyVersion || 'jwt-v1');
   const iv = blob.subarray(0, 12), tag = blob.subarray(12, 28), ct = blob.subarray(28);
-  const d = crypto.createDecipheriv('aes-256-gcm', key, iv);
-  d.setAuthTag(tag);
-  return Buffer.concat([d.update(ct), d.final()]);   // throws on any tamper (GCM)
+  try {
+    const d = crypto.createDecipheriv('aes-256-gcm', key, iv);
+    d.setAuthTag(tag);
+    return Buffer.concat([d.update(ct), d.final()]);
+  } catch { throw new Error('Integrity check failed'); }
 }
 
 /** @param {any} actor @param {string} action @param {any} targetId @param {any} detail */
@@ -107,7 +124,7 @@ async function getContent({ doc, requesterId }) {
   if (!doc || doc.status !== 'active') throw new Error('Document not found');
   if (!(await canAccess(doc, requesterId))) throw new Error('Not authorized');
   const blob = await storage.readFile(doc.storageKey);
-  const buf = decrypt(blob);
+  const buf = decrypt(blob, doc.enc && doc.enc.keyVersion);
   if (doc.evidenceHash && crypto.createHash('sha256').update(buf).digest('hex') !== doc.evidenceHash) {
     throw new Error('Integrity check failed');
   }

@@ -18,6 +18,8 @@ const User = require('../models/User');
 const VaultDocument = require('../models/VaultDocument');
 
 const OPEN = ['pending', 'active'];
+const COOLDOWN_DAYS = 7;              // after a denial/revocation, before re-requesting the same person
+const MAX_REQUESTS_PER_DAY = 5;      // per requester, anti-spam
 const FIRST_PARTY = ['identity_authenticity', 'photo_authenticity', 'claim_consistency'];
 const DISCLAIMER = 'Shared with the subject\'s consent and revocable at any time. Verification items are point-in-time platform signals; documents are provided by the subject. This is not a background check, a criminal-record search, or a judgement of character.';
 /** @param {any} r */
@@ -31,6 +33,13 @@ async function requestDossier({ requesterId, subjectId }) {
   if (!(await vsvc.sharesActiveMatch(requesterId, subjectId))) throw new Error('You can request a dossier only from an active mutual match');
   const open = await DueDiligenceCase.findOne({ requesterId, subjectId, status: { $in: OPEN } });
   if (open) throw new Error('You already have an open dossier request for this person');
+  const recent = await DueDiligenceCase.findOne({
+    requesterId, subjectId, status: { $in: ['declined', 'revoked'] },
+    createdAt: { $gt: new Date(Date.now() - COOLDOWN_DAYS * 86400000) }
+  });
+  if (recent) throw new Error('A recent dossier request to this person was closed. Please try again later.');
+  const dayCount = await DueDiligenceCase.countDocuments({ requesterId, createdAt: { $gt: new Date(Date.now() - 86400000) } });
+  if (dayCount >= MAX_REQUESTS_PER_DAY) throw new Error('Daily dossier-request limit reached. Please try again tomorrow.');
   const kase = await DueDiligenceCase.create({ requesterId, subjectId, status: 'pending', sharedDocs: [], createdAt: new Date() });
   const consent = await Consent.create({ subjectId, requesterId, purpose: 'due_diligence', scope: ['verification', 'documents'], caseId: kase._id, status: 'pending', createdAt: new Date() });
   await DueDiligenceCase.findByIdAndUpdate(kase._id, { consentId: consent._id });
@@ -78,7 +87,9 @@ async function shareDocument({ kase, subjectId, vaultDocumentId }) {
 async function canView(kase) {
   if (kase.status !== 'active') return false;
   const c = kase.consentId ? await Consent.findById(kase.consentId) : null;
-  return !!(c && c.status === 'granted');
+  if (!(c && c.status === 'granted')) return false;
+  if (await vsvc.blockedBetween(kase.requesterId, kase.subjectId)) return false;   // a block cuts off access
+  return true;
 }
 
 /** Compile the coarse dossier — first-party verification + subject-shared documents. @param {any} kase */

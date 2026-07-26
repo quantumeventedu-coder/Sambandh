@@ -79,6 +79,30 @@ describe('store + retrieve', () => {
   });
 });
 
+describe('security-review fixes', () => {
+  test('a document stays readable after VAULT_KEY is introduced (version-aware decrypt)', async () => {
+    const me = await mkUser();
+    const doc = await vault.storeDocument({ ownerId: me._id, buf: Buffer.from(PNG_B64, 'base64'), label: 'x', docType: 'id' });
+    expect((await VaultDocument.findById(doc._id)).enc.keyVersion).toBe('jwt-v1');
+    const prev = process.env.VAULT_KEY;
+    process.env.VAULT_KEY = 'ab'.repeat(32);   // 64 hex — introduce a dedicated key, as prod would
+    try {
+      const { buf } = await vault.getContent({ doc: await VaultDocument.findById(doc._id), requesterId: me._id });
+      expect(buf.equals(Buffer.from(PNG_B64, 'base64'))).toBe(true);          // old doc still decrypts
+      const doc2 = await vault.storeDocument({ ownerId: me._id, buf: Buffer.from(PNG_B64, 'base64'), label: 'y', docType: 'id' });
+      expect((await VaultDocument.findById(doc2._id)).enc.keyVersion).toBe('env-v1');  // new doc uses VAULT_KEY
+    } finally { if (prev === undefined) delete process.env.VAULT_KEY; else process.env.VAULT_KEY = prev; }
+  });
+
+  test('a tampered stored blob returns 422 (not 500)', async () => {
+    const me = await mkUser();
+    const id = (await upload(me)).body.document.id;
+    const doc = await VaultDocument.findById(id);
+    await storage.uploadFile(doc.storageKey, Buffer.alloc(64, 7), 'application/octet-stream');   // corrupt ciphertext
+    expect((await request(app).get(`/api/vault/documents/${id}/content`).set(auth(me))).status).toBe(422);
+  });
+});
+
 describe('access control', () => {
   test('a stranger cannot see metadata or content (404, not 403)', async () => {
     const me = await mkUser(), stranger = await mkUser();
