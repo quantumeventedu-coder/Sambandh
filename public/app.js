@@ -289,6 +289,7 @@ async function route() {
     case 'room': return renderRoom(parts[1]);
     case 'astro': return renderAstro();
     case 'services': return renderServices();
+    case 'redeem': S._pendingGiftCode = parts[1] || ''; return nav('#/services');
     case 'compat': return renderCompat(parts[1]);
     case 'settings': return renderSettings();
     case 'notifications': return renderNotifications();
@@ -2630,8 +2631,53 @@ async function renderServices() {
     <div id="svc-vault"><div class="empty">Loading your vault…</div></div>
     <h2 class="svc-h">Get verified</h2>
     <div id="svc-verify"><div class="empty">Loading…</div></div>
+    <h2 class="svc-h">Gift a Sambandh Pass 🎁</h2>
+    <p class="hint" style="margin:0 0 8px">Gift premium or chat access to anyone — they redeem a code, no account needed to receive it.</p>
+    <div id="svc-gifts"><div class="empty">Loading passes…</div></div>
+    <div class="card" style="margin-top:10px"><b>Have a gift code?</b>
+      <div class="row" style="gap:8px;margin-top:8px"><input id="gift-code" placeholder="SB-XXXX-XXXX-XXXX" style="flex:1"/><button class="btn" style="width:auto" onclick="redeemGiftCode()">Redeem</button></div></div>
   </div>`;
-  loadTrust(); loadCommerce(); loadVault(); loadVerifyTiers();
+  loadTrust(); loadCommerce(); loadVault(); loadVerifyTiers(); loadGiftPasses();
+  if (S._pendingGiftCode) { const el = document.getElementById('gift-code'); if (el) el.value = S._pendingGiftCode; S._pendingGiftCode = null; }
+}
+async function loadGiftPasses() {
+  const el = document.getElementById('svc-gifts'); if (!el) return;
+  try {
+    const [cat, wal] = await Promise.all([api('/gift-passes/catalog'), api('/gift-passes/wallet').catch(() => ({ purchased: [] }))]);
+    const mine = (wal.purchased || []).filter((p) => p.status === 'active' && p.code);
+    el.innerHTML = (cat.passes || []).map((p) => `<div class="card"><div class="row" style="justify-content:space-between;align-items:flex-start">
+      <div><b>${esc(p.label)}</b><div class="hint">${esc(p.sub || '')}</div></div>
+      <div style="text-align:right"><b>CHF ${p.priceCHF}</b><div><button class="btn" style="width:auto;padding:6px 12px;margin-top:6px" onclick="buyPass('${p.id}',this)">Gift this</button></div></div>
+      </div>`).join('')
+      + (mine.length ? `<div class="card" style="margin-top:8px"><b>Your active gift codes — share them anywhere</b>${mine.map((p) => `<div class="row" style="justify-content:space-between;align-items:center;margin-top:6px"><span class="hint">${esc(p.label)}</span><b style="letter-spacing:.5px;cursor:pointer" onclick="navigator.clipboard&&navigator.clipboard.writeText('${esc(p.code)}');toast('Code copied ✓')">${esc(p.code)} 📋</b></div>`).join('')}</div>` : '');
+  } catch (e) { el.innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+}
+async function buyPass(passType, btn) {
+  if (btn) btn.disabled = true;
+  try {
+    const r = await api('/gift-passes/purchase', { method: 'POST', body: { passType } });
+    if (r.order && r.order.orderId && r.order.devMode) {
+      await api('/payment/verify', { method: 'POST', body: { razorpay_order_id: r.order.orderId } });
+      const conf = await api('/gift-passes/' + r.pass.id + '/confirm-payment', { method: 'POST' });
+      const code = conf.pass.code;
+      openModal(`<h2 style="margin-top:0">Your gift is ready 🎁</h2>
+        <p class="hint">Share this code with anyone — they redeem it inside Sambandh to unlock <b>${esc(conf.pass.label || '')}</b>.</p>
+        <div class="card" style="text-align:center;font-size:20px;font-weight:800;letter-spacing:1px">${esc(code)}</div>
+        <button class="btn mt" onclick="navigator.clipboard&&navigator.clipboard.writeText('${esc(code)}');toast('Code copied ✓')">Copy code</button>
+        <button class="btn secondary" onclick="closeModal();renderServices()">Done</button>`);
+    } else { toast('Pass created — complete payment to activate.'); }
+  } catch (e) { toast(e.message); }
+  finally { if (btn) btn.disabled = false; loadGiftPasses(); }
+}
+async function redeemGiftCode() {
+  const inp = document.getElementById('gift-code'); const code = (inp && inp.value || '').trim();
+  if (!code) return toast('Enter a gift code');
+  try {
+    const r = await api('/gift-passes/redeem', { method: 'POST', body: { code } });
+    toast('🎉 Unlocked: ' + (r.unlocked || 'your gift') + '!');
+    if (inp) inp.value = '';
+    loadTrust();
+  } catch (e) { toast(e.message); }
 }
 
 async function loadTrust() {

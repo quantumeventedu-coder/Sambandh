@@ -113,6 +113,7 @@ app.use('/api/vault', require('./routes-vault')); // encrypted-at-rest document 
 app.use('/api/court-marriage', require('./routes-court-marriage')); // court-marriage assistant workflow (on the vault)
 app.use('/api/due-diligence', require('./routes-due-diligence')); // consent-gated subject-curated trust dossier
 app.use('/api/commerce', require('./routes-commerce')); // trust-aware, intent-personalised commerce recommendations
+app.use('/api/gift-passes', require('./routes-gift-passes')); // Sambandh Gift Pass system (buy → share code → redeem → grant)
 
 // Analytics summary for the admin panel (event counts, last 7 days)
 app.get('/api/analytics/admin/summary', authRoutes.requireAdmin, async (req, res, next) => {

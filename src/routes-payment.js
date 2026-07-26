@@ -360,6 +360,12 @@ router.post('/admin/:paymentId/refund', requireAdmin, async (req, res, next) => 
         'membership.joinFeePaid': false, 'membership.tier': 'free', 'membership.tierExpiresAt': null
       });
     }
+    // Refunding a gift pass must also invalidate it — an un-redeemed pass is revoked so
+    // it can never be redeemed for value that was paid back.
+    if (payment.purpose === 'gift_pass') {
+      try { await require('./services/gift-pass').handlePaymentRefund(payment); }
+      catch (e) { console.error('[REFUND] gift-pass reconcile failed:', e instanceof Error ? e.message : e); }
+    }
 
     const Notification = require('./models/Notification');
     await Notification.create({
