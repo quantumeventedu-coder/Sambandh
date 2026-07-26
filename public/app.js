@@ -226,7 +226,7 @@ function connectSocket() {
 }
 
 // ---------------- Router ----------------
-const TAB_ROUTES = ['discover', 'community', 'astro', 'chats', 'karma', 'settings', 'notifications'];
+const TAB_ROUTES = ['discover', 'services', 'community', 'astro', 'chats', 'karma', 'settings', 'notifications'];
 
 window.addEventListener('hashchange', route);
 
@@ -288,6 +288,7 @@ async function route() {
     case 'community': return renderCommunity();
     case 'room': return renderRoom(parts[1]);
     case 'astro': return renderAstro();
+    case 'services': return renderServices();
     case 'compat': return renderCompat(parts[1]);
     case 'settings': return renderSettings();
     case 'notifications': return renderNotifications();
@@ -336,7 +337,8 @@ function renderWaitingRoom() {
           ${row(verified, 'Photo verified')}
           <div class="wr-row"><span class="wr-tick pend">…</span>Matching &amp; chats — <b>unlocking at launch</b></div>
         </div>
-        <button class="btn ic-row" style="display:flex;justify-content:center" onclick="nav('#/settings')">${ic('edit')} Polish your profile while you wait</button>
+        <button class="btn ic-row" style="display:flex;justify-content:center" onclick="nav('#/services')">✦ Explore your services (verification, vault &amp; more)</button>
+        <button class="btn secondary ic-row" style="display:flex;justify-content:center" onclick="nav('#/settings')">${ic('edit')} Polish your profile while you wait</button>
         <button class="btn secondary ic-row" style="display:flex;justify-content:center" onclick="nav('#/notifications')">${ic('bell')} Notification settings</button>
         <button class="btn secondary" onclick="logout()">Sign out</button>
         <p class="wr-foot">Questions? grievance@sambandh.in</p>
@@ -2555,6 +2557,144 @@ async function saveEditProfile() {
 
 // ---------------- Boot ----------------
 // Owner "experience as": a super-admin impersonation token arrives as ?imp=<jwt>.
+// ---------------- Services hub (trust · commerce · vault · verification) ------
+// These verticals are NOT gated behind launch, so a member can use them even while
+// the dating side is in early access. Each section loads independently.
+function ensureServicesCss() {
+  if (document.getElementById('svc-css')) return;
+  const s = document.createElement('style'); s.id = 'svc-css';
+  s.textContent = `
+  .svc-h{font-family:Georgia,serif;font-size:18px;color:#4B1528;margin:22px 0 6px}
+  .svc-h .hint{font-family:inherit;font-weight:400;font-size:12px}
+  .trust-ring{--p:0;width:74px;height:74px;flex:0 0 74px;border-radius:50%;display:grid;place-items:center;background:conic-gradient(#1f7a4d calc(var(--p)*1%),#eadfe4 0);position:relative}
+  .trust-ring::before{content:'';position:absolute;inset:7px;background:#fff;border-radius:50%}
+  .trust-ring span{position:relative;font-weight:800;font-size:22px;color:#1f7a4d}`;
+  document.head.appendChild(s);
+}
+const LEVEL_LABEL = { phone_only: 'Phone only', photo_verified: 'Photo verified', id_verified: 'ID verified', profession_verified: 'Profession verified', fully_verified: 'Fully verified' };
+const TIER_LABEL = { dating_lite: 'Dating-Lite', pre_marital: 'Pre-marital', post_marital: 'Post-marital' };
+function svcPrice(l) { if (l.billing === 'per_minute' && l.ratePerMinuteCHF) return 'CHF ' + l.ratePerMinuteCHF + '/min'; return l.priceCHF != null ? 'CHF ' + l.priceCHF : ''; }
+
+async function renderServices() {
+  ensureServicesCss();
+  screen.innerHTML = `<div class="section-pad">
+    <h1>Your services</h1>
+    <p class="sub">Trust, verification, your private document vault, and things worth your time.</p>
+    <div id="svc-trust" class="card"><div class="empty">Loading your Trust Score…</div></div>
+    <h2 class="svc-h">Recommended for you</h2>
+    <div id="svc-commerce"><div class="empty">Finding relevant options…</div></div>
+    <h2 class="svc-h">Document vault <span class="hint">· encrypted &amp; private to you</span></h2>
+    <div class="row" style="gap:8px;margin:6px 0 10px">
+      <label class="btn" style="width:auto;cursor:pointer">+ Upload document<input id="svc-file" type="file" accept="image/*,application/pdf" style="display:none" onchange="vaultUpload(this)"/></label></div>
+    <div id="svc-vault"><div class="empty">Loading your vault…</div></div>
+    <h2 class="svc-h">Get verified</h2>
+    <div id="svc-verify"><div class="empty">Loading…</div></div>
+  </div>`;
+  loadTrust(); loadCommerce(); loadVault(); loadVerifyTiers();
+}
+
+async function loadTrust() {
+  const el = $('#svc-trust'); if (!el) return;
+  try {
+    const t = await api('/me/trust');
+    const earned = t.factors.filter(f => f.earned).length;
+    const next = (t.nextSteps || []).slice(0, 3);
+    el.innerHTML = `<div class="row" style="align-items:center;gap:16px">
+      <div class="trust-ring" style="--p:${t.score}"><span>${t.score}</span></div>
+      <div><b style="font-size:16px">Trust Score</b>
+        <div class="tag forest" style="margin-top:4px">${esc(LEVEL_LABEL[t.level] || t.level)}</div>
+        <div class="hint" style="margin-top:6px">${earned} of ${t.factors.length} checks complete</div></div></div>
+      ${next.length ? `<div class="hint" style="margin-top:10px">Raise it: ${next.map(f => esc(f.label) + ' (+' + f.points + ')').join(' · ')}</div>` : '<div class="hint" style="margin-top:10px">You\'re fully verified 🎉</div>'}`;
+  } catch (e) { el.innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+}
+
+async function loadCommerce() {
+  const el = $('#svc-commerce'); if (!el) return;
+  try {
+    const r = await api('/commerce/recommendations');
+    const items = [...(r.listings || []), ...(r.consultants || [])];
+    if (!items.length) { el.innerHTML = '<div class="empty">Nothing to recommend yet — check back soon.</div>'; return; }
+    el.innerHTML = items.slice(0, 8).map(c => `<div class="card"><div class="row" style="justify-content:space-between;align-items:flex-start">
+      <div><b>${esc(c.listing.title)}</b>${c.partner.verified ? ' <span class="tag forest">verified</span>' : ''}
+        <div class="hint">${esc(c.partner.name)} · ${esc(c.listing.category || c.partner.category || '')}${c.listing.city ? ' · ' + esc(c.listing.city) : ''}</div></div>
+      <div style="text-align:right"><b>${esc(svcPrice(c.listing))}</b>${c.partner.ratingCount ? `<div class="hint">★ ${c.partner.ratingAvg} (${c.partner.ratingCount})</div>` : ''}</div>
+      </div></div>`).join('');
+  } catch (e) { el.innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+}
+
+async function loadVault() {
+  const el = $('#svc-vault'); if (!el) return;
+  try {
+    const r = await api('/vault/documents');
+    if (!r.documents.length) { el.innerHTML = '<div class="empty">No documents yet. Upload an ID or certificate — it\'s encrypted and private to you.</div>'; return; }
+    el.innerHTML = r.documents.map(d => `<div class="card"><div class="row" style="justify-content:space-between;align-items:center">
+      <div><b>${esc(d.label)}</b><div class="hint">${esc(String(d.docType || '').replace(/_/g, ' '))} · ${Math.max(1, Math.round((d.size || 0) / 1024))} KB</div></div>
+      <div class="row" style="gap:6px">
+        <button class="btn secondary" style="width:auto;padding:6px 10px" onclick="vaultView('${d.id}')">View</button>
+        <button class="btn secondary" style="width:auto;padding:6px 10px" onclick="vaultDelete('${d.id}')">Delete</button>
+      </div></div></div>`).join('');
+  } catch (e) { el.innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+}
+
+function vaultUpload(input) {
+  const f = input.files && input.files[0]; if (!f) return;
+  if (f.size > 12 * 1024 * 1024) { input.value = ''; return toast('File too large (max 12 MB).'); }
+  toast('Encrypting & uploading…');
+  const reader = new FileReader();
+  reader.onload = async () => {
+    try {
+      const base64 = String(reader.result).split(',')[1];
+      await api('/vault/documents', { method: 'POST', body: { base64, label: f.name, mime: f.type || undefined, docType: 'other' } });
+      toast('Saved to your vault ✓'); loadVault();
+    } catch (e) { toast(e.message); }
+    input.value = '';
+  };
+  reader.readAsDataURL(f);
+}
+async function vaultDelete(id) {
+  try { await api('/vault/documents/' + id, { method: 'DELETE' }); toast('Deleted'); loadVault(); }
+  catch (e) { toast(e.message); }
+}
+async function vaultView(id) {
+  try {
+    const res = await fetch('/api/vault/documents/' + id + '/content', { headers: { Authorization: 'Bearer ' + S.token } });
+    if (!res.ok) throw new Error('Could not open this document');
+    const url = URL.createObjectURL(await res.blob());
+    window.open(url, '_blank');
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+  } catch (e) { toast(e.message); }
+}
+
+async function loadVerifyTiers() {
+  const el = $('#svc-verify'); if (!el) return;
+  try {
+    const r = await api('/verification-services/tiers');
+    el.innerHTML = r.tiers.map(t => `<div class="card"><div class="row" style="justify-content:space-between;align-items:flex-start">
+      <div><b>${esc(TIER_LABEL[t.id] || t.id)}</b>
+        <div class="hint">${t.checks.map(c => esc(c.name.replace(/_/g, ' '))).join(' · ')}</div></div>
+      <div style="text-align:right"><b>CHF ${t.priceCHF}</b>
+        <div><button class="btn" style="width:auto;padding:6px 12px;margin-top:6px" onclick="verifySelf('${t.id}',this)">Verify me</button></div></div>
+      </div></div>`).join('');
+  } catch (e) { el.innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+}
+async function verifySelf(tier, btn) {
+  if (btn) { btn.disabled = true; btn.textContent = 'Working…'; }
+  try {
+    const r = await api('/verification-services/cases', { method: 'POST', body: { tier } });
+    if (r.order && r.order.orderId && r.order.devMode) {
+      await api('/payment/verify', { method: 'POST', body: { razorpay_order_id: r.order.orderId } });
+      const done = await api('/verification-services/cases/' + r.case.id + '/confirm-payment', { method: 'POST' });
+      const rep = await api('/verification-services/cases/' + r.case.id);
+      const lvl = rep.case && rep.case.report ? rep.case.report.verifiedLevel : done.case.status;
+      toast('Verification complete — level: ' + lvl);
+      loadTrust();
+    } else {
+      toast('Verification requested — complete payment to run it.');
+    }
+  } catch (e) { toast(e.message); }
+  finally { if (btn) { btn.disabled = false; btn.textContent = 'Verify me'; } }
+}
+
 // Adopt it as the session, then clean the URL so it isn't shared/bookmarked.
 (function () {
   try {
