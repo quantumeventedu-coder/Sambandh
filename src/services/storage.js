@@ -67,5 +67,39 @@ async function uploadFile(objectKey, buffer, mimeType) {
   return uploadToLocal(key, buffer);
 }
 
+// Read a stored object back as a Buffer (for the encrypted document vault — the
+// bytes are ciphertext, decrypted server-side only for an authorized caller).
+// Uses the AUTHENTICATED object path so it works even for a non-public bucket.
+async function readFile(objectKey) {
+  const key = String(objectKey).replace(/\\/g, '/');
+  if (process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_KEY) {
+    const base = process.env.SUPABASE_URL.replace(/\/+$/, '');
+    const serviceKey = process.env.SUPABASE_SERVICE_KEY;
+    const res = await fetch(`${base}/storage/v1/object/${BUCKET}/${key}`, {
+      headers: { Authorization: `Bearer ${serviceKey}`, apikey: serviceKey }
+    });
+    if (!res.ok) throw new Error(`Storage read failed (${res.status})`);
+    return Buffer.from(await res.arrayBuffer());
+  }
+  return fs.readFileSync(path.join(UPLOADS_ROOT, key));
+}
+
+// Best-effort hard delete of a stored object (vault document deletion).
+async function deleteFile(objectKey) {
+  const key = String(objectKey).replace(/\\/g, '/');
+  try {
+    if (process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_KEY) {
+      const base = process.env.SUPABASE_URL.replace(/\/+$/, '');
+      const serviceKey = process.env.SUPABASE_SERVICE_KEY;
+      await fetch(`${base}/storage/v1/object/${BUCKET}/${key}`, {
+        method: 'DELETE', headers: { Authorization: `Bearer ${serviceKey}`, apikey: serviceKey }
+      });
+    } else {
+      fs.rmSync(path.join(UPLOADS_ROOT, key), { force: true });
+    }
+    return true;
+  } catch { return false; }
+}
+
 // `uploadToR2` kept as an alias for existing callers.
-module.exports = { uploadFile, uploadToR2: uploadFile, UPLOADS_ROOT };
+module.exports = { uploadFile, uploadToR2: uploadFile, readFile, deleteFile, UPLOADS_ROOT };
