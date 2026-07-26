@@ -969,17 +969,25 @@ function pricingView() {
 async function loadPricing() {
   try { S._pricing = await api('/payment/pricing'); if (['#/onboarding', '#/settings'].includes(location.hash)) route(); } catch { /* mirror used */ }
 }
+// The canonical price is in CHF (Swiss francs). Indian members are billed the local
+// equivalent via Razorpay (so UPI works); that local figure is an APPROXIMATE estimate,
+// shown as "≈", never as the headline price.
+const CHF_BASE = { male: 1, female: 5, non_binary: 3 };
 function obPay() {
   const g = S.user.profile.gender;
+  const chf = CHF_BASE[g] ?? CHF_BASE.non_binary;
   const p = pricingView();
-  const fee = p.base[g] ?? p.base.non_binary;
+  const country = (S.user.profile && S.user.profile.country) || 'IN';
+  const localFee = p.base[g] ?? p.base.non_binary;
+  const showLocal = country === 'IN' && p.sym && p.sym.trim() !== 'CHF';
   return `<div class="section-pad">
     <h1>Start your membership</h1>
     <p class="sub">Nothing here is free — every member pays monthly. That's what keeps the bots and time-wasters out.</p>
     <div class="card center" style="background:var(--rose-soft);border-color:var(--rose)">
-      <div style="font-size:38px;font-weight:700;color:var(--sindoor-deep);font-family:Georgia,serif">${p.sym}${fee}<span style="font-size:15px;color:var(--sindoor)"> / month</span></div>
-      <div style="font-size:12px;color:var(--sindoor)">30 days per payment · renew when it suits you · taxes included</div>
-      <div class="hint">Men ${p.sym}${p.base.male} · Women ${p.sym}${p.base.female} · Non-binary ${p.sym}${p.base.non_binary} per month — your price is set by your verified profile, not by this page.</div>
+      <div style="font-size:38px;font-weight:700;color:var(--sindoor-deep);font-family:Georgia,serif">CHF ${chf}<span style="font-size:15px;color:var(--sindoor)"> / month</span></div>
+      ${showLocal ? `<div style="font-size:13px;color:var(--sindoor)">≈ ${p.sym}${localFee} — billed in ₹ (INR) so UPI works · approx</div>` : ''}
+      <div style="font-size:12px;color:var(--sindoor)">30 days per payment · renew when it suits you</div>
+      <div class="hint">Men CHF ${CHF_BASE.male} · Women CHF ${CHF_BASE.female} · Non-binary CHF ${CHF_BASE.non_binary} per month — your price is set by your verified profile, not by this page.</div>
     </div>
     <button class="btn" onclick="obPayNow()">Pay with UPI / Card</button>
     <p class="hint center mt">Powered by Razorpay · Secure payment · Monthly membership, cancel anytime</p>
