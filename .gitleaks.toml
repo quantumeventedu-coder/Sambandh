@@ -19,6 +19,10 @@ description = "Known-public dev keys (rotated; boot-rejected in production) and 
 regexes = [
   '''sambandh-super-dev-key''',
   '''sambandh-admin-dev-key''',
+  # Public, non-secret cryptographic PARAMETERS (not credentials): a scrypt salt is
+  # meant to be public and is safe to publish; it only fixes the derived key so vault
+  # documents stay decryptable. The real key material is VAULT_KEY / JWT_SECRET (env).
+  '''sambandh-vault-v1''',
 ]
 
 paths = [
