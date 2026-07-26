@@ -177,8 +177,28 @@ router.post('/orders/:id/review', requireAuth, async (req, res, next) => {
 });
 
 // ==== Staff: partners + listings (market:manage) ============================
+/** The acting staff member's email (or the owner). @param {any} req */
+const actorOf = (req) => (req.staff && req.staff.email) || 'super-admin';
+/** Full staff-facing partner detail — KYB fields + document metadata (never raw bytes/URLs). @param {any} p */
+const staffPartner = (p) => p && ({
+  id: p._id, name: p.name, category: p.category, type: p.type || 'individual',
+  legalName: p.legalName, registration: p.registration || { kind: 'none' },
+  contactPerson: p.contactPerson || {}, address: p.address, website: p.website,
+  city: p.city, email: p.email, phone: p.phone, tier: p.tier || 'standard',
+  verified: !!p.verified, active: p.active !== false, suspended: !!p.suspended, suspendReason: p.suspendReason,
+  verification: p.verification || { status: 'unverified' },
+  documents: (p.documents || []).map((/** @type {any} */ d, /** @type {number} */ i) => ({ index: i, type: d.type, evidenceHash: d.evidenceHash, aavDecision: d.aavDecision, mime: d.mime, size: d.size, uploadedBy: d.uploadedBy, uploadedAt: d.uploadedAt })),
+  commissionRate: p.commissionRate, ratingAvg: p.ratingAvg || 0, ratingCount: p.ratingCount || 0,
+  onboardedBy: p.onboardedBy, createdAt: p.createdAt
+});
+
 const partnerSchema = z.object({
   name: z.string().min(1), category: z.enum(/** @type {any} */ (Partner.CATEGORIES)),
+  type: z.enum(/** @type {any} */ (Partner.PARTNER_TYPES)).optional(),
+  legalName: z.string().max(200).optional(),
+  registration: z.object({ kind: z.enum(/** @type {any} */ (Partner.REG_KINDS)), number: z.string().max(60).optional() }).optional(),
+  contactPerson: z.object({ name: z.string().max(120).optional(), email: z.string().email().optional(), phone: z.string().max(30).optional() }).optional(),
+  address: z.string().max(400).optional(), website: z.string().max(200).optional(),
   city: z.string().optional(), location: z.object({ lat: z.number(), lng: z.number() }).optional(),
   email: z.string().email().optional(), phone: z.string().optional(),
   tier: z.enum(/** @type {any} */ (Partner.PARTNER_TIERS)).optional(),
@@ -189,29 +209,132 @@ router.post('/partners', staff, async (req, res, next) => {
   try {
     const parsed = partnerSchema.safeParse(req.body || {});
     if (!parsed.success) return res.status(400).json({ error: 'name + valid category required' });
-    const st = /** @type {any} */ (req).staff;
-    const actor = (st && st.email) || 'super-admin';
-    const partner = await Partner.create({ ...parsed.data, createdBy: actor, createdAt: new Date() });
-    res.status(201).json({ partner: { id: partner._id, ...parsed.data, verified: false, active: true } });
+    const actor = actorOf(/** @type {any} */(req));
+    const partner = await Partner.create({
+      ...parsed.data, onboardedBy: actor, createdBy: actor,
+      verification: { status: 'unverified' }, verified: false, active: true, createdAt: new Date()
+    });
+    res.status(201).json({ partner: staffPartner(partner) });
   } catch (err) { next(err); }
 });
 
 router.get('/partners', staff, async (req, res, next) => {
-  try { res.json({ partners: (await Partner.find({}).sort({ createdAt: -1 }).limit(500).lean()) }); }
-  catch (err) { next(err); }
+  try {
+    /** @type {Record<string, any>} */ const filter = {};
+    if (req.query.category) filter.category = String(req.query.category);
+    if (req.query.status) filter['verification.status'] = String(req.query.status);
+    const partners = await Partner.find(filter).sort({ createdAt: -1 }).limit(500).lean();
+    res.json({ partners: partners.map(staffPartner) });
+  } catch (err) { next(err); }
+});
+
+router.get('/partners/:id', staff, async (req, res, next) => {
+  try {
+    const p = await Partner.findById(req.params.id);
+    if (!p) return res.status(404).json({ error: 'Partner not found' });
+    res.json({ partner: staffPartner(p) });
+  } catch (err) { next(err); }
 });
 
 router.patch('/partners/:id', staff, async (req, res, next) => {
   try {
     /** @type {Record<string, any>} */ const set = {};
     const b = req.body || {};
-    if (typeof b.verified === 'boolean') { set.verified = b.verified; if (b.verified) set.verifiedAt = new Date(); }
+    for (const k of ['name', 'legalName', 'address', 'website', 'city', 'email', 'phone']) if (typeof b[k] === 'string') set[k] = b[k];
+    if (b.type && Partner.PARTNER_TYPES.includes(b.type)) set.type = b.type;
+    if (b.category && Partner.CATEGORIES.includes(b.category)) set.category = b.category;
+    if (b.registration && typeof b.registration === 'object') set.registration = { kind: Partner.REG_KINDS.includes(b.registration.kind) ? b.registration.kind : 'none', number: String(b.registration.number || '').slice(0, 60) };
+    if (b.contactPerson && typeof b.contactPerson === 'object') set.contactPerson = { name: String(b.contactPerson.name || '').slice(0, 120), email: String(b.contactPerson.email || '').slice(0, 120), phone: String(b.contactPerson.phone || '').slice(0, 30) };
     if (typeof b.active === 'boolean') set.active = b.active;
+    if (typeof b.suspended === 'boolean') { set.suspended = b.suspended; set.suspendedAt = b.suspended ? new Date() : null; if (b.suspended) { set.active = false; set.suspendReason = String(b.suspendReason || '').slice(0, 300); } }
     if (b.tier && Partner.PARTNER_TIERS.includes(b.tier)) set.tier = b.tier;
     if (typeof b.commissionRate === 'number' && b.commissionRate >= 0 && b.commissionRate <= 0.9) set.commissionRate = b.commissionRate;
     if (!Object.keys(set).length) return res.status(400).json({ error: 'Nothing to update' });
-    await Partner.findByIdAndUpdate(req.params.id, set);
-    res.json({ ok: true, updated: Object.keys(set) });
+    const p = await Partner.findByIdAndUpdate(req.params.id, set, { new: true });
+    if (!p) return res.status(404).json({ error: 'Partner not found' });
+    res.json({ partner: staffPartner(p) });
+  } catch (err) { next(err); }
+});
+
+// ---- KYB: submit an authentication document (AAV-scanned, encrypted at rest) ----
+const partnerDocSchema = z.object({ type: z.enum(/** @type {any} */ (Partner.PARTNER_DOC_TYPES)), base64: z.string().min(1), filename: z.string().optional() });
+router.post('/partners/:id/documents', staff, async (req, res, next) => {
+  try {
+    const p = await Partner.findById(req.params.id);
+    if (!p) return res.status(404).json({ error: 'Partner not found' });
+    const parsed = partnerDocSchema.safeParse(req.body || {});
+    if (!parsed.success) return res.status(400).json({ error: 'type + document required' });
+    const buf = Buffer.from(parsed.data.base64, 'base64');
+    if (!buf.length) return res.status(400).json({ error: 'Empty document' });
+    if (buf.length > 12 * 1024 * 1024) return res.status(400).json({ error: 'Document too large (max 12 MB)' });
+    const t = await require('./services/trust').evaluateDocument(buf, { filename: parsed.data.filename, userId: String(p._id) });
+    if (t.decision === 'reject') return res.status(400).json({ error: 'Only image or PDF documents are accepted, and the file failed the security scan' });
+    const crypto = require('crypto');
+    const vault = require('./services/vault');
+    const { blob, keyVersion } = vault.encrypt(buf);
+    const key = `partners/${p._id}/docs/${crypto.randomBytes(10).toString('hex')}.enc`;
+    await require('./services/storage').uploadFile(key, blob, 'application/octet-stream');
+    const doc = {
+      type: parsed.data.type, storageKey: key, keyVersion,
+      evidenceHash: crypto.createHash('sha256').update(buf).digest('hex'),
+      mime: t.fileType ? `application/${t.fileType}` : 'application/octet-stream',
+      size: buf.length, aavDecision: t.decision, uploadedBy: actorOf(/** @type {any} */(req)), uploadedAt: new Date()
+    };
+    await Partner.findByIdAndUpdate(p._id, { $push: { documents: doc }, $set: { 'verification.status': 'pending' } });
+    res.status(201).json({ document: { type: doc.type, evidenceHash: doc.evidenceHash, aavDecision: t.decision, uploadedAt: doc.uploadedAt } });
+  } catch (err) { next(err); }
+});
+
+// View a submitted document (decrypted server-side, staff only).
+router.get('/partners/:id/documents/:index/content', staff, async (req, res, next) => {
+  try {
+    const p = await Partner.findById(req.params.id);
+    const doc = p && (p.documents || [])[Number(req.params.index)];
+    if (!doc || !doc.storageKey) return res.status(404).json({ error: 'Document not found' });
+    const vault = require('./services/vault');
+    const blob = await require('./services/storage').readFile(doc.storageKey);
+    const buf = vault.decrypt(blob, doc.keyVersion);
+    res.setHeader('Content-Type', doc.mime || 'application/octet-stream');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Cache-Control', 'private, no-store');
+    res.send(buf);
+  } catch (err) {
+    if (/integrity|corrupt/i.test(msg(err))) return res.status(422).json({ error: 'Document integrity check failed' });
+    next(err);
+  }
+});
+
+// ---- KYB decision: verify / reject (named staff member, audit-logged) ----
+async function partnerAudit(/** @type {any} */ req, /** @type {string} */ action, /** @type {any} */ partnerId, /** @type {any} */ detail) {
+  try { await require('./models/AuditLog').create({ actor: actorOf(/** @type {any} */(req)), action, targetType: 'partner', targetId: String(partnerId), detail }); }
+  catch { /* audit must not break the op */ }
+}
+router.post('/partners/:id/verify', staff, async (req, res, next) => {
+  try {
+    const p = await Partner.findById(req.params.id);
+    if (!p) return res.status(404).json({ error: 'Partner not found' });
+    const actor = actorOf(/** @type {any} */(req));
+    const updated = await Partner.findByIdAndUpdate(p._id, {
+      verified: true, verifiedAt: new Date(),
+      'verification.status': 'verified', 'verification.reviewedBy': actor, 'verification.reviewedAt': new Date(),
+      'verification.notes': String((req.body || {}).notes || '').slice(0, 500)
+    }, { new: true });
+    await partnerAudit(req, 'partner_verified', p._id, { name: p.name });
+    res.json({ partner: staffPartner(updated) });
+  } catch (err) { next(err); }
+});
+router.post('/partners/:id/reject', staff, async (req, res, next) => {
+  try {
+    const reason = String((req.body || {}).reason || '').slice(0, 500);
+    if (!reason) return res.status(400).json({ error: 'A rejection reason is required' });
+    const p = await Partner.findById(req.params.id);
+    if (!p) return res.status(404).json({ error: 'Partner not found' });
+    const updated = await Partner.findByIdAndUpdate(p._id, {
+      verified: false, 'verification.status': 'rejected', 'verification.reviewedBy': actorOf(/** @type {any} */(req)),
+      'verification.reviewedAt': new Date(), 'verification.notes': reason
+    }, { new: true });
+    await partnerAudit(req, 'partner_rejected', p._id, { reason });
+    res.json({ partner: staffPartner(updated) });
   } catch (err) { next(err); }
 });
 
