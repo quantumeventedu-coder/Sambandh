@@ -84,6 +84,14 @@ function assertProductionSecrets(env = process.env) {
   if (env.SEED_DEMO === 'true') {
     warnings.push('SEED_DEMO=true is ignored in production — demo profiles are never seeded here. Unset it to silence this.');
   }
+  // The document vault derives its encryption key from JWT_SECRET when VAULT_KEY is
+  // unset. That works, but it couples stored documents to JWT_SECRET: rotating the
+  // JWT would make existing vault documents undecryptable. Recommend a dedicated key.
+  if (!env.VAULT_KEY) {
+    warnings.push('VAULT_KEY is not set — the document vault will derive its key from JWT_SECRET. Set VAULT_KEY (64 hex chars) so rotating JWT_SECRET never orphans stored documents.');
+  } else if (!/^[0-9a-fA-F]{64}$/.test(String(env.VAULT_KEY))) {
+    warnings.push('VAULT_KEY is set but is not 64 hex characters (32 bytes) — it will be ignored and the vault will fall back to deriving from JWT_SECRET.');
+  }
   return { production: true, ok: true, problems: [], warnings };
 }
 

@@ -112,6 +112,23 @@ describe('SEED_DEMO is a warning, not a boot-blocker', () => {
   });
 });
 
+describe('VAULT_KEY is a warning, not a boot-blocker', () => {
+  test('unset VAULT_KEY warns (the vault would derive its key from JWT_SECRET)', () => {
+    const r = assertProductionSecrets(goodEnv());   // goodEnv sets no VAULT_KEY
+    expect(r.warnings.some(w => /VAULT_KEY is not set/.test(w))).toBe(true);
+  });
+
+  test('a malformed VAULT_KEY warns (it would be ignored)', () => {
+    const r = assertProductionSecrets(goodEnv({ VAULT_KEY: 'not-hex-and-too-short' }));
+    expect(r.warnings.some(w => /not 64 hex/.test(w))).toBe(true);
+  });
+
+  test('a valid 64-hex VAULT_KEY produces no vault warning', () => {
+    const r = assertProductionSecrets(goodEnv({ VAULT_KEY: 'a'.repeat(64) }));
+    expect(r.warnings.some(w => /VAULT_KEY/.test(w))).toBe(false);
+  });
+});
+
 describe('the error is actionable', () => {
   test('reports every problem at once, not one at a time', () => {
     const env = goodEnv({ DEV_PAYMENTS: 'true' });
