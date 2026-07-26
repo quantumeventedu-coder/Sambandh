@@ -65,8 +65,10 @@ function inspectFile(buf, meta = {}) {
   if (/(<\?php|<script\b|#!\s*\/)/i.test(head)) { reasons.push('polyglot-payload'); hardFail = true; }   // a raw archive/other type is already caught by the header sniff
 
   // PDF active content — JavaScript / auto-actions / embedded files / launch.
+  // Scan the WHOLE buffer: a payload placed past the first bytes must not slip
+  // through (these documents are served back to staff/users).
   if (type === 'pdf') {
-    const pdfText = buf.slice(0, Math.min(buf.length, 262144)).toString('latin1');
+    const pdfText = buf.toString('latin1');
     if (/\/(JavaScript|JS)\b/.test(pdfText)) { reasons.push('pdf-javascript'); hardFail = true; }
     if (/\/(OpenAction|AA)\b/.test(pdfText)) { reasons.push('pdf-auto-action'); hardFail = true; }
     if (/\/(Launch|EmbeddedFile)\b/.test(pdfText)) { reasons.push('pdf-embedded-payload'); hardFail = true; }

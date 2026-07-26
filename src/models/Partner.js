@@ -40,7 +40,7 @@ const PartnerSchema = new mongoose.Schema({
   // Submitted authentication documents (each AAV-scanned before it is stored).
   documents: [{
     type: { type: String, enum: PARTNER_DOC_TYPES },
-    url: String, storageKey: String, evidenceHash: String, mime: String, size: Number,
+    url: String, storageKey: String, keyVersion: String, evidenceHash: String, mime: String, size: Number,
     aavDecision: String, uploadedBy: String, uploadedAt: Date
   }],
   // The KYB decision, made by a named staff member.

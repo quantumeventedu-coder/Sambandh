@@ -87,6 +87,33 @@ describe('KYB partner authentication', () => {
     expect(e.body.partner.registration.kind).toBe('cin');
   });
 
+  test('reactivating a suspended partner clears the suspension (coupled flags)', async () => {
+    const id = (await createPartner()).body.partner.id;
+    await request(app).patch(`/api/marketplace/partners/${id}`).set(SK).send({ suspended: true, suspendReason: 'x' });
+    const r = await request(app).patch(`/api/marketplace/partners/${id}`).set(SK).send({ active: true });
+    expect(r.body.partner.active).toBe(true);
+    expect(r.body.partner.suspended).toBe(false);
+  });
+
+  test('a new document during re-review drops the verified badge', async () => {
+    const id = (await createPartner()).body.partner.id;
+    await request(app).post(`/api/marketplace/partners/${id}/verify`).set(SK).send({});
+    expect((await request(app).get(`/api/marketplace/partners/${id}`).set(SK)).body.partner.verified).toBe(true);
+    await request(app).post(`/api/marketplace/partners/${id}/documents`).set(SK).send({ type: 'other', base64: PNG_B64, filename: 'x.png' });
+    const d = (await request(app).get(`/api/marketplace/partners/${id}`).set(SK)).body.partner;
+    expect(d.verified).toBe(false);
+    expect(d.verification.status).toBe('pending');
+  });
+
+  test('editing one contact subfield preserves the others; an invalid email is rejected', async () => {
+    const id = (await createPartner()).body.partner.id;   // seeds contactPerson.name 'R. Sharma'
+    await request(app).patch(`/api/marketplace/partners/${id}`).set(SK).send({ contactPerson: { phone: '+919111111111' } });
+    const p = (await request(app).get(`/api/marketplace/partners/${id}`).set(SK)).body.partner;
+    expect(p.contactPerson.phone).toBe('+919111111111');
+    expect(p.contactPerson.name).toBe('R. Sharma');       // preserved, not wiped
+    expect((await request(app).patch(`/api/marketplace/partners/${id}`).set(SK).send({ contactPerson: { email: 'not-an-email' } })).status).toBe(400);
+  });
+
   test('the staff endpoints reject an unauthenticated request', async () => {
     expect((await request(app).get('/api/marketplace/partners')).status).toBe(401);
     expect((await request(app).post('/api/marketplace/partners').send({ name: 'x', category: 'gift' })).status).toBe(401);

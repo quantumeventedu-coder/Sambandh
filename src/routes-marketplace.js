@@ -243,10 +243,24 @@ router.patch('/partners/:id', staff, async (req, res, next) => {
     for (const k of ['name', 'legalName', 'address', 'website', 'city', 'email', 'phone']) if (typeof b[k] === 'string') set[k] = b[k];
     if (b.type && Partner.PARTNER_TYPES.includes(b.type)) set.type = b.type;
     if (b.category && Partner.CATEGORIES.includes(b.category)) set.category = b.category;
-    if (b.registration && typeof b.registration === 'object') set.registration = { kind: Partner.REG_KINDS.includes(b.registration.kind) ? b.registration.kind : 'none', number: String(b.registration.number || '').slice(0, 60) };
-    if (b.contactPerson && typeof b.contactPerson === 'object') set.contactPerson = { name: String(b.contactPerson.name || '').slice(0, 120), email: String(b.contactPerson.email || '').slice(0, 120), phone: String(b.contactPerson.phone || '').slice(0, 30) };
-    if (typeof b.active === 'boolean') set.active = b.active;
+    // Nested KYB objects: set only the subfields provided (never wipe the rest).
+    if (b.registration && typeof b.registration === 'object') {
+      if (Partner.REG_KINDS.includes(b.registration.kind)) set['registration.kind'] = b.registration.kind;
+      if (typeof b.registration.number === 'string') set['registration.number'] = b.registration.number.slice(0, 60);
+    }
+    if (b.contactPerson && typeof b.contactPerson === 'object') {
+      const cp = b.contactPerson;
+      if (typeof cp.name === 'string') set['contactPerson.name'] = cp.name.slice(0, 120);
+      if (typeof cp.phone === 'string') set['contactPerson.phone'] = cp.phone.slice(0, 30);
+      if (typeof cp.email === 'string' && cp.email) {
+        if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(cp.email)) return res.status(400).json({ error: 'Invalid contact email' });
+        set['contactPerson.email'] = cp.email.slice(0, 120);
+      }
+    }
+    // active + suspended are coupled: suspending deactivates; reactivating clears suspension.
     if (typeof b.suspended === 'boolean') { set.suspended = b.suspended; set.suspendedAt = b.suspended ? new Date() : null; if (b.suspended) { set.active = false; set.suspendReason = String(b.suspendReason || '').slice(0, 300); } }
+    if (b.active === true) { set.active = true; set.suspended = false; set.suspendedAt = null; }
+    else if (b.active === false) set.active = false;
     if (b.tier && Partner.PARTNER_TIERS.includes(b.tier)) set.tier = b.tier;
     if (typeof b.commissionRate === 'number' && b.commissionRate >= 0 && b.commissionRate <= 0.9) set.commissionRate = b.commissionRate;
     if (!Object.keys(set).length) return res.status(400).json({ error: 'Nothing to update' });
@@ -280,7 +294,8 @@ router.post('/partners/:id/documents', staff, async (req, res, next) => {
       mime: t.fileType ? `application/${t.fileType}` : 'application/octet-stream',
       size: buf.length, aavDecision: t.decision, uploadedBy: actorOf(/** @type {any} */(req)), uploadedAt: new Date()
     };
-    await Partner.findByIdAndUpdate(p._id, { $push: { documents: doc }, $set: { 'verification.status': 'pending' } });
+    // New evidence → back to pending review; drop the trust badge until re-verified.
+    await Partner.findByIdAndUpdate(p._id, { $push: { documents: doc }, $set: { 'verification.status': 'pending', verified: false, verifiedAt: null } });
     res.status(201).json({ document: { type: doc.type, evidenceHash: doc.evidenceHash, aavDecision: t.decision, uploadedAt: doc.uploadedAt } });
   } catch (err) { next(err); }
 });
@@ -296,6 +311,9 @@ router.get('/partners/:id/documents/:index/content', staff, async (req, res, nex
     const buf = vault.decrypt(blob, doc.keyVersion);
     res.setHeader('Content-Type', doc.mime || 'application/octet-stream');
     res.setHeader('X-Content-Type-Options', 'nosniff');
+    // PDFs are downloaded, never rendered inline (active content is caught by the AAV
+    // scan, but attachment is defence in depth); images may be viewed inline.
+    res.setHeader('Content-Disposition', (doc.mime === 'application/pdf' ? 'attachment' : 'inline') + '; filename="partner-document"');
     res.setHeader('Cache-Control', 'private, no-store');
     res.send(buf);
   } catch (err) {

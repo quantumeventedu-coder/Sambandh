@@ -78,7 +78,9 @@ router.get('/documents/:id/content', requireAuth, async (req, res, next) => {
     const { buf, mime } = await vault.getContent({ doc, requesterId: req.userId });
     res.setHeader('Content-Type', mime || 'application/octet-stream');
     res.setHeader('X-Content-Type-Options', 'nosniff');   // no MIME sniffing of vault bytes
-    res.setHeader('Content-Disposition', `inline; filename="${String(doc.label || 'document').replace(/[^\w.-]/g, '_')}"`);
+    // PDFs download (never render inline); images may be viewed inline.
+    const disp = (mime === 'application/pdf') ? 'attachment' : 'inline';
+    res.setHeader('Content-Disposition', `${disp}; filename="${String(doc.label || 'document').replace(/[^\w.-]/g, '_')}"`);
     res.setHeader('Cache-Control', 'private, no-store');
     res.send(buf);
   } catch (err) {
