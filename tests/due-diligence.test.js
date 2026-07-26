@@ -72,14 +72,24 @@ describe('gates', () => {
     expect((await request(app).post('/api/due-diligence/cases').set(auth(requester)).send({ subjectId: String(stranger._id) })).status).toBe(403);
   });
 
-  test('one open dossier per pair; deny closes it', async () => {
+  test('one open dossier per pair; deny closes it; cooldown blocks immediate re-request', async () => {
     const requester = await plainUser(), subject = await verifiedSubject();
     await match(requester, subject);
     const first = await request(app).post('/api/due-diligence/cases').set(auth(requester)).send({ subjectId: String(subject._id) });
     expect(first.status).toBe(201);
     expect((await request(app).post('/api/due-diligence/cases').set(auth(requester)).send({ subjectId: String(subject._id) })).status).toBe(409);
     expect((await request(app).post(`/api/due-diligence/cases/${first.body.case.id}/deny`).set(auth(subject))).body.case.status).toBe('declined');
-    // after a decline the requester may ask again
-    expect((await request(app).post('/api/due-diligence/cases').set(auth(requester)).send({ subjectId: String(subject._id) })).status).toBe(201);
+    // a post-decline cooldown blocks immediate re-requesting the same person (anti-pester)
+    expect((await request(app).post('/api/due-diligence/cases').set(auth(requester)).send({ subjectId: String(subject._id) })).status).toBe(409);
+  });
+
+  test('blocking the requester after a grant cuts off the dossier', async () => {
+    const requester = await plainUser(), subject = await verifiedSubject();
+    await match(requester, subject);
+    const id = (await request(app).post('/api/due-diligence/cases').set(auth(requester)).send({ subjectId: String(subject._id) })).body.case.id;
+    await request(app).post(`/api/due-diligence/cases/${id}/grant`).set(auth(subject));
+    expect((await request(app).get(`/api/due-diligence/cases/${id}`).set(auth(requester))).status).toBe(200);
+    await User.findByIdAndUpdate(subject._id, { blockedUsers: [requester._id] });   // subject blocks
+    expect((await request(app).get(`/api/due-diligence/cases/${id}`).set(auth(requester))).status).toBe(403);
   });
 });

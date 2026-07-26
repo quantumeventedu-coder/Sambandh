@@ -14,6 +14,8 @@ const CourtMarriageCase = require('../models/CourtMarriageCase');
 
 const OPEN_STATES = ['proposed', 'active', 'notice_period', 'objection_raised', 'clear_to_solemnize', 'solemnized'];
 const TERMINAL = ['declined', 'cancelled', 'certificate_issued'];
+const COOLDOWN_DAYS = 3;              // after a decline/cancel, before re-proposing to the same person
+const MAX_PROPOSALS_PER_DAY = 5;      // per initiator, anti-spam
 
 const isParticipant = (/** @type {any} */ k, /** @type {any} */ u) => String(k.initiatorId) === String(u) || String(k.partnerId) === String(u);
 const otherParty = (/** @type {any} */ k, /** @type {any} */ u) => (String(k.initiatorId) === String(u) ? k.partnerId : k.initiatorId);
@@ -47,11 +49,23 @@ async function proposeCase({ initiatorId, partnerId, act, state }) {
   if (String(partnerId) === String(initiatorId)) throw new Error('You cannot start a case with yourself');
   const User = require('../models/User');
   if (!(await User.findById(partnerId))) throw new Error('Partner not found');
+  // Anti-harassment: only an ACTIVE mutual match (no block either way) can be proposed
+  // to — reuses the same gate the verification/due-diligence verticals use.
+  if (!(await require('./verification-service').sharesActiveMatch(initiatorId, partnerId))) {
+    throw new Error('You can propose a court marriage only to an active mutual match');
+  }
   const open = await CourtMarriageCase.findOne({
     $or: [{ initiatorId, partnerId }, { initiatorId: partnerId, partnerId: initiatorId }],
     status: { $in: OPEN_STATES }
   });
   if (open) throw new Error('There is already an open court-marriage case between you two');
+  const recent = await CourtMarriageCase.findOne({
+    initiatorId, partnerId, status: { $in: ['declined', 'cancelled'] },
+    createdAt: { $gt: new Date(Date.now() - COOLDOWN_DAYS * 86400000) }
+  });
+  if (recent) throw new Error('A recent court-marriage proposal to this person was closed. Please try again later.');
+  const dayCount = await CourtMarriageCase.countDocuments({ initiatorId, createdAt: { $gt: new Date(Date.now() - 86400000) } });
+  if (dayCount >= MAX_PROPOSALS_PER_DAY) throw new Error('Daily proposal limit reached. Please try again tomorrow.');
   return CourtMarriageCase.create({ initiatorId, partnerId, act, state: state || null, status: 'proposed', createdAt: new Date(), updatedAt: new Date() });
 }
 
@@ -94,14 +108,15 @@ async function addWitness({ kase, userId, name }) {
   return await CourtMarriageCase.findById(kase._id);
 }
 
-/** File the statutory notice (Special Marriage Act) — starts the 30-day clock.
- * @param {{ kase:any, userId:any, filedAt?:string }} a */
-async function fileNotice({ kase, userId, filedAt }) {
+/** File the statutory notice (Special Marriage Act) — starts the 30-day clock. The
+ * clock is anchored to SERVER time, never a client-supplied date, so the mandatory
+ * period cannot be backdated away. @param {{ kase:any, userId:any }} a */
+async function fileNotice({ kase, userId }) {
   if (!isParticipant(kase, userId)) throw new Error('Not your case');
   if (kase.act !== 'special_marriage') throw new Error('A notice period applies only to Special Marriage Act cases');
   if (kase.status !== 'active') throw new Error('The case is not ready to file notice');
   if (!allDocsComplete(kase)) throw new Error('Attach all required documents before filing notice');
-  const filed = filedAt ? new Date(filedAt) : new Date();
+  const filed = new Date();
   const ends = new Date(filed.getTime() + ref.NOTICE_PERIOD_DAYS.special_marriage * 86400000);
   return cas(kase._id, 'active', { status: 'notice_period', noticeFiledAt: filed, noticePeriodEndsAt: ends });
 }
@@ -155,11 +170,21 @@ async function issueCertificate({ kase, userId, vaultDocumentId }) {
   return cas(kase._id, 'solemnized', { status: 'certificate_issued', certificateDocumentId: doc._id });
 }
 
+/** Withdraw the vault document shares this case created (best-effort). @param {any} kase */
+async function revokeCaseShares(kase) {
+  const vault = require('./vault');
+  for (const d of (kase.documents || [])) {
+    if (d.shareId && d.byUserId) await vault.revokeShare({ shareId: d.shareId, ownerId: d.byUserId }).catch(() => { /* best-effort */ });
+  }
+}
+
 /** @param {{ kase:any, userId:any }} a */
 async function cancelCase({ kase, userId }) {
   if (!isParticipant(kase, userId)) throw new Error('Not your case');
   if (TERMINAL.includes(kase.status)) throw new Error('This case is already closed');
-  return cas(kase._id, kase.status, { status: 'cancelled' });
+  const won = await cas(kase._id, kase.status, { status: 'cancelled' });
+  await revokeCaseShares(kase);   // a cancelled case must not leave the ex-partner read access
+  return won;
 }
 
 module.exports = {
