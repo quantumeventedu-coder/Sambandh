@@ -24,13 +24,16 @@ const AuditLog = require('../models/AuditLog');
 const MAX_BYTES = 12 * 1024 * 1024;   // aligns with file-guard's cap
 /** @type {Record<string,string>} */
 const MIME_FOR = { jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp', pdf: 'application/pdf' };
+// A scrypt salt is a PUBLIC key-derivation parameter, not a secret — it fixes the
+// derived key so documents stay decryptable. Not a credential.
+const KDF_SALT = 'sambandh-vault-v1'; // gitleaks:allow (public scrypt salt, not a secret)
 
 /** @returns {{ key:Buffer, version:string }} */
 function keyInfo() {
   const hex = process.env.VAULT_KEY;
   if (hex && /^[0-9a-fA-F]{64}$/.test(hex)) return { key: Buffer.from(hex, 'hex'), version: 'env-v1' };
   const secret = process.env.JWT_SECRET || 'sambandh-dev-secret';
-  return { key: crypto.scryptSync(secret, 'sambandh-vault-v1', 32), version: 'jwt-v1' };
+  return { key: crypto.scryptSync(secret, KDF_SALT, 32), version: 'jwt-v1' };
 }
 
 /** @param {Buffer} buf @returns {{ blob:Buffer, keyVersion:string }} */
