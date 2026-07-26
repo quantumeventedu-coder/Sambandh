@@ -23,10 +23,30 @@ const BYPASS_ROLES = new Set(['admin', 'moderator', 'super_admin']);
 function roleBypasses(role) { return !!role && BYPASS_ROLES.has(role); }
 
 /**
- * Is the site in pre-launch (gated) mode? Cached ~15s.
+ * An explicit environment override, set by the owner in the host (Vercel) dashboard.
+ * It WINS over the DB flag, the cache, and everything else — no super-admin key or DB
+ * write needed, so the site can always be opened or closed from the deploy settings:
+ *   SITE_LAUNCHED = true|open|launched|1|yes   → OPEN  (not pre-launch)
+ *   SITE_LAUNCHED = false|gated|prelaunch|0|no → GATED (pre-launch)
+ * Unset → no override; fall through to the AppConfig flag.
+ * @returns {boolean|null} true=gated, false=open, null=no override
+ */
+function envOverride() {
+  const v = String(process.env.SITE_LAUNCHED || '').trim().toLowerCase();
+  if (!v) return null;
+  if (['true', 'open', 'launched', '1', 'yes', 'on'].includes(v)) return false;   // launched → NOT pre-launch
+  if (['false', 'gated', 'prelaunch', '0', 'no', 'off'].includes(v)) return true; // pre-launch
+  return null;
+}
+
+/**
+ * Is the site in pre-launch (gated) mode? The env override wins; otherwise the
+ * AppConfig flag, cached ~15s. Fail-safe default is GATED.
  * @returns {Promise<boolean>}
  */
 async function isPrelaunch() {
+  const forced = envOverride();
+  if (forced !== null) return forced;             // owner-controlled, bypasses cache + DB
   if (Date.now() - _cache.at < TTL_MS) return _cache.on;
   let on = true;                                  // fail-safe default: gated
   try {
@@ -135,4 +155,4 @@ async function requireLaunched(req, res, next) {
 
 function _clearCacheForTests() { _cache = { at: 0, on: true }; }
 
-module.exports = { isPrelaunch, setPrelaunch, gatedFor, requireLaunched, grantEarlyAccessTrials, roleBypasses, BYPASS_ROLES, _clearCacheForTests };
+module.exports = { isPrelaunch, setPrelaunch, gatedFor, requireLaunched, grantEarlyAccessTrials, roleBypasses, BYPASS_ROLES, envOverride, _clearCacheForTests };
