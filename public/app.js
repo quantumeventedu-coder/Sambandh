@@ -1302,6 +1302,8 @@ function openFilters() {
   const f = S.filters;
   openModal(`
     <h2 style="margin-top:0">Filters</h2>
+    <div class="field"><label>Looking for</label><select id="f-intent">
+      ${[['all', 'Any intent'], ['marriage', 'Marriage'], ['dating', 'Dating'], ['casual', 'Casual'], ['friendship', 'Friendship'], ['networking', 'Networking / business']].map(([v, l]) => `<option value="${v}" ${f.intent === v ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
     <div class="row">
       <div class="field"><label>Min age</label><input id="f-min" type="number" min="18" max="60" value="${f.minAge}"/></div>
       <div class="field"><label>Max age</label><input id="f-max" type="number" min="18" max="60" value="${f.maxAge}"/></div>
@@ -1323,6 +1325,7 @@ function openFilters() {
 }
 
 function applyFilters() {
+  S.filters.intent = $('#f-intent').value;
   S.filters.minAge = +$('#f-min').value || 18;
   S.filters.maxAge = +$('#f-max').value || 60;
   S.filters.verification = $('#f-ver').value;
@@ -1859,11 +1862,49 @@ async function renderAstro() {
       ${ch.doshas.length ? `<div class="card"><b class="ic-row">${ic('alert')} Doshas</b>${ch.doshas.map(d => `<div style="margin-top:8px"><b style="color:var(--haldi-deep)">${esc(d.name)} <span class="hint">(${esc(d.severity)})</span></b><div class="hint">${esc(d.detail)}</div></div>`).join('')}</div>` : ''}
       ${ch.dasha && ch.dasha.current ? `<div class="card"><b>Dasha timeline</b><p class="hint" style="margin:4px 0 8px">Now: <b>${esc(ch.dasha.current.lord)}</b>${ch.dasha.current.antardasha ? ' / ' + esc(ch.dasha.current.antardasha.lord) : ''} — until ${esc(ch.dasha.current.end)}</p><div style="display:flex;gap:6px;flex-wrap:wrap">${ch.dasha.periods.map(p => `<span class="tag ${p.lord === ch.dasha.current.lord ? 'forest' : 'plain'}">${esc(p.lord)} ${p.start.slice(0, 4)}–${p.end.slice(0, 4)}</span>`).join('')}</div></div>` : ''}
       ${c.numerology ? `<div class="card"><b>Numerology</b><div class="hint" style="margin-top:4px">Life Path ${c.numerology.lifePath ?? '—'} · Destiny ${c.numerology.destiny ?? '—'} · Soul ${c.numerology.soul ?? '—'} · Personality ${c.numerology.personality ?? '—'}</div></div>` : ''}
-      <div class="card"><b class="ic-row">${ic('sparkle')} Ask your chart</b>
-        <div id="astro-chat" style="margin:8px 0;display:flex;flex-direction:column;gap:8px"></div>
-        <div class="row" style="gap:8px"><input id="astro-q" placeholder="Is this a good year for a new venture?" style="flex:1" onkeydown="if(event.key==='Enter')askAstro()"/><button class="btn" style="width:auto" onclick="askAstro()">Ask</button></div>
-        <p class="hint mt">Traditional interpretation from your computed chart — not professional advice.</p></div>`;
+      ${(c.reading && c.reading.sections && c.reading.sections.length) ? `<div class="card"><b class="ic-row">${ic('sparkle')} Your chart reading</b>
+        ${c.reading.sections.map(s => `<div style="margin-top:10px"><b>${esc(s.title)}</b><div class="hint" style="line-height:1.55;margin-top:2px">${esc(s.text)}</div></div>`).join('')}
+        <p class="hint mt" style="opacity:.85">${esc(c.reading.disclaimer || '')}</p></div>` : ''}
+      <div class="card"><b class="ic-row">${ic('star')} Consult a verified astrologer</b>
+        <p class="hint" style="margin:4px 0 8px">For a precise, personal reading, book a live session with a real, verified astrologer.</p>
+        <div id="astro-consult"><div class="empty">Finding astrologers…</div></div></div>`;
+    loadAstrologers();
   } catch (e) { const b = $('#astro-body'); if (b) b.innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+}
+async function loadAstrologers() {
+  const el = document.getElementById('astro-consult'); if (!el) return;
+  try {
+    const r = await api('/consultation/consultants?category=astrologer');
+    const list = r.results || [];
+    if (!list.length) { el.innerHTML = '<div class="empty">Verified astrologers are being onboarded — check back soon.</div>'; return; }
+    el.innerHTML = list.map(x => `<div class="card" style="margin:8px 0"><div class="row" style="justify-content:space-between;align-items:flex-start">
+      <div><b>${esc(x.partner.name)}</b>${x.partner.verified ? ' <span class="tag forest">verified</span>' : ''}
+        <div class="hint">${esc(x.listing.title || 'Astrology consultation')}${x.partner.city ? ' · ' + esc(x.partner.city) : ''}</div>
+        ${x.partner.ratingCount ? `<div class="hint">★ ${x.partner.ratingAvg} (${x.partner.ratingCount})</div>` : ''}</div>
+      <div style="text-align:right"><b>${esc(svcPrice(x.listing))}</b>
+        <div><button class="btn" style="width:auto;padding:6px 12px;margin-top:6px" onclick="astroSlots('${x.listing.id}')">Book</button></div></div>
+      </div><div id="aslots-${x.listing.id}"></div></div>`).join('');
+  } catch (e) { el.innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+}
+async function astroSlots(listingId) {
+  const box = document.getElementById('aslots-' + listingId); if (!box) return;
+  if (box.innerHTML) { box.innerHTML = ''; return; }
+  box.innerHTML = '<div class="hint" style="margin-top:8px">Loading availability…</div>';
+  try {
+    const r = await api('/consultation/listings/' + listingId + '/slots');
+    const slots = r.slots || [];
+    if (!slots.length) { box.innerHTML = '<div class="hint" style="margin-top:8px">No open slots right now — check back soon.</div>'; return; }
+    box.innerHTML = '<div class="row" style="gap:6px;flex-wrap:wrap;margin-top:8px">' + slots.slice(0, 8).map(s =>
+      `<button class="btn secondary" style="width:auto;padding:6px 10px" onclick="bookAstro('${s.id}',this)">${new Date(s.startsAt).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })} · ${s.durationMin}m</button>`).join('') + '</div>';
+  } catch (e) { box.innerHTML = `<div class="hint" style="margin-top:8px">${esc(e.message)}</div>`; }
+}
+async function bookAstro(slotId, btn) {
+  if (btn) btn.disabled = true;
+  try {
+    await api('/consultation/book', { method: 'POST', body: { slotId } });
+    toast('Session booked ✓ — see it under Chats to confirm payment.');
+    loadAstrologers();
+  } catch (e) { toast(e.message); if (btn) btn.disabled = false; }
 }
 async function askAstro() {
   const inp = $('#astro-q'); const q = (inp.value || '').trim(); if (!q) return;
