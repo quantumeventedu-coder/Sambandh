@@ -27,6 +27,19 @@ router.get('/behavior', requireAuth, async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+// GET /api/me/trust — your own Trust Score, the factor breakdown, and the next
+// steps that would raise it. The number is owner-only (others see a coarse badge).
+const trustScore = require('./services/trust-score');
+router.get('/trust', requireAuth, async (req, res, next) => {
+  try {
+    const user = await User.findById(req.userId);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+    const { score, level } = trustScore.computeTrustScore(user);
+    const factors = trustScore.factorsFor(user);
+    res.json({ score, level, factors, nextSteps: factors.filter((f) => !f.earned) });
+  } catch (err) { next(err); }
+});
+
 // GET /api/me/network — your relationship graph: connection + community counts,
 // and friend-of-friend suggestions (people your matches have matched with).
 router.get('/network', requireAuth, requireLaunched, async (req, res, next) => {
