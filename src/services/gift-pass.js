@@ -72,8 +72,8 @@ async function purchasePass({ purchaserId, passType, message, deliverAt, expires
  * @param {any} passId @param {any} purchaserId */
 async function confirmPurchase(passId, purchaserId) {
   const pass = await GiftPass.findById(passId);
-  if (!pass) throw new Error('Gift pass not found');
-  if (String(pass.purchaserId) !== String(purchaserId)) throw new Error('Not your gift pass');
+  // A non-owned pass is reported as "not found" (not 403) so existence isn't leaked.
+  if (!pass || String(pass.purchaserId) !== String(purchaserId)) throw new Error('Gift pass not found');
   if (pass.status === 'active' || pass.status === 'redeemed') return pass;   // idempotent
   if (pass.status !== 'created') throw new Error('This pass can no longer be activated');
 
@@ -102,6 +102,11 @@ async function redeem({ code, redeemerId }) {
   if (pass.status === 'redeemed') throw new Error('This gift has already been redeemed');
   if (pass.status === 'revoked') throw new Error('This gift was cancelled');
   if (pass.status === 'created') throw new Error('This gift is not active yet');
+  // Defence in depth: never grant on a pass whose payment was reversed (refund/chargeback).
+  if (pass.paymentId) {
+    const pay = await Payment.findById(pass.paymentId);
+    if (!pay || pay.status !== 'captured') throw new Error('This gift is no longer valid');
+  }
   if (pass.status === 'expired' || (pass.expiresAt && new Date(pass.expiresAt) < new Date())) {
     await market.atomicUpdate(GiftPass, { _id: pass._id, status: 'active' }, { $set: { status: 'expired', updatedAt: new Date() } });
     throw new Error('This gift has expired');
@@ -121,26 +126,50 @@ async function applyGrant(pass, userId) {
   if (g && g.kind === 'membership') await grantMembership(userId, g.tier, g.months || 1);
 }
 
+/** Add N CALENDAR months to a timestamp (so 12 months = a real year, not 360 days). */
+function addMonths(/** @type {number} */ fromMs, /** @type {number} */ months) { const d = new Date(fromMs); d.setMonth(d.getMonth() + months); return d.getTime(); }
+
 /** Extend a user's membership by N months, keeping the better tier and NEVER shortening
- * an entitlement they already hold. @param {any} userId @param {string} tier @param {number} months */
+ * an entitlement they already hold. Written as a compare-and-set RETRY loop guarded on
+ * the current expiry, so two grants racing on the same recipient STACK instead of
+ * clobbering (each purchased month is honoured). @param {any} userId @param {string} tier @param {number} months */
 async function grantMembership(userId, tier, months) {
   const { tierRank } = require('./membership');
-  const user = await User.findById(userId);
-  if (!user) return;
-  const m = user.membership || {};
-  const active = !!(m.tierExpiresAt && new Date(m.tierExpiresAt) > new Date());
-  const curRank = active ? tierRank(m.tier) : 0;
-  const curEnd = active ? new Date(m.tierExpiresAt).getTime() : 0;
-  const grantRank = tierRank(tier);
-  const effectiveTier = curRank > grantRank ? m.tier : tier;
-  const from = (active && curRank >= grantRank) ? curEnd : Date.now();
-  const newEnd = Math.max(from + months * 30 * 86400000, curEnd);
-  await User.findByIdAndUpdate(userId, {
-    'membership.tier': effectiveTier,
-    'membership.tierExpiresAt': new Date(newEnd),
-    'membership.joinFeePaid': true,
-    'membership.paidAt': new Date()
-  });
+  for (let attempt = 0; attempt < 6; attempt++) {
+    const user = await User.findById(userId);
+    if (!user) return;
+    const m = (user.membership && (user.membership.toObject ? user.membership.toObject() : user.membership)) || {};
+    const active = !!(m.tierExpiresAt && new Date(m.tierExpiresAt) > new Date());
+    const curRank = active ? tierRank(m.tier) : 0;
+    const curEnd = active ? new Date(m.tierExpiresAt).getTime() : 0;
+    const grantRank = tierRank(tier);
+    const effectiveTier = curRank > grantRank ? m.tier : tier;
+    const from = (active && curRank >= grantRank) ? curEnd : Date.now();
+    const membership = { ...m, tier: effectiveTier, tierExpiresAt: new Date(addMonths(from, months)), joinFeePaid: true, paidAt: new Date() };
+    // Guard on the expiry we read: if a concurrent grant moved it, the CAS misses and we
+    // retry against the committed value (stacking correctly). Replaces the whole
+    // `membership` object in one $set — no dotted-key merge issues.
+    /** @type {Record<string, any>} */ const filter = { _id: userId };
+    if (m.tierExpiresAt) filter['membership.tierExpiresAt'] = new Date(m.tierExpiresAt).toISOString();
+    const won = await market.atomicUpdate(User, filter, { $set: { membership } });
+    if (won) return;
+  }
+}
+
+/** Reconcile a REFUNDED gift-pass payment (admin refund / provider chargeback): an
+ * un-redeemed pass becomes unredeemable; a redeemed one is flagged for manual review so
+ * a refunded pass can never keep yielding a live entitlement. @param {any} payment */
+async function handlePaymentRefund(payment) {
+  if (!payment || payment.purpose !== 'gift_pass') return;
+  const passId = (payment.metadata || {}).giftPassId;
+  if (!passId) return;
+  const pass = await GiftPass.findById(passId);
+  if (!pass) return;
+  if (pass.status === 'active' || pass.status === 'created') {
+    await market.atomicUpdate(GiftPass, { _id: pass._id, status: pass.status }, { $set: { status: 'revoked', updatedAt: new Date() } });
+  } else if (pass.status === 'redeemed' && !pass.chargebackFlag) {
+    await GiftPass.findByIdAndUpdate(pass._id, { chargebackFlag: true, updatedAt: new Date() });
+  }
 }
 
 /** Cancel a not-yet-redeemed pass and refund the buyer (idempotent CAS). @param {{ passId:any, purchaserId:any }} args */
@@ -171,5 +200,5 @@ function catalog() {
 
 module.exports = {
   CATALOG, isPassType, priceOf, catalog,
-  purchasePass, confirmPurchase, redeem, revoke, wallet, applyGrant, grantMembership, genCode
+  purchasePass, confirmPurchase, redeem, revoke, wallet, applyGrant, grantMembership, handlePaymentRefund, genCode
 };

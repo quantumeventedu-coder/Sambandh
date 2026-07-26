@@ -108,6 +108,45 @@ describe('revoke + refund', () => {
   });
 });
 
+describe('security-review fixes', () => {
+  const gp = require('../src/services/gift-pass');
+
+  test('a refunded pass is revoked and cannot be redeemed', async () => {
+    const buyer = await mkUser(), recipient = await mkUser();
+    const bought = await purchase(buyer, 'premium_1m');
+    const pass = await activate(buyer, bought);
+    await Payment.findByIdAndUpdate(bought.payment.id, { status: 'refunded' });
+    await gp.handlePaymentRefund(await Payment.findById(bought.payment.id));   // reconcile
+    expect((await GiftPass.findById(pass.id)).status).toBe('revoked');
+    expect((await request(app).post('/api/gift-passes/redeem').set(auth(recipient)).send({ code: pass.code })).status).toBe(409);
+  });
+
+  test("confirm-payment on someone else's pass returns 404 (no existence leak)", async () => {
+    const buyer = await mkUser(), other = await mkUser();
+    const bought = await purchase(buyer, 'premium_1m');
+    expect((await request(app).post(`/api/gift-passes/${bought.pass.id}/confirm-payment`).set(auth(other))).status).toBe(404);
+  });
+
+  test('a 1-year pass grants a real calendar year (not 360 days)', async () => {
+    const buyer = await mkUser(), recipient = await mkUser();
+    const pass = await activate(buyer, await purchase(buyer, 'premium_1y'));
+    await request(app).post('/api/gift-passes/redeem').set(auth(recipient)).send({ code: pass.code });
+    const u = await User.findById(recipient._id);
+    expect(new Date(u.membership.tierExpiresAt).getTime()).toBeGreaterThan(Date.now() + 360 * 86400000);
+  });
+
+  test('two premium months stack — a grant never shortens the entitlement', async () => {
+    const buyer = await mkUser(), recipient = await mkUser();
+    const p1 = await activate(buyer, await purchase(buyer, 'premium_1m'));
+    await request(app).post('/api/gift-passes/redeem').set(auth(recipient)).send({ code: p1.code });
+    const after1 = new Date((await User.findById(recipient._id)).membership.tierExpiresAt).getTime();
+    const p2 = await activate(buyer, await purchase(buyer, 'premium_1m'));
+    await request(app).post('/api/gift-passes/redeem').set(auth(recipient)).send({ code: p2.code });
+    const after2 = new Date((await User.findById(recipient._id)).membership.tierExpiresAt).getTime();
+    expect(after2).toBeGreaterThan(after1 + 25 * 86400000);   // stacked another month
+  });
+});
+
 describe('wallet', () => {
   test('the wallet shows purchased and received passes', async () => {
     const buyer = await mkUser(), recipient = await mkUser();

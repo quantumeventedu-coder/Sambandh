@@ -24,6 +24,8 @@ const GiftPassSchema = new mongoose.Schema({
   grant: { type: mongoose.Schema.Types.Mixed },                        // the entitlement: { kind, tier?, months? }
   recipientId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },  // set on redemption
   redeemedAt: Date,
+  chargebackFlag: { type: Boolean, default: false },   // payment refunded AFTER redemption → manual review
+
   createdAt: { type: Date, default: Date.now },
   updatedAt: { type: Date, default: Date.now }
 });
