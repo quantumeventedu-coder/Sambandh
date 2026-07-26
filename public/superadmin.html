@@ -162,7 +162,7 @@ async function renderOverview() {
           <div style="color:var(--mut);font-size:12px;margin-top:6px">Registered <b>${pl.registered}</b> · Paid <b>${pl.paid}</b> · Photo-verified <b>${pl.verified}</b> · Email waitlist <b>${pl.emailWaitlist}</b></div>
         </div>
         <div style="display:flex;flex-direction:column;gap:8px">
-          <button onclick="togglePrelaunch(${launched})" style="background:${launched ? 'transparent' : 'var(--pink)'};border:1px solid var(--pink);white-space:nowrap">
+          <button onclick="togglePrelaunch(${!launched})" style="background:${launched ? 'transparent' : 'var(--pink)'};border:1px solid var(--pink);white-space:nowrap">
             ${launched ? 'Return to pre-launch' : 'Open the doors — LAUNCH'}
           </button>
           <button onclick="purgeTestData()" class="ghost" style="white-space:nowrap;font-size:12px">Purge demo/test accounts</button>
