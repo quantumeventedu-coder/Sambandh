@@ -111,6 +111,7 @@ app.use('/api/consultation', require('./routes-consultation')); // bookable cons
 app.use('/api/verification-services', require('./routes-verification-services')); // consent-gated verification product on the AAV Trust Engine
 app.use('/api/vault', require('./routes-vault')); // encrypted-at-rest document vault (AAV-scanned, consent-shareable)
 app.use('/api/court-marriage', require('./routes-court-marriage')); // court-marriage assistant workflow (on the vault)
+app.use('/api/due-diligence', require('./routes-due-diligence')); // consent-gated subject-curated trust dossier
 
 // Analytics summary for the admin panel (event counts, last 7 days)
 app.get('/api/analytics/admin/summary', authRoutes.requireAdmin, async (req, res, next) => {
