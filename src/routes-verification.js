@@ -491,30 +491,10 @@ async function applyApproval(verification) {
   await User.findByIdAndUpdate(verification.userId, updates);
 }
 
-// Trust score per spec: 10 phone + 30 ID + 15 selfie + 20 profession
-// + 10 education + 10 income + 5 clean 30-day record = max 100
-function computeTrustScore(user, v) {
-  let score = 0;
-  if (user.phoneVerified) score += 10;
-  if (v.idVerified) score += 30;
-  if (v.selfieVerified) score += 15;
-  if (v.professionVerified) score += 20;
-  if (v.educationVerified) score += 10;
-  if (v.incomeVerified) score += 10;
-  const accountAgeDays = (Date.now() - user.createdAt) / 86400000;
-  if (accountAgeDays > 30) score += 5;
-
-  // Live-selfie face verification is the real, functional core tier ("Photo
-  // verified"). Government-ID is an optional booster on top (real OCR arrives
-  // with a DigiLocker/Hyperverge partnership).
-  let level = 'phone_only';
-  if (v.selfieVerified) level = 'photo_verified';
-  if (v.idVerified) level = 'id_verified';
-  if (v.professionVerified && (v.idVerified || v.selfieVerified)) level = 'profession_verified';
-  if (v.idVerified && v.selfieVerified && v.professionVerified) level = 'fully_verified';
-
-  return { score: Math.min(100, score), level };
-}
+// Trust score is centralised in services/trust-score.js (same weights: 10 phone +
+// 30 ID + 15 selfie + 20 profession + 10 education + 10 income + 5 clean 30-day
+// record = max 100) so the write path here and the read/surface paths can't drift.
+const { computeTrustScore } = require('./services/trust-score');
 
 function getMimeType(filename) {
   const ext = filename.split('.').pop().toLowerCase();
