@@ -926,3 +926,11 @@ button:focus:not(:focus-visible) { outline: none; }
 .plan-trust { margin-top: var(--sp-5); text-align: center; font-size: 12px; color: var(--ink-soft); line-height: 1.7; }
 .plan-philosophy { margin-top: var(--sp-3); text-align: center; font-size: 12.5px; color: var(--ink-mid); font-style: italic; max-width: 46ch; margin-left: auto; margin-right: auto; }
 @media (min-width: 720px) { .plan-grid { grid-template-columns: repeat(3, 1fr); align-items: start; } .plan-card.popular { transform: translateY(-6px); } }
+
+/* Itemized checkout breakdown — base + tax lines + gateway fee → total (SHIG R-14) */
+.co-breakdown { margin: var(--sp-5) 0 var(--sp-2); text-align: left; border-top: 1px solid var(--hair); padding-top: var(--sp-4); }
+.co-loading { color: var(--ink-soft); font-size: 13px; text-align: center; }
+.co-row { display: flex; justify-content: space-between; align-items: baseline; gap: var(--sp-4); font-size: 13.5px; color: var(--ink-mid); margin: 6px 0; }
+.co-row.co-muted { color: var(--ink-soft); }
+.co-row.co-total { margin-top: var(--sp-3); padding-top: var(--sp-3); border-top: 1px solid var(--hair); font-family: Georgia, serif; font-size: 18px; font-weight: 700; color: var(--sindoor-deep); }
+.co-note { margin-top: var(--sp-2); font-size: 11.5px; color: var(--ink-soft); text-align: center; }

@@ -53,6 +53,11 @@ const AppConfigSchema = new mongoose.Schema({
     activation: String,
     auto: { type: Boolean, default: false }   // nightly auto-retrain of the neural net
   },
+  // Super-admin-editable commerce config: per-country currency + tax categories/rates,
+  // payment-gateway fee, and cancellation policy. Mixed because the country/category
+  // maps have arbitrary keys (any ISO country code). Shape + defaults are owned by
+  // services/commerce-config.js; the stored value overrides the seeded defaults.
+  commerce: mongoose.Schema.Types.Mixed,
   updatedAt: Date
 });
 

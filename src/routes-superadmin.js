@@ -432,6 +432,71 @@ router.put('/llm', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+// ---- Commerce: prices, per-country taxes, gateway fee, cancellation ----------
+// Everything money-facing is editable here so tax can be adjusted per government /
+// jurisdiction (which vary country to country and change over time).
+const commerceCfg = require('./services/commerce-config');
+const fxSvc = require('./services/fx');
+// A currency is chargeable only if fx can convert CHF → it. Adding a country whose
+// currency we cannot convert would silently under/over-charge, so reject it here.
+const SUPPORTED_CURRENCIES = new Set(['CHF', ...Object.keys(fxSvc.FALLBACK)]);
+
+router.get('/commerce', async (req, res, next) => {
+  try { res.json(await commerceCfg.getCommerce()); } catch (err) { next(err); }
+});
+
+router.put('/commerce', async (req, res, next) => {
+  try {
+    const body = req.body || {};
+    const patch = {};
+    const rate = (v) => { const n = Number(v); return Number.isFinite(n) && n >= 0 && n <= 100 ? n : null; };
+    const cleanCategories = (cats) => {
+      const out = {};
+      for (const [k, v] of Object.entries(cats || {})) { const r = rate(v); if (r != null) out[String(k).slice(0, 32)] = r; }
+      return out;
+    };
+    const cleanCountry = (cfg) => {
+      const c = {};
+      if (typeof cfg.currency === 'string') c.currency = cfg.currency.toUpperCase().replace(/[^A-Z]/g, '').slice(0, 3);
+      if (typeof cfg.taxName === 'string') c.taxName = cfg.taxName.slice(0, 24);
+      if (typeof cfg.taxIdLabel === 'string') c.taxIdLabel = cfg.taxIdLabel.slice(0, 24);
+      if (cfg.categories && typeof cfg.categories === 'object') c.categories = cleanCategories(cfg.categories);
+      return c;
+    };
+
+    if (body.gatewayFeePct != null) { const r = rate(body.gatewayFeePct); if (r != null) patch.gatewayFeePct = r; }
+    if (body.cancellation && typeof body.cancellation === 'object') {
+      patch.cancellation = {};
+      if (Number.isFinite(Number(body.cancellation.windowDays)) && Number(body.cancellation.windowDays) >= 0) {
+        patch.cancellation.windowDays = Math.min(365, Math.floor(Number(body.cancellation.windowDays)));
+      }
+      if (typeof body.cancellation.prorate === 'boolean') patch.cancellation.prorate = body.cancellation.prorate;
+    }
+    if (body.countries && typeof body.countries === 'object') {
+      patch.countries = {};
+      for (const [code, cfg] of Object.entries(body.countries)) {
+        if (!cfg || typeof cfg !== 'object') continue;
+        const cc = String(code).toUpperCase().replace(/[^A-Z]/g, '').slice(0, 2);
+        if (cc.length === 2) patch.countries[cc] = cleanCountry(cfg);
+      }
+    }
+    if (body.DEFAULT && typeof body.DEFAULT === 'object') patch.DEFAULT = cleanCountry(body.DEFAULT);
+
+    // Reject any currency fx cannot convert — otherwise checkout would mis-charge.
+    for (const c of [...Object.values(patch.countries || {}), patch.DEFAULT].filter(Boolean)) {
+      if (c.currency && !SUPPORTED_CURRENCIES.has(c.currency)) {
+        return res.status(400).json({
+          error: `Unsupported currency "${c.currency}". Supported: ${[...SUPPORTED_CURRENCIES].join(', ')}.`,
+        });
+      }
+    }
+
+    const updated = await commerceCfg.updateCommerce(patch);
+    await audit('commerce_config_updated', 'AppConfig', 'singleton', 'fields: ' + Object.keys(patch).join(','));
+    res.json(updated);
+  } catch (err) { next(err); }
+});
+
 router.post('/llm/test', async (req, res, next) => {
   try {
     const r = await llm.test();

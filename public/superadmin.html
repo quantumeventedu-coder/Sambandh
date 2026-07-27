@@ -70,6 +70,7 @@
       <button id="tb-llm" onclick="show('llm')">AI Engine</button>
       <button id="tb-audit" onclick="show('audit')">Audit trail</button>
       <button id="tb-test" onclick="show('test')">System Test</button>
+      <button id="tb-commerce" onclick="show('commerce')">Commerce &amp; Tax</button>
     </div>
     <div id="view"></div>
   </div>
@@ -120,12 +121,83 @@ async function connect() {
 }
 
 function show(tab) {
-  ['overview','users','llm','audit','test'].forEach(t => $('#tb-'+t).classList.toggle('on', t===tab));
+  ['overview','users','llm','audit','test','commerce'].forEach(t => $('#tb-'+t).classList.toggle('on', t===tab));
   if (tab==='overview') renderOverview();
   if (tab==='users') renderUsers();
   if (tab==='llm') renderLLM();
   if (tab==='audit') renderAudit();
   if (tab==='test') renderTest();
+  if (tab==='commerce') renderCommerce();
+}
+
+// ---- Commerce & Tax editor: prices, per-country taxes, gateway fee, cancellation ----
+let COMMERCE = null;
+function catRow(code, k, v) {
+  return `<div class="crow" style="display:flex;gap:6px;align-items:center;margin:4px 0">
+    <input class="cat-k" value="${esc(k)}" placeholder="category" style="width:170px"/>
+    <input class="cat-v" type="number" step="0.1" min="0" max="100" value="${esc(v)}" style="width:80px"/><span style="color:#888">%</span></div>`;
+}
+function countryCard(code, cfg) {
+  const cats = Object.entries(cfg.categories || {}).map(([k, v]) => catRow(code, k, v)).join('');
+  return `<div class="card" data-country="${esc(code)}" style="margin-top:10px">
+    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+      <b style="font-size:15px">${esc(code)}</b>
+      <label>Currency <input class="c-cur" value="${esc(cfg.currency || '')}" style="width:64px"/></label>
+      <label>Tax label <input class="c-tax" value="${esc(cfg.taxName || '')}" style="width:100px"/></label>
+    </div>
+    <div class="cats" style="margin-top:8px">${cats}</div>
+    <button onclick="addCat(this)" style="margin-top:4px">+ category</button>
+  </div>`;
+}
+async function renderCommerce() {
+  try { COMMERCE = await api('/commerce'); }
+  catch (e) { $('#view').innerHTML = `<div class="card">${esc(e.message)}</div>`; return; }
+  const c = COMMERCE;
+  const countries = Object.entries(c.countries || {}).map(([code, cfg]) => countryCard(code, cfg)).join('');
+  $('#view').innerHTML = `
+    <div class="card">
+      <h3 style="font-family:Georgia,serif;margin-bottom:2px">Commerce &amp; Tax — editable per jurisdiction</h3>
+      <p style="color:#888;font-size:13px">Tax varies by government and changes over time — verify each rate against the current law for that jurisdiction. Edits apply to new checkouts immediately.</p>
+      <div style="display:flex;gap:18px;flex-wrap:wrap;margin-top:10px">
+        <label>Gateway fee % <input id="gw-fee" type="number" step="0.1" min="0" max="100" value="${esc(c.gatewayFeePct)}" style="width:80px"/></label>
+        <label>Cancellation window (days) <input id="cx-days" type="number" min="0" max="365" value="${esc(c.cancellation && c.cancellation.windowDays)}" style="width:70px"/></label>
+        <label><input id="cx-prorate" type="checkbox" ${c.cancellation && c.cancellation.prorate ? 'checked' : ''}/> Pro-rate refund</label>
+      </div>
+    </div>
+    ${countryCard('DEFAULT', c.DEFAULT)}
+    ${countries}
+    <div style="margin-top:12px;display:flex;gap:8px">
+      <button onclick="saveCommerce()">Save all</button>
+      <button onclick="addCountry()">+ country</button>
+    </div>`;
+}
+function addCat(btn) {
+  const box = btn.parentElement.querySelector('.cats');
+  box.insertAdjacentHTML('beforeend', catRow('', '', ''));
+}
+function addCountry() {
+  const code = (prompt('Country code (2-letter ISO, e.g. BR):') || '').toUpperCase().replace(/[^A-Z]/g, '').slice(0, 2);
+  if (code.length !== 2) return;
+  const cards = document.querySelectorAll('[data-country]');
+  const last = cards[cards.length - 1];
+  last.insertAdjacentHTML('afterend', countryCard(code, { currency: 'USD', taxName: 'Tax', categories: { default: 0 } }));
+}
+async function saveCommerce() {
+  const gatewayFeePct = parseFloat($('#gw-fee').value);
+  const cancellation = { windowDays: parseInt($('#cx-days').value, 10), prorate: $('#cx-prorate').checked };
+  const countries = {}; let DEFAULT = null;
+  document.querySelectorAll('[data-country]').forEach(card => {
+    const code = card.getAttribute('data-country');
+    const cfg = { currency: card.querySelector('.c-cur').value.trim(), taxName: card.querySelector('.c-tax').value.trim(), categories: {} };
+    card.querySelectorAll('.cats .crow').forEach(row => {
+      const k = row.querySelector('.cat-k').value.trim();
+      const v = parseFloat(row.querySelector('.cat-v').value);
+      if (k && Number.isFinite(v)) cfg.categories[k] = v;
+    });
+    if (code === 'DEFAULT') DEFAULT = cfg; else countries[code] = cfg;
+  });
+  try { COMMERCE = await apiPut('/commerce', { gatewayFeePct, cancellation, countries, DEFAULT }); toast('Saved ✓'); renderCommerce(); }
+  catch (e) { toast(e.message); }
 }
 
 async function renderTest() {

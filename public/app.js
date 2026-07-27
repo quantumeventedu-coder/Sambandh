@@ -1000,19 +1000,44 @@ async function loadPricing() {
 // Base membership is a single flat price for every member (CHF 5/month). The canonical
 // price is CHF; Indian members are billed the local ≈ equivalent so UPI works.
 const BASE_CHF_FLAT = 5;
+
+// Format a local-currency amount: whole (₹591) or 2dp (S$5.14) with grouping.
+function fmtMoney(sym, n) {
+  const whole = Math.round(n) === Number(n);
+  const v = whole ? Math.round(n).toLocaleString('en-IN') : Number(n).toFixed(2);
+  return `${sym}${v}`;
+}
+// The itemized, honest checkout breakdown (base + each tax line + gateway fee → total).
+function checkoutBreakdownHtml(q) {
+  const m = (n) => fmtMoney(q.symbol, n);
+  const taxLines = (q.taxLines || []).map(l =>
+    `<div class="co-row"><span>${esc(l.label)}</span><span>${m(l.amount)}</span></div>`).join('');
+  return `<div class="co-row"><span>Membership</span><span>${m(q.base)}</span></div>
+    ${taxLines}
+    ${q.gatewayFee ? `<div class="co-row co-muted"><span>Payment fee · ${q.gatewayFeePct}%</span><span>${m(q.gatewayFee)}</span></div>` : ''}
+    <div class="co-row co-total"><span>Total</span><span>${m(q.total)} ${esc(q.code)}</span></div>
+    <div class="co-note">Canonical price CHF ${q.chf}${q.taxRate ? ` · incl. ${esc(q.taxName)} ${q.taxRate}%` : ''} · live rate</div>`;
+}
+// Fetch the server-authoritative quote and fill the breakdown container.
+async function loadCheckoutQuote(purpose, elId) {
+  elId = elId || 'co-breakdown';
+  try {
+    const q = await api('/payment/quote?purpose=' + encodeURIComponent(purpose));
+    S._quote = Object.assign({}, q, { purpose });
+    const el = document.getElementById(elId);
+    if (el) el.innerHTML = checkoutBreakdownHtml(q);
+  } catch (e) { /* keep the loading state; Pay still uses the server total */ }
+}
+
 function obPay() {
-  const p = pricingView();
-  const g = S.user.profile.gender;
-  const country = (S.user.profile && S.user.profile.country) || 'IN';
-  const localFee = p.base[g] ?? p.base.male;
-  const showLocal = country === 'IN' && p.sym && p.sym.trim() !== 'CHF';
+  setTimeout(() => loadCheckoutQuote('base_subscription'), 0);
   return `<div class="section-pad">
     <h1>Start your membership</h1>
     <p class="sub">Nothing here is free — every member pays the same, honestly. That's what keeps bots and time-wasters out.</p>
     <div class="card center price-hero">
       <div class="price-big">CHF ${BASE_CHF_FLAT}</div>
       <div class="price-per">per month · one price for everyone</div>
-      ${showLocal ? `<div class="price-approx">≈ ${p.sym}${localFee} · billed in ₹ so UPI works · approx</div>` : ''}
+      <div id="co-breakdown" class="co-breakdown"><div class="co-loading">Calculating taxes &amp; total…</div></div>
       <ul class="trust-points">
         <li>Full verified access — the Lakshan Book &amp; safety alerts</li>
         <li>Astrology &amp; compatibility insights, every day</li>
@@ -1020,7 +1045,7 @@ function obPay() {
       </ul>
     </div>
     <button class="btn" onclick="obPayNow()">Pay with UPI / Card</button>
-    <div class="pay-trust">Cancel anytime · Secure payment via Razorpay · Verified members only · No hidden charges</div>
+    <div class="pay-trust">Cancel within 2 days for a pro-rated refund · Secure payment via Razorpay · Taxes itemised above · No hidden charges</div>
   </div>`;
 }
 
@@ -2469,20 +2494,40 @@ function tierCards(u) {
         'See who values your profile',
         'Priority support & early access to new experiences'
       ], false)
-    + `</div>
-    <div class="plan-trust">Cancel anytime · Secure payments · Verified members only · No hidden charges · Privacy-first</div>
+    + `</div>`
+    + (cur !== 'free'
+      ? `<div class="center" style="margin-top:14px"><button class="btn danger small" onclick="cancelMembership()">Cancel membership</button></div>`
+      : '')
+    + `<div class="plan-trust">Cancel within 2 days for a pro-rated refund · Secure payments · Verified members only · Taxes &amp; fees itemised at checkout · Privacy-first</div>
     <p class="plan-philosophy">Membership supports a safer, verified relationship community — not advertising or engagement tricks.</p>`;
 }
 
+async function cancelMembership() {
+  if (!confirm('Cancel your membership?\n\nWithin the refund window you get a pro-rated refund for the unused time. After the window, cancellation isn\'t available and your membership simply runs to its expiry.')) return;
+  try {
+    const r = await api('/payment/cancel-subscription', { method: 'POST', body: {} });
+    toast(r.refunded ? `Cancelled — pro-rated refund ${r.currency} ${r.refundAmount} on the way` : 'Membership cancelled');
+    S.user = (await api('/auth/me')).user;
+    renderSettings();
+  } catch (e) { toast(e.message); }
+}
+
 async function buyTier(purpose) {
-  const p = pricingView();
   const annual = purpose.endsWith('_annual');
   const stem = purpose.replace(/_(subscription|annual)$/, '');
   const label = stem === 'max' ? 'Sambandh Signature' : stem === 'pro' ? 'Sambandh Plus' : 'Sambandh Essential';
-  const price = annual ? (p.annual?.[stem] ?? '') : (stem === 'base' ? (p.base[S.user.profile?.gender] ?? p.base.male) : p[stem]);
   const per = annual ? 'year' : 'month';
-  const name = `${label} (${p.sym}${price}/${per})`;
-  if (!confirm(`Subscribe to ${name}? ${annual ? '365' : '30'} days from today.`)) return;
+  const name = label;
+  // Show the real itemized total (base + tax + gateway fee) before charging.
+  let msg = `Subscribe to ${label}? ${annual ? '365' : '30'} days from today.`;
+  try {
+    const q = await api('/payment/quote?purpose=' + encodeURIComponent(purpose));
+    const parts = [`Membership   ${fmtMoney(q.symbol, q.base)}`];
+    (q.taxLines || []).forEach(l => parts.push(`${l.label}   ${fmtMoney(q.symbol, l.amount)}`));
+    if (q.gatewayFee) parts.push(`Payment fee ${q.gatewayFeePct}%   ${fmtMoney(q.symbol, q.gatewayFee)}`);
+    msg = `${label} · per ${per}\n\n${parts.join('\n')}\n────────────\nTotal   ${fmtMoney(q.symbol, q.total)} ${q.code}\n(canonical CHF ${q.chf})`;
+  } catch (e) { /* fall back to the simple confirm */ }
+  if (!confirm(msg)) return;
   try {
     const order = await api('/payment/create-order', { method: 'POST', body: { purpose } });
     if (order.devMode) {

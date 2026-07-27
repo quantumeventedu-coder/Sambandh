@@ -3,7 +3,10 @@
 // the current exchange rate. Rates come from frankfurter.app (free, ECB data, no
 // key), cached ~12h, with a static fallback so payments never break if it's down.
 
-const FALLBACK = { INR: 95, USD: 1.1, EUR: 1.05, GBP: 0.88, AED: 4.0, SGD: 1.5 };
+// Static fallback used only when the live rate API is unreachable. Kept current-ish so
+// an outage never mis-quotes badly (the old INR: 95 under-quoted CHF 5 at ₹475 instead
+// of ~₹590). Live rates from frankfurter.app override these whenever available.
+const FALLBACK = { INR: 118, USD: 1.1, EUR: 1.05, GBP: 0.88, AED: 4.0, SGD: 1.5, AUD: 1.7, CAD: 1.5, JPY: 165 };
 const TTL = 12 * 3600 * 1000;
 let cache = { at: 0, rates: {} };
 
@@ -22,7 +25,10 @@ async function ratesFromCHF() {
 async function convertFromCHF(chf, to) {
   if (!to || to === 'CHF') return chf;
   const rates = await ratesFromCHF();
-  const rate = rates[to] || FALLBACK[to] || 1;
+  // Fail CLOSED: an unknown currency must NOT silently default to a 1:1 rate (that
+  // undercharges ~99%). Only currencies we can actually convert are chargeable.
+  const rate = rates[to] || FALLBACK[to];
+  if (!rate) throw new Error(`No exchange rate available for currency "${to}" — configure a supported currency before charging this jurisdiction.`);
   const val = chf * rate;
   // Sub-unit CHF prices (e.g. CHF 0.5 escalation) keep 2 decimals; whole ones round.
   return chf < 1 ? Math.round(val * 100) / 100 : Math.round(val);

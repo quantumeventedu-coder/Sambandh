@@ -60,7 +60,8 @@ app.use('/payment', paymentRouter);
 
 beforeAll(db.start);
 afterAll(db.stop);
-afterEach(async () => { await db.clear(); jest.clearAllMocks(); });
+const commerce = require('../src/services/commerce-config');
+afterEach(async () => { await db.clear(); jest.clearAllMocks(); commerce._resetCache(); });
 
 const mkUser = async (gender = 'male', country = 'IN') => User.create({
   _id: TEST_USER_ID,
@@ -273,6 +274,126 @@ describe('webhook — only Razorpay may call it', () => {
         .send(b);
       expect(r.status).toBeGreaterThanOrEqual(400);   // refused, never 200
     } finally { process.env.RAZORPAY_WEBHOOK_SECRET = saved; }
+  });
+});
+
+describe('itemized checkout — base + tax + gateway fee is server-authoritative', () => {
+  test('an India subscription breaks down GST 18% + 2.7% gateway fee and charges the total', async () => {
+    await mkUser('female', 'IN');
+    const r = await request(app).post('/payment/create-order').send({ purpose: 'base_subscription' });
+    expect(r.status).toBe(200);
+    expect(r.body.amountCHF).toBe(5);                 // canonical CHF base unchanged
+    expect(r.body.currency).toBe('INR');
+    const b = r.body.breakdown;
+    expect(b.base).toBe(500);                          // CHF 5 × 100 (mocked fx)
+    expect(b.taxName).toBe('GST');
+    expect(b.taxRate).toBe(18);
+    expect(b.taxTotal).toBe(90);                       // 18% of 500
+    expect(b.gatewayFeePct).toBe(2.7);
+    expect(b.gatewayFee).toBe(15.93);                  // 2.7% of 590
+    expect(b.total).toBe(605.93);                      // 500 + 90 + 15.93
+    expect(r.body.amount).toBe(60593);                 // the minor units actually charged
+    // the breakdown is persisted, so /verify + refunds read it from the DB
+    const row = await Payment.findOne({ razorpayOrderId: 'order_live_TEST123' });
+    expect(row.amountCHF).toBe(5);
+    expect(row.metadata.total).toBe(605.93);
+    expect(row.metadata.taxRate).toBe(18);
+    expect(row.metadata.country).toBe('IN');
+  });
+
+  test('a US subscription applies the gateway fee but 0 tax (state sales tax is operator-configured)', async () => {
+    await mkUser('male', 'US');
+    const r = await request(app).post('/payment/create-order').send({ purpose: 'base_subscription' });
+    expect(r.body.currency).toBe('USD');
+    expect(r.body.breakdown.taxRate).toBe(0);
+    expect(r.body.breakdown.taxTotal).toBe(0);
+    expect(r.body.breakdown.gatewayFee).toBe(13.5);    // 2.7% of 500
+    expect(r.body.breakdown.total).toBe(513.5);
+  });
+
+  test('a zero-decimal currency (JPY) is NOT multiplied by 100 for the gateway', async () => {
+    await commerce.updateCommerce({ countries: { JP: { currency: 'JPY', taxName: 'CT', categories: { subscription: 0, default: 0 } } } });
+    await mkUser('male', 'JP');
+    const r = await request(app).post('/payment/create-order').send({ purpose: 'base_subscription' });
+    expect(r.body.currency).toBe('JPY');
+    // base 500 (mock fx) + 0 tax + 2.7% fee = 513.5; JPY minor = round(513.5) = 514, NOT 51350
+    expect(r.body.amount).toBe(Math.round(r.body.breakdown.total));
+    expect(r.body.amount).toBeLessThan(1000);
+  });
+
+  test('GET /payment/quote returns the display breakdown without creating an order', async () => {
+    await mkUser('male', 'IN');
+    const r = await request(app).get('/payment/quote').query({ purpose: 'pro_subscription' });
+    expect(r.status).toBe(200);
+    expect(r.body.chf).toBe(12);
+    expect(r.body.base).toBe(1200);
+    expect(r.body.taxTotal).toBe(216);                 // 18% of 1200
+    expect(r.body.gatewayFee).toBe(38.23);             // 2.7% of 1416
+    expect(r.body.total).toBe(1454.23);
+    expect(await Payment.countDocuments({})).toBe(0);  // quote must not create an order
+  });
+});
+
+describe('cancellation — pro-rated within the window, refused after', () => {
+  const DAY = 86400000;
+  test('cancelling within the window refunds the unused fraction and frees the tier', async () => {
+    await User.create({
+      _id: TEST_USER_ID, phone: '+919000000009',
+      profile: { firstName: 'T', gender: 'female', country: 'IN', age: 30, city: 'Mumbai' },
+      membership: { tier: 'base', joinFeePaid: true, paidAt: new Date(), tierExpiresAt: new Date(Date.now() + 30 * DAY) },
+    });
+    await Payment.create({
+      userId: TEST_USER_ID, purpose: 'base_subscription', amountCHF: 5, currency: 'INR',
+      razorpayOrderId: 'order_live_TEST123', razorpayPaymentId: 'pay_live_cancel',
+      status: 'captured', capturedAt: new Date(), metadata: { total: 605.93, amountLocal: 605.93 },
+    });
+    const r = await request(app).post('/payment/cancel-subscription').send({});
+    expect(r.status).toBe(200);
+    expect(r.body.refunded).toBe(true);
+    expect(r.body.currency).toBe('INR');
+    expect(r.body.fraction).toBeGreaterThan(0.99);       // ~all of the 30 days unused
+    expect(r.body.refundAmount).toBeGreaterThan(600);    // ~605.93 × ~1
+    const user = await User.findById(TEST_USER_ID);
+    expect(user.membership.tier).toBe('free');
+    expect(user.membership.tierExpiresAt == null).toBe(true);
+    expect((await Payment.findOne({ razorpayPaymentId: 'pay_live_cancel' })).status).toBe('refunded');
+  });
+
+  test('a second cancel never double-refunds (payment refunded exactly once)', async () => {
+    await User.create({
+      _id: TEST_USER_ID, phone: '+919000000011',
+      profile: { firstName: 'T', gender: 'female', country: 'IN', age: 30, city: 'Mumbai' },
+      membership: { tier: 'base', joinFeePaid: true, paidAt: new Date(), tierExpiresAt: new Date(Date.now() + 30 * DAY) },
+    });
+    await Payment.create({
+      userId: TEST_USER_ID, purpose: 'base_subscription', amountCHF: 5, currency: 'INR',
+      razorpayOrderId: 'order_live_TEST200', razorpayPaymentId: 'pay_live_dc',
+      status: 'captured', capturedAt: new Date(), metadata: { total: 605.93 },
+    });
+    const first = await request(app).post('/payment/cancel-subscription').send({});
+    expect(first.status).toBe(200);
+    const second = await request(app).post('/payment/cancel-subscription').send({});
+    expect([400, 409]).toContain(second.status);         // refused, not a second refund
+    // the payment is refunded exactly once (its terminal state is 'refunded', not re-refundable)
+    expect((await Payment.findOne({ razorpayPaymentId: 'pay_live_dc' })).status).toBe('refunded');
+    expect(await Payment.countDocuments({ userId: TEST_USER_ID, status: 'refunded' })).toBe(1);
+  });
+
+  test('cancelling after the 2-day window is refused; membership is untouched', async () => {
+    await User.create({
+      _id: TEST_USER_ID, phone: '+919000000010',
+      profile: { firstName: 'T', gender: 'male', country: 'IN', age: 30, city: 'Mumbai' },
+      membership: { tier: 'base', joinFeePaid: true, paidAt: new Date(Date.now() - 5 * DAY), tierExpiresAt: new Date(Date.now() + 25 * DAY) },
+    });
+    await Payment.create({
+      userId: TEST_USER_ID, purpose: 'base_subscription', amountCHF: 5, currency: 'INR',
+      razorpayOrderId: 'order_live_TEST124', razorpayPaymentId: 'pay_live_late',
+      status: 'captured', capturedAt: new Date(Date.now() - 5 * DAY), metadata: { total: 605.93 },
+    });
+    const r = await request(app).post('/payment/cancel-subscription').send({});
+    expect(r.status).toBe(403);
+    const user = await User.findById(TEST_USER_ID);
+    expect(user.membership.tier).toBe('base');
   });
 });
 
