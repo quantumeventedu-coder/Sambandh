@@ -10,7 +10,7 @@ const path = require('path');
 const html = fs.readFileSync(path.join(__dirname, '..', 'public', 'home.html'), 'utf8');
 // Scope the copy checks to the hero visual itself, so unrelated astrology terms
 // elsewhere on the page (e.g. the features section's Guna Milan / nakshatra) can't leak in.
-const dStart = html.indexOf('class="stage nd-stage"');
+const dStart = html.indexOf('class="nd-stage"');
 const dEnd = html.indexOf('</section>', dStart);
 const dial = html.slice(dStart, dEnd > -1 ? dEnd : dStart + 4000);
 
