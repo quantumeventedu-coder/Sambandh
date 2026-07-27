@@ -38,6 +38,8 @@ if (!DEV_PAYMENTS) {
 const fx = require('./services/fx');
 const commerce = require('./services/commerce-config');
 const tax = require('./services/tax');
+const wallet = require('./services/wallet');
+const { toMinor } = require('./services/money');
 
 /**
  * The Razorpay secret, or a loud failure. Signature verification must NEVER run
@@ -89,13 +91,8 @@ const LEGACY_PURPOSES = {
 /** @type {Record<string, string>} */
 const SYMBOLS = { INR: '₹', CHF: 'CHF ', USD: '$', EUR: '€', GBP: '£', AED: 'AED ', SGD: 'S$', AUD: 'A$', CAD: 'C$', JPY: '¥' };
 
-// Zero-decimal (exponent-0) currencies: the major unit IS the smallest unit, so the
-// gateway amount MUST NOT be multiplied by 100 (¥932 is 932, not 93200). Everything
-// else is 2-decimal. Charging the gateway uses minor units, so this must be exact.
-const ZERO_DECIMAL = new Set(['JPY', 'KRW', 'VND', 'CLP', 'ISK', 'XAF', 'XOF', 'BIF', 'DJF', 'GNF', 'KMF', 'MGA', 'PYG', 'RWF', 'UGX', 'VUV', 'XPF']);
-/** Convert a major-unit amount to the gateway's minor units for a currency.
- * @param {number} amount @param {string} code @returns {number} */
-const toMinor = (amount, code) => (ZERO_DECIMAL.has(String(code)) ? Math.round(amount) : Math.round(amount * 100));
+// Gateway amounts are charged in minor units (services/money.toMinor is currency-
+// exponent-aware, so ¥932 stays 932, not 93200).
 
 /**
  * Map a payment purpose to a tax category (so the right rate applies per jurisdiction).
@@ -361,6 +358,85 @@ router.post('/cancel-subscription', requireAuth, async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+// ---- WALLET: stored value, so members can pay without a gateway each time (and in
+// countries where UPI/cards are awkward). Paying FROM the wallet skips the per-txn
+// gateway fee; the fee was already paid at top-up. ------------------------------------
+
+// GET /payment/wallet — balance + recent ledger.
+router.get('/wallet', requireAuth, async (req, res, next) => {
+  try {
+    const [w, history] = await Promise.all([wallet.getWallet(req.userId), wallet.history(req.userId, 30)]);
+    res.json({ ...w, history });
+  } catch (e) { next(e); }
+});
+
+// POST /payment/wallet/topup { amount } — add funds. Charges (amount + gateway fee) via
+// the gateway; on capture (/verify) the wallet is credited `amount` (no tax — storing
+// value is not a taxable supply).
+router.post('/wallet/topup', requireAuth, async (req, res, next) => {
+  try {
+    const user = await User.findById(req.userId);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+    const amount = Math.round((Number(req.body.amount) || 0) * 100) / 100;
+    if (!(amount > 0)) return res.status(400).json({ error: 'Enter a top-up amount' });
+    const cc = await commerce.countryConfig((user.profile && user.profile.country) || 'IN');
+    const cfg = await commerce.getCommerce();
+    const code = cc.currency;
+    const w = await wallet.getWallet(user._id);
+    if (w.currency && w.balance > 0 && w.currency !== code) {
+      return res.status(400).json({ error: `Your wallet holds ${w.currency}; top up in ${w.currency}.` });
+    }
+    const q = tax.computeQuote({ components: [{ label: 'Top-up', amount, rate: 0 }], gatewayFeePct: cfg.gatewayFeePct });
+    const meta = { topupAmount: amount, gatewayFee: q.gatewayFee, total: q.total, currency: code, amountLocal: q.total };
+    const clientQuote = { amount: toMinor(q.total, code), amountMajor: q.total, currency: code, symbol: SYMBOLS[code] || (code + ' '), purpose: 'wallet_topup', topupAmount: amount, gatewayFee: q.gatewayFee };
+
+    if (DEV_PAYMENTS) {
+      const orderId = 'order_dev_' + crypto.randomBytes(8).toString('hex');
+      await Payment.create({ userId: req.userId, purpose: 'wallet_topup', amountCHF: 0, currency: code, razorpayOrderId: orderId, status: 'created', createdAt: new Date(), metadata: { dev: true, ...meta } });
+      return res.json({ devMode: true, orderId, ...clientQuote });
+    }
+    if (!razorpay) return res.status(503).json({ error: 'Payments are not configured.' });
+    const order = await razorpay.orders.create({ amount: toMinor(q.total, code), currency: code, receipt: `wt_${Date.now().toString(36)}_${String(user._id).slice(-6)}`, notes: { userId: String(user._id), purpose: 'wallet_topup' } });
+    await Payment.create({ userId: req.userId, purpose: 'wallet_topup', amountCHF: 0, currency: code, razorpayOrderId: order.id, status: 'created', createdAt: new Date(), metadata: meta });
+    res.json({ orderId: order.id, ...clientQuote, key: process.env.RAZORPAY_KEY_ID, prefill: { name: user.profile.firstName, contact: user.phone } });
+  } catch (e) { next(e); }
+});
+
+// POST /payment/pay-wallet { purpose } — pay a membership plan from the wallet. NO gateway
+// fee (internal): total = base + tax. Atomic debit; if fulfillment fails, auto-refund.
+router.post('/pay-wallet', requireAuth, async (req, res, next) => {
+  try {
+    const user = await User.findById(req.userId);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+    const purpose = LEGACY_PURPOSES[req.body.purpose] || req.body.purpose || 'base_subscription';
+    if (!/_(subscription|annual)$/.test(purpose)) return res.status(400).json({ error: 'Wallet payment supports membership plans here.' });
+    const quote = await quoteFor(purpose, user);
+    if (!quote) return res.status(400).json({ error: 'Unknown purpose' });
+    const walletTotal = Math.round((quote.base + quote.taxTotal) * 100) / 100;   // base + tax, no gateway fee
+    const cur = quote.code;
+    const w = await wallet.getWallet(user._id);
+    if (w.currency && w.currency !== cur) return res.status(400).json({ error: `Your wallet holds ${w.currency}, but this is priced in ${cur}.` });
+    if (w.balance < walletTotal) return res.status(402).json({ error: 'Insufficient wallet balance', needed: walletTotal, balance: w.balance, currency: cur });
+
+    // Atomic debit first; the balance guard prevents overspend/double-pay.
+    const after = await wallet.debit(user._id, walletTotal, cur, { purpose, note: `Membership (${purpose})` });
+    if (!after) return res.status(402).json({ error: 'Insufficient wallet balance', currency: cur });
+    try {
+      const payment = await Payment.create({
+        userId: req.userId, purpose: purpose.replace('_high', ''), amountCHF: quote.chf, currency: cur,
+        status: 'captured', method: 'wallet', capturedAt: new Date(), createdAt: new Date(),
+        metadata: { base: quote.base, taxTotal: quote.taxTotal, total: walletTotal, country: quote.country, category: quote.category, paidFromWallet: true },
+      });
+      await activateTier(String(req.userId), purpose, payment);
+      res.json({ ok: true, paidFromWallet: true, amount: walletTotal, currency: cur, balance: after.balance, paymentId: payment._id });
+    } catch (fulfillErr) {
+      // Roll the money back if we couldn't grant what they paid for.
+      await wallet.credit(user._id, walletTotal, cur, { type: 'refund', purpose, note: 'Auto-refund: fulfillment failed' });
+      throw fulfillErr;
+    }
+  } catch (e) { next(e); }
+});
+
 // GET /payment/pricing — live, localized prices for display (server order is authoritative)
 router.get('/pricing', requireAuth, async (req, res, next) => {
   try {
@@ -407,6 +483,7 @@ router.post('/verify', requireAuth, async (req, res, next) => {
 
       if (payment.purpose === 'join_fee') await markJoinFeePaid(userId, payment); // legacy stored orders
       if (/_(subscription|annual)$/.test(payment.purpose)) await activateTier(userId, payment.purpose, payment);
+      if (payment.purpose === 'wallet_topup') await wallet.credit(userId, payment.metadata.topupAmount, payment.metadata.currency, { type: 'topup', ref: String(payment._id), note: 'Wallet top-up' });
       return res.json({ ok: true, devMode: true, paymentId: payment._id, purpose: payment.purpose });
     }
 
@@ -446,6 +523,7 @@ router.post('/verify', requireAuth, async (req, res, next) => {
 
     if (purpose === 'join_fee') await markJoinFeePaid(userId, payment); // legacy stored orders
     if (/_(subscription|annual)$/.test(purpose)) await activateTier(userId, purpose, payment);
+    if (purpose === 'wallet_topup') await wallet.credit(userId, payment.metadata.topupAmount, payment.metadata.currency, { type: 'topup', ref: String(payment._id), note: 'Wallet top-up' });
 
     res.json({ ok: true, paymentId: payment._id, purpose });
   } catch (err) { next(err); }

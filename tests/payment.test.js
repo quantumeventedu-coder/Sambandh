@@ -397,6 +397,45 @@ describe('cancellation — pro-rated within the window, refused after', () => {
   });
 });
 
+describe('wallet — top-up credits on capture; pay-from-wallet debits base+tax and activates', () => {
+  const walletSvc = require('../src/services/wallet');
+
+  test('top-up charges amount + gateway fee; /verify credits the wallet the amount only', async () => {
+    await mkUser('female', 'IN');
+    const topup = await request(app).post('/payment/wallet/topup').send({ amount: 1000 });
+    expect(topup.status).toBe(200);
+    expect(topup.body.purpose).toBe('wallet_topup');
+    expect(topup.body.topupAmount).toBe(1000);
+    expect(topup.body.amountMajor).toBe(1027);             // 1000 + 2.7% gateway fee
+    const orderId = 'order_live_TEST123', paymentId = 'pay_live_wt';
+    const v = await request(app).post('/payment/verify').send({ razorpay_order_id: orderId, razorpay_payment_id: paymentId, razorpay_signature: sign(orderId, paymentId) });
+    expect(v.body.purpose).toBe('wallet_topup');
+    const w = await request(app).get('/payment/wallet');
+    expect(w.body.currency).toBe('INR');
+    expect(w.body.balance).toBe(1000);                     // credited the amount, NOT amount+fee
+  });
+
+  test('pay-from-wallet debits base+tax with NO gateway fee, and activates the tier', async () => {
+    await mkUser('female', 'IN');
+    await walletSvc.credit(TEST_USER_ID, 700, 'INR', { type: 'topup' });
+    const r = await request(app).post('/payment/pay-wallet').send({ purpose: 'base_subscription' });
+    expect(r.status).toBe(200);
+    expect(r.body.paidFromWallet).toBe(true);
+    expect(r.body.amount).toBe(590);                       // base 500 + GST 90, NO 2.7% fee
+    expect(r.body.balance).toBe(110);                      // 700 - 590
+    expect((await User.findById(TEST_USER_ID)).membership.tier).toBe('base');
+  });
+
+  test('pay-from-wallet with insufficient balance returns 402 and grants nothing', async () => {
+    await mkUser('male', 'IN');
+    await walletSvc.credit(TEST_USER_ID, 100, 'INR', { type: 'topup' });
+    const r = await request(app).post('/payment/pay-wallet').send({ purpose: 'base_subscription' });
+    expect(r.status).toBe(402);
+    expect((await User.findById(TEST_USER_ID)).membership?.tier).not.toBe('base');
+    expect((await walletSvc.getWallet(TEST_USER_ID)).balance).toBe(100);   // untouched
+  });
+});
+
 describe('pricing endpoint', () => {
   test('quotes live-converted local currency for an Indian user', async () => {
     await mkUser('female', 'IN');
