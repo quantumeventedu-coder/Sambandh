@@ -44,7 +44,20 @@ describe('wallet credit/debit ledger', () => {
     expect((await wallet.getWallet(u)).balance).toBe(100);
   });
 
-  test('a different-currency top-up is rejected while a balance exists', async () => {
+  test('a concurrent credit does not clobber a concurrent debit (no lost update)', async () => {
+    const u = uid();
+    await wallet.credit(u, 500, 'INR');
+    // Race a +100 credit against a -400 debit on the same 500 balance.
+    await Promise.all([wallet.credit(u, 100, 'INR'), wallet.debit(u, 400, 'INR')]);
+    // Both must apply: 500 + 100 - 400 = 200 (before the fix, credit's read-then-write
+    // clobbered the debit and the balance was wrong/inflated).
+    expect((await wallet.getWallet(u)).balance).toBe(200);
+    const h = await wallet.history(u);
+    expect(h.filter((t) => t.type === 'spend').length).toBe(1);
+    expect(h.filter((t) => t.type === 'topup').length).toBe(2);
+  });
+
+  test('a different-currency top-up is rejected (single-currency wallet)', async () => {
     const u = uid();
     await wallet.credit(u, 100, 'INR');
     await expect(wallet.credit(u, 5, 'USD')).rejects.toThrow(/holds INR/);

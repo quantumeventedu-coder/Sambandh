@@ -27,28 +27,53 @@ async function getWallet(userId) {
   return { userId: String(userId), currency, balanceMinor, balance: currency ? fromMinor(balanceMinor, currency) : 0 };
 }
 
+/** A currency-mismatch error the caller can detect (`err.code === 'WALLET_CURRENCY'`)
+ * and reconcile, rather than crashing a captured top-up. @param {string} msg */
+function currencyError(msg) { const e = new Error(msg); /** @type {any} */ (e).code = 'WALLET_CURRENCY'; return e; }
+
 /**
- * Atomic CREDIT (top-up / refund). The wallet is single-currency: adding a different
- * currency while a balance exists is rejected (a wallet can't hold two currencies).
+ * Atomic CREDIT (top-up / refund). Uses the SAME genuinely-atomic conditional update as
+ * debit (not read-then-write), so a concurrent debit can never be clobbered. The wallet
+ * is single-currency and its currency is fixed at creation; a different-currency credit
+ * is rejected. Balance and ledger are kept consistent (ledger failure rolls the balance
+ * back).
  * @param {any} userId @param {number} amountMajor @param {string} currency
  * @param {{type?:string, ref?:string, purpose?:string, note?:string}} [meta]
  */
 async function credit(userId, amountMajor, currency, meta = {}) {
   const addMinor = toMinor(amountMajor, currency);
   if (!(addMinor > 0)) throw new Error('Credit amount must be positive');
-  const existing = await Wallet.findOne({ userId });
-  if (existing && existing.balanceMinor > 0 && existing.currency && existing.currency !== currency) {
-    throw new Error(`Wallet holds ${existing.currency}; cannot add ${currency}.`);
+
+  // Common path: atomic same-currency increment (server-side against the committed row).
+  let w = await atomicUpdate(Wallet, { userId, currency },
+    { $inc: { balanceMinor: addMinor }, $set: { updatedAt: new Date() } });
+
+  if (!w) {
+    // No same-currency wallet: either none exists (first top-up) or it holds another
+    // currency (reject — a wallet is single-currency).
+    const existing = await Wallet.findOne({ userId });
+    if (existing) throw currencyError(`Wallet holds ${existing.currency}; cannot add ${currency}.`);
+    try {
+      // First top-up: an atomic insert. The unique userId serialises concurrent creates.
+      w = await Wallet.create({ userId, currency, balanceMinor: addMinor, updatedAt: new Date() });
+    } catch {
+      // A concurrent create won the row — retry the same-currency atomic increment.
+      w = await atomicUpdate(Wallet, { userId, currency },
+        { $inc: { balanceMinor: addMinor }, $set: { updatedAt: new Date() } });
+      if (!w) throw currencyError(`Wallet was created in a different currency; cannot add ${currency}.`);
+    }
   }
-  const w = await Wallet.findOneAndUpdate(
-    { userId },
-    { $inc: { balanceMinor: addMinor }, $set: { currency, updatedAt: new Date() }, $setOnInsert: { userId } },
-    { upsert: true, new: true },
-  );
-  await WalletTransaction.create({
-    userId, type: meta.type || 'topup', amountMinor: addMinor, currency,
-    balanceAfterMinor: w.balanceMinor, ref: meta.ref, purpose: meta.purpose, note: meta.note,
-  });
+
+  // Ledger — compensate on failure so balance and ledger can never diverge.
+  try {
+    await WalletTransaction.create({
+      userId, type: meta.type || 'topup', amountMinor: addMinor, currency,
+      balanceAfterMinor: w.balanceMinor, ref: meta.ref, purpose: meta.purpose, note: meta.note,
+    });
+  } catch (ledgerErr) {
+    await atomicUpdate(Wallet, { userId, currency }, { $inc: { balanceMinor: -addMinor }, $set: { updatedAt: new Date() } });
+    throw ledgerErr;
+  }
   return getWallet(userId);
 }
 
@@ -71,10 +96,17 @@ async function debit(userId, amountMajor, currency, meta = {}) {
     { $inc: { balanceMinor: -subMinor }, $set: { updatedAt: new Date() } },
   );
   if (!w) return null;
-  await WalletTransaction.create({
-    userId, type: 'spend', amountMinor: -subMinor, currency,
-    balanceAfterMinor: w.balanceMinor, ref: meta.ref, purpose: meta.purpose, note: meta.note,
-  });
+  // Ledger — compensate on failure so a debit either fully succeeds (balance + ledger)
+  // or leaves the balance untouched.
+  try {
+    await WalletTransaction.create({
+      userId, type: 'spend', amountMinor: -subMinor, currency,
+      balanceAfterMinor: w.balanceMinor, ref: meta.ref, purpose: meta.purpose, note: meta.note,
+    });
+  } catch (ledgerErr) {
+    await atomicUpdate(Wallet, { userId, currency }, { $inc: { balanceMinor: subMinor }, $set: { updatedAt: new Date() } });
+    throw ledgerErr;
+  }
   return getWallet(userId);
 }
 

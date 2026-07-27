@@ -316,13 +316,20 @@ router.post('/cancel-subscription', requireAuth, async (req, res, next) => {
 
     // Refund at the gateway (real partial refund in prod; simulated in dev), then
     // finalize the claimed row. On a gateway error, roll the claim back to 'captured'.
+    // Wallet-paid subscriptions have NO gateway charge to reverse — the refund must go
+    // back to the wallet, not to a razorpay payment that doesn't exist.
+    const fromWallet = !!(claimed && (claimed.method === 'wallet' || (claimed.metadata && claimed.metadata.paidFromWallet)));
     if (claimed) {
       try {
-        if (refundAmount > 0 && !DEV_PAYMENTS && razorpay && claimed.razorpayPaymentId) {
-          await razorpay.payments.refund(claimed.razorpayPaymentId, {
-            amount: toMinor(refundAmount, currency), speed: 'normal',
-            notes: { idempotency: `refund_${claimed._id}` },
-          });
+        if (refundAmount > 0) {
+          if (fromWallet) {
+            await wallet.credit(userId, refundAmount, currency, { type: 'refund', purpose: 'cancellation', ref: String(claimed._id), note: 'Membership cancellation refund' });
+          } else if (!DEV_PAYMENTS && razorpay && claimed.razorpayPaymentId) {
+            await razorpay.payments.refund(claimed.razorpayPaymentId, {
+              amount: toMinor(refundAmount, currency), speed: 'normal',
+              notes: { idempotency: `refund_${claimed._id}` },
+            });
+          }
         }
         claimed.status = 'refunded';
         claimed.refundedAt = new Date();
@@ -343,7 +350,9 @@ router.post('/cancel-subscription', requireAuth, async (req, res, next) => {
       await Notification.create({
         userId, type: 'membership_cancelled', severity: 'info', title: 'Membership cancelled',
         body: refundAmount > 0
-          ? `Your membership is cancelled. A pro-rated refund of ${currency} ${refundAmount} (for the unused time) reaches your account in 5–7 working days.`
+          ? (fromWallet
+              ? `Your membership is cancelled. A pro-rated refund of ${currency} ${refundAmount} (for the unused time) has been added back to your wallet.`
+              : `Your membership is cancelled. A pro-rated refund of ${currency} ${refundAmount} (for the unused time) reaches your account in 5–7 working days.`)
           : 'Your membership is cancelled.',
       });
     } catch { /* notification is best-effort */ }
@@ -383,7 +392,9 @@ router.post('/wallet/topup', requireAuth, async (req, res, next) => {
     const cfg = await commerce.getCommerce();
     const code = cc.currency;
     const w = await wallet.getWallet(user._id);
-    if (w.currency && w.balance > 0 && w.currency !== code) {
+    // Reject a mismatched currency even at zero balance — a wallet is single-currency,
+    // and a mismatched top-up would strand at capture (credit() rejects it) after charging.
+    if (w.currency && w.currency !== code) {
       return res.status(400).json({ error: `Your wallet holds ${w.currency}; top up in ${w.currency}.` });
     }
     const q = tax.computeQuote({ components: [{ label: 'Top-up', amount, rate: 0 }], gatewayFeePct: cfg.gatewayFeePct });
@@ -421,8 +432,9 @@ router.post('/pay-wallet', requireAuth, async (req, res, next) => {
     // Atomic debit first; the balance guard prevents overspend/double-pay.
     const after = await wallet.debit(user._id, walletTotal, cur, { purpose, note: `Membership (${purpose})` });
     if (!after) return res.status(402).json({ error: 'Insufficient wallet balance', currency: cur });
+    let payment = null;
     try {
-      const payment = await Payment.create({
+      payment = await Payment.create({
         userId: req.userId, purpose: purpose.replace('_high', ''), amountCHF: quote.chf, currency: cur,
         status: 'captured', method: 'wallet', capturedAt: new Date(), createdAt: new Date(),
         metadata: { base: quote.base, taxTotal: quote.taxTotal, total: walletTotal, country: quote.country, category: quote.category, paidFromWallet: true },
@@ -430,12 +442,38 @@ router.post('/pay-wallet', requireAuth, async (req, res, next) => {
       await activateTier(String(req.userId), purpose, payment);
       res.json({ ok: true, paidFromWallet: true, amount: walletTotal, currency: cur, balance: after.balance, paymentId: payment._id });
     } catch (fulfillErr) {
-      // Roll the money back if we couldn't grant what they paid for.
+      // Roll the money back AND void the orphaned captured Payment, so cancel/admin-refund
+      // can never treat a reversed wallet sale as real.
       await wallet.credit(user._id, walletTotal, cur, { type: 'refund', purpose, note: 'Auto-refund: fulfillment failed' });
+      if (payment && payment._id) await Payment.findByIdAndUpdate(payment._id, { $set: { status: 'failed' } });
       throw fulfillErr;
     }
   } catch (e) { next(e); }
 });
+
+// Credit a CAPTURED wallet top-up. If the wallet currency has diverged (a rare race:
+// two pending top-ups in different currencies), the credit can't apply — but the money
+// is already captured, so we must NOT crash /verify. Flag it for manual reconciliation
+// instead (audit + user notification), so the amount is never silently swallowed.
+/** @param {any} userId @param {any} payment */
+async function creditTopupSafely(userId, payment) {
+  try {
+    await wallet.credit(userId, payment.metadata.topupAmount, payment.metadata.currency, { type: 'topup', ref: String(payment._id), note: 'Wallet top-up' });
+  } catch (e) {
+    const err = /** @type {any} */ (e);
+    if (!(err && err.code === 'WALLET_CURRENCY')) throw err;
+    try {
+      await require('./models/AuditLog').create({
+        actor: 'system', action: 'wallet_topup_unapplied', targetType: 'payment', targetId: String(payment._id),
+        detail: { userId: String(userId), amount: payment.metadata.topupAmount, currency: payment.metadata.currency, reason: err.message },
+      });
+      await require('./models/Notification').create({
+        userId, type: 'wallet_topup_unapplied', severity: 'warning', title: 'Top-up needs attention',
+        body: `We received your ${payment.metadata.currency} ${payment.metadata.topupAmount} top-up but couldn't add it to your wallet (currency mismatch). Our team will resolve it — you won't lose the amount.`,
+      });
+    } catch { /* flagging is best-effort */ }
+  }
+}
 
 // GET /payment/pricing — live, localized prices for display (server order is authoritative)
 router.get('/pricing', requireAuth, async (req, res, next) => {
@@ -483,7 +521,7 @@ router.post('/verify', requireAuth, async (req, res, next) => {
 
       if (payment.purpose === 'join_fee') await markJoinFeePaid(userId, payment); // legacy stored orders
       if (/_(subscription|annual)$/.test(payment.purpose)) await activateTier(userId, payment.purpose, payment);
-      if (payment.purpose === 'wallet_topup') await wallet.credit(userId, payment.metadata.topupAmount, payment.metadata.currency, { type: 'topup', ref: String(payment._id), note: 'Wallet top-up' });
+      if (payment.purpose === 'wallet_topup') await creditTopupSafely(userId, payment);
       return res.json({ ok: true, devMode: true, paymentId: payment._id, purpose: payment.purpose });
     }
 
@@ -523,7 +561,7 @@ router.post('/verify', requireAuth, async (req, res, next) => {
 
     if (purpose === 'join_fee') await markJoinFeePaid(userId, payment); // legacy stored orders
     if (/_(subscription|annual)$/.test(purpose)) await activateTier(userId, purpose, payment);
-    if (purpose === 'wallet_topup') await wallet.credit(userId, payment.metadata.topupAmount, payment.metadata.currency, { type: 'topup', ref: String(payment._id), note: 'Wallet top-up' });
+    if (purpose === 'wallet_topup') await creditTopupSafely(userId, payment);
 
     res.json({ ok: true, paymentId: payment._id, purpose });
   } catch (err) { next(err); }
