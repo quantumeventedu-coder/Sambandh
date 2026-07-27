@@ -1095,7 +1095,7 @@ function obDrawGrid() {
   const grid = $('#ob-grid');
   if (!grid) return;
   grid.innerHTML = S.onboardPhotos.map((p, i) => `
-    <div class="ph"><img src="data:image/jpeg;base64,${p.base64}"/>
+    <div class="ph"><img alt="" src="data:image/jpeg;base64,${p.base64}"/>
       ${i === 0 ? '<span class="primary-tag">PRIMARY</span>' : ''}
       <button class="rm" onclick="S.onboardPhotos.splice(${i},1);obDrawGrid()">✕</button></div>`).join('')
     + (S.onboardPhotos.length < 6 ? `<div class="ph" onclick="document.getElementById('ob-photo-input').click()">+</div>` : '');
@@ -1193,7 +1193,7 @@ function ddShow() {
   ].filter(Boolean).join('');
   const core = p.anonymous
     ? `<div class="ini">${ic('ghost', 'ic-xl')}</div>`
-    : (p.photo ? `<img src="${esc(p.photo)}" onerror="this.replaceWith(Object.assign(document.createElement('div'),{className:'ini',textContent:'${esc((p.firstName || '?')[0].toUpperCase())}'}))"/>` : `<div class="ini">${esc((p.firstName || '?')[0].toUpperCase())}</div>`);
+    : (p.photo ? `<img alt="" src="${esc(p.photo)}" onerror="this.replaceWith(Object.assign(document.createElement('div'),{className:'ini',textContent:'${esc((p.firstName || '?')[0].toUpperCase())}'}))"/>` : `<div class="ini">${esc((p.firstName || '?')[0].toUpperCase())}</div>`);
   const verified = p.verificationLevel && p.verificationLevel !== 'phone_only';
   feed.innerHTML = `
     <div class="dd-top">
@@ -1266,7 +1266,7 @@ function headerBar() {
     <div class="wordmark">sambandh</div>
     <div class="header-actions">
       <button onclick="showWhoLikedMe()" title="Who liked you" style="color:var(--sindoor)">${ic('heart', 'ic-lg')}</button>
-      <button onclick="nav('#/notifications')" style="color:var(--ink-mid)">${ic('bell', 'ic-lg')}<span class="notif-dot" id="notif-dot" style="display:none"></span></button>
+      <button aria-label="Notifications" onclick="nav('#/notifications')" style="color:var(--ink-mid)">${ic('bell', 'ic-lg')}<span class="notif-dot" id="notif-dot" style="display:none"></span></button>
     </div>
   </div>`;
 }
@@ -1281,7 +1281,7 @@ async function showWhoLikedMe() {
         ? `<div class="notice rose">Seeing <b>who</b> liked you is a Sambandh Max perk (CHF 15/month). Like people back in Discover — mutual likes always match.</div>`
         : (r.profiles || []).map(p => `
           <div class="chat-item" style="border-radius:12px;margin-bottom:8px" onclick="closeModal();nav('#/profile/${p.userId}')">
-            <div class="avatar">${p.photo ? `<img src="${esc(p.photo)}" data-i="${esc((p.firstName || '?')[0])}" onerror="imgFail(this)"/>` : esc((p.firstName || '?')[0])}</div>
+            <div class="avatar">${p.photo ? `<img alt="" src="${esc(p.photo)}" data-i="${esc((p.firstName || '?')[0])}" onerror="imgFail(this)"/>` : esc((p.firstName || '?')[0])}</div>
             <div class="cbody"><div class="cname"><span>${esc(p.firstName)}${p.age ? ', ' + p.age : ''}</span></div>
             <div class="clast">${esc(p.city || '')}</div></div>
           </div>`).join('') || '<p class="sub">No likes yet — polish that bio!</p>'}
@@ -1475,8 +1475,8 @@ async function renderProfile(userId) {
         ${p.bio ? `<p style="margin-bottom:12px">${esc(p.bio)}</p>` : ''}
         <div style="margin-bottom:10px">
           ${(p.intent || []).map(i => `<span class="tag rose" style="text-transform:capitalize">${esc(i)}</span>`).join('')}
-          ${(p.tagsPositive || []).map(t => `<span class="tag forest">${esc(t)}</span>`).join('')}
-          ${(p.tagsNegative || []).map(t => `<span class="tag haldi">${esc(t)}</span>`).join('')}
+          ${(p.tagsPositive || []).map(t => `<span class="tag forest">+ ${esc(t)}</span>`).join('')}
+          ${(p.tagsNegative || []).map(t => `<span class="tag haldi">− ${esc(t)}</span>`).join('')}
         </div>
         ${p.profession?.title ? `<div class="card ic-row" style="padding:12px 14px;font-size:13.5px;display:flex">${ic('briefcase')} <span>${esc(p.profession.title)}${p.profession.company ? ' · ' + esc(p.profession.company) : ''}</span> ${p.profession.verified ? '<span class="tag forest">verified</span>' : '<span class="tag plain">unverified</span>'}</div>` : ''}
         ${readingBlock}
@@ -1593,7 +1593,7 @@ async function renderChats() {
     }
     list.innerHTML = r.chats.map(c => `
       <div class="chat-item" onclick="nav('#/chat/${c.chatId}')">
-        <div class="avatar ${c.other.anonymous ? 'anon' : ''}">${c.other.anonymous ? ic('ghost', 'ic-lg') : c.other.photo ? `<img src="${esc(c.other.photo)}" data-i="${esc((c.other.displayName || '?')[0])}" onerror="imgFail(this)"/>` : esc((c.other.displayName || '?')[0].toUpperCase())}</div>
+        <div class="avatar ${c.other.anonymous ? 'anon' : ''}">${c.other.anonymous ? ic('ghost', 'ic-lg') : c.other.photo ? `<img alt="" src="${esc(c.other.photo)}" data-i="${esc((c.other.displayName || '?')[0])}" onerror="imgFail(this)"/>` : esc((c.other.displayName || '?')[0].toUpperCase())}</div>
         <div class="cbody">
           <div class="cname"><span class="ic-row">${esc(c.other.displayName || 'Anonymous')}${c.anonymous ? ic('ghost') : ''}</span><time>${c.lastMessage ? timeAgo(c.lastMessage.createdAt) : ''}</time></div>
           <div class="clast" ${c.unreadCount ? 'style="font-weight:700;color:var(--ink)"' : ''}>${esc(c.lastMessage?.text || 'Say hi')}</div>
@@ -1619,7 +1619,7 @@ async function renderChat(chatId) {
     <div class="chat-input">
       <input id="msg-input" placeholder="Type a message…" maxlength="5000"
         onkeydown="if(event.key==='Enter')sendMsg('${chatId}')" oninput="emitTyping('${chatId}')"/>
-      <button onclick="sendMsg('${chatId}')" style="display:flex;align-items:center;justify-content:center">${ic('send', 'ic-lg')}</button>
+      <button aria-label="Send message" onclick="sendMsg('${chatId}')" style="display:flex;align-items:center;justify-content:center">${ic('send', 'ic-lg')}</button>
     </div>
   </div>`;
 
@@ -1630,7 +1630,7 @@ async function renderChat(chatId) {
     if (meta) {
       $('#ch-name').textContent = meta.other.displayName || 'Anonymous';
       $('#ch-sub').textContent = (meta.anonymous ? 'identity hidden · ' : 'verified · ') + (meta.intent || '');
-      $('#ch-avatar').innerHTML = meta.other.anonymous ? ic('ghost') : meta.other.photo ? `<img src="${esc(meta.other.photo)}" data-i="${esc((meta.other.displayName || '?')[0])}" onerror="imgFail(this)"/>` : esc((meta.other.displayName || '?')[0].toUpperCase());
+      $('#ch-avatar').innerHTML = meta.other.anonymous ? ic('ghost') : meta.other.photo ? `<img alt="" src="${esc(meta.other.photo)}" data-i="${esc((meta.other.displayName || '?')[0])}" onerror="imgFail(this)"/>` : esc((meta.other.displayName || '?')[0].toUpperCase());
       if (meta.anonymous) $('#ch-reveal').style.display = 'inline-flex';
     }
     const r = await api(`/chat/${chatId}/messages`);
@@ -1822,7 +1822,7 @@ async function renderCompat(userId) {
               <span class="gv">${k.got}<i>/${k.max}</i></span>
               <span class="gbar"><i style="width:${Math.round((k.got / k.max) * 100)}%"></i></span>
             </div>`).join('')}</div>` : ''}
-          ${(a.doshas && a.doshas.length) ? `<div class="notice danger" style="margin-top:10px">${a.doshas.map(d => esc(d)).join('<br>')}</div>` : `<div class="notice forest" style="margin-top:10px">No major doshas — Nadi and Bhakoot both clear.</div>`}
+          ${(a.doshas && a.doshas.length) ? `<div class="notice" style="margin-top:10px">${SBBadge.badgeHtml('reading', 'Astrology — an insight, not a verdict')}<div style="margin-top:6px">${a.doshas.map(d => esc(d)).join('<br>')}</div></div>` : `<div class="notice forest" style="margin-top:10px">No major doshas — Nadi and Bhakoot both clear.</div>`}
           ${!a.birthTimeKnown ? `<div class="hint mt">More accurate with exact birth times for both partners (Moon changes sign every ~2.25 days).</div>` : ''}
           <div class="hint mt">Real Ashtakoot Guna Milan from computed Moon positions${a.computedVia === 'internal_sidereal_ashtakoot' ? ' (sidereal approximation; exact when ProKerala is connected)' : ''}. 18+ gunas is the traditional threshold for marriage.</div>
         ` : `<p class="sub">Add birth details in Settings (both of you) to unlock astrology compatibility.</p>`}
@@ -2051,7 +2051,7 @@ async function renderSettings() {
     const photo = u.profile?.photos?.find(x => x.isPrimary)?.url || u.profile?.photos?.[0]?.url;
     screen.querySelector('.section-pad').innerHTML = `
       <div style="display:flex;gap:14px;align-items:center;margin-bottom:16px">
-        <div class="avatar" style="width:64px;height:64px;font-size:26px">${photo ? `<img src="${esc(photo)}" data-i="${esc((u.profile?.firstName || '?')[0])}" onerror="imgFail(this)"/>` : esc((u.profile?.firstName || '?')[0])}</div>
+        <div class="avatar" style="width:64px;height:64px;font-size:26px">${photo ? `<img alt="" src="${esc(photo)}" data-i="${esc((u.profile?.firstName || '?')[0])}" onerror="imgFail(this)"/>` : esc((u.profile?.firstName || '?')[0])}</div>
         <div><b style="font-size:18px">${esc(u.profile?.firstName || '')}, ${u.profile?.age || ''}</b>
           <div style="font-size:12px;color:var(--forest)">${verLabel(u.verification)} · Trust ${u.verification?.trustScore || 0}/100</div>
           <div style="font-size:12px;color:var(--ink-soft)">${esc(u.profile?.city || '')} · ${(u.intent || []).join(', ')}</div>
@@ -2248,6 +2248,7 @@ async function loadMyNakshatra() {
     el.innerHTML = `
       <div class="card nak-card" style="margin-top:14px;background:linear-gradient(160deg,var(--rose-soft),#fff);border-color:var(--rose)">
         <div class="ic-row" style="color:var(--sindoor);font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase">${ic('sparkle')} Your nakshatra</div>
+        <div style="margin:6px 0 4px">${SBBadge.badgeHtml('reading', 'A reading — an insight, not a verified fact')}</div>
         <div style="font-family:Georgia,serif;font-size:22px;color:var(--sindoor-deep);margin:2px 0 8px">${esc(n.headline)}</div>
         ${n.personality ? `<p style="font-size:13.5px;margin-bottom:8px">${esc(n.personality)}.</p>` : ''}
         <div class="trow" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">
@@ -2297,7 +2298,7 @@ async function setup2FA() {
     const qr = 'https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=' + encodeURIComponent(r.otpauthUri);
     $('#twofa-card').innerHTML = `
       <b>Scan with your authenticator app</b>
-      <div style="text-align:center;margin:12px 0"><img src="${qr}" alt="2FA QR" style="border-radius:10px" onerror="this.style.display='none'"/></div>
+      <div style="text-align:center;margin:12px 0"><img alt="" src="${qr}" alt="2FA QR" style="border-radius:10px" onerror="this.style.display='none'"/></div>
       <p class="hint">Or enter this key manually: <b style="letter-spacing:1px">${esc(r.secret)}</b></p>
       <div class="field mt"><label>Enter the 6-digit code to confirm</label><input id="tf-code" class="otp-boxes" maxlength="6" inputmode="numeric" placeholder="••••••"/></div>
       <button class="btn forest" onclick="confirm2FA()">Confirm &amp; enable</button>
