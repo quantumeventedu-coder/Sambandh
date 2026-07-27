@@ -81,7 +81,8 @@ const UserSchema = new mongoose.Schema({
     // consumed while the app is gated — at launch their 30 days are (re)started, so
     // they get a full 30-day free run once the doors open (site-mode.setPrelaunch).
     earlyAccess: { type: Boolean, default: false },
-    trialGrantedAt: Date
+    trialGrantedAt: Date,
+    cancelledAt: Date            // set when a member cancels within the refund window
   },
   preferences: {
     interestedInGenders: [String],

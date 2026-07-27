@@ -36,6 +36,8 @@ if (!DEV_PAYMENTS) {
 }
 
 const fx = require('./services/fx');
+const commerce = require('./services/commerce-config');
+const tax = require('./services/tax');
 
 /**
  * The Razorpay secret, or a loud failure. Signature verification must NEVER run
@@ -85,7 +87,29 @@ const LEGACY_PURPOSES = {
   join_fee: 'base_subscription'
 };
 /** @type {Record<string, string>} */
-const SYMBOLS = { INR: '₹', CHF: 'CHF ', USD: '$', EUR: '€', GBP: '£', AED: 'AED ', SGD: 'S$' };
+const SYMBOLS = { INR: '₹', CHF: 'CHF ', USD: '$', EUR: '€', GBP: '£', AED: 'AED ', SGD: 'S$', AUD: 'A$', CAD: 'C$', JPY: '¥' };
+
+// Zero-decimal (exponent-0) currencies: the major unit IS the smallest unit, so the
+// gateway amount MUST NOT be multiplied by 100 (¥932 is 932, not 93200). Everything
+// else is 2-decimal. Charging the gateway uses minor units, so this must be exact.
+const ZERO_DECIMAL = new Set(['JPY', 'KRW', 'VND', 'CLP', 'ISK', 'XAF', 'XOF', 'BIF', 'DJF', 'GNF', 'KMF', 'MGA', 'PYG', 'RWF', 'UGX', 'VUV', 'XPF']);
+/** Convert a major-unit amount to the gateway's minor units for a currency.
+ * @param {number} amount @param {string} code @returns {number} */
+const toMinor = (amount, code) => (ZERO_DECIMAL.has(String(code)) ? Math.round(amount) : Math.round(amount * 100));
+
+/**
+ * Map a payment purpose to a tax category (so the right rate applies per jurisdiction).
+ * Marketplace/consultation orders that carry their own category use createDirectOrder.
+ * @param {string} purpose
+ * @returns {string}
+ */
+function categoryForPurpose(purpose) {
+  if (/(_subscription|_annual)$/.test(purpose) || purpose === 'base_subscription') return 'subscription';
+  if (purpose === 'consultation' || purpose === 'consultation_session') return 'consultation';
+  if (purpose === 'verification_service') return 'verification';
+  if (purpose === 'gift_pass') return 'gift';
+  return 'default';
+}
 
 /**
  * A user document, as far as pricing is concerned. Deliberately narrow: pricing
@@ -94,10 +118,16 @@ const SYMBOLS = { INR: '₹', CHF: 'CHF ', USD: '$', EUR: '€', GBP: '£', AED:
  */
 
 /**
+ * The currency to charge this user in — derived from the super-admin-editable commerce
+ * config (each country charged in its own currency; India → INR unlocks UPI). Falls
+ * back to the config DEFAULT for unlisted countries.
  * @param {PricingUser | null | undefined} user
- * @returns {string} the currency code to charge this user in
+ * @returns {Promise<string>}
  */
-function currencyForUser(user) { return ((user && user.profile && user.profile.country) || 'IN') === 'IN' ? 'INR' : 'CHF'; }
+async function currencyForUser(user) {
+  const cc = await commerce.countryConfig((user && user.profile && user.profile.country) || 'IN');
+  return cc.currency;
+}
 
 /**
  * Canonical CHF amount. Returns null for an unknown purpose, so the caller
@@ -112,18 +142,34 @@ function chfAmount(purpose, gender) {
 }
 
 /**
- * { code, symbol, major (live-converted, rounded), minor (=major×100), chf (canonical) }
+ * The full, itemized, honest quote for a purpose (SHIG R-14): base (live fx-converted)
+ * + every tax line (per the buyer's country/category) + the gateway fee → total. This
+ * is what the buyer is actually charged. Country/gender come from the STORED user.
  * @param {string} purpose
  * @param {PricingUser | null | undefined} user
- * @returns {Promise<{ code: string, symbol: string, major: number, minor: number, chf: number } | null>}
+ * @returns {Promise<null | { code:string, symbol:string, chf:number, base:number, taxName:string, taxRate:number, taxTotal:number, taxLines:Array<{label:string,rate:number,amount:number}>, gatewayFeePct:number, gatewayFee:number, total:number, minor:number, country:string, category:string }>}
  */
-async function priceFor(purpose, user) {
+async function quoteFor(purpose, user) {
   const gender = (user && user.profile && user.profile.gender) || 'other';
   const chf = chfAmount(purpose, gender);
   if (chf == null) return null;
-  const code = currencyForUser(user);
-  const major = await fx.convertFromCHF(chf, code);
-  return { code, symbol: SYMBOLS[code] || (code + ' '), major, minor: Math.round(major * 100), chf };
+  const country = (user && user.profile && user.profile.country) || 'IN';
+  const cc = await commerce.countryConfig(country);
+  const cfg = await commerce.getCommerce();
+  const code = cc.currency;
+  const base = await fx.convertFromCHF(chf, code);
+  const category = categoryForPurpose(purpose);
+  const taxRate = await commerce.categoryRate(country, category);
+  const q = tax.computeQuote({
+    components: [{ label: 'Membership', amount: base, rate: taxRate }],
+    taxName: cc.taxName, gatewayFeePct: cfg.gatewayFeePct,
+  });
+  return {
+    code, symbol: SYMBOLS[code] || (code + ' '),
+    chf, base: q.base, taxName: cc.taxName, taxRate, taxTotal: q.taxTotal, taxLines: q.lines,
+    gatewayFeePct: q.gatewayFeePct, gatewayFee: q.gatewayFee,
+    total: q.total, minor: toMinor(q.total, code), country, category,
+  };
 }
 
 // 1. Create order — join fee by default, or another purpose
@@ -135,32 +181,42 @@ router.post('/create-order', requireAuth, async (req, res, next) => {
     const purpose = LEGACY_PURPOSES[req.body.purpose] || req.body.purpose || 'base_subscription';
     // Priced by verified gender + country (INR for India → UPI etc.), live-converted
     // from CHF. Registration is by payment, so no verification gate here.
-    const price = await priceFor(purpose, user);
-    if (!price) return res.status(400).json({ error: 'Unknown purpose' });
+    // The itemized quote is AUTHORITATIVE: base (live fx from CHF) + tax (per the
+    // buyer's country/category) + gateway fee → total. The user is charged `total`.
+    const quote = await quoteFor(purpose, user);
+    if (!quote) return res.status(400).json({ error: 'Unknown purpose' });
+    // Breakdown persisted with the order so /verify, receipts, and pro-rated refunds
+    // read the real charged amounts back from the DB, never from the request body.
+    const breakdown = {
+      base: quote.base, taxName: quote.taxName, taxRate: quote.taxRate,
+      taxTotal: quote.taxTotal, taxLines: quote.taxLines,
+      gatewayFeePct: quote.gatewayFeePct, gatewayFee: quote.gatewayFee,
+      total: quote.total, country: quote.country, category: quote.category,
+    };
+    const clientQuote = {
+      amount: quote.minor, amountMajor: quote.total, amountCHF: quote.chf,
+      currency: quote.code, symbol: quote.symbol, purpose, breakdown,
+    };
 
     if (DEV_PAYMENTS) {
       const orderId = 'order_dev_' + crypto.randomBytes(8).toString('hex');
       await Payment.create({
         userId: req.userId,
         purpose: purpose.replace('_high', ''),
-        amountCHF: price.chf, currency: price.code,
+        amountCHF: quote.chf, currency: quote.code,
         razorpayOrderId: orderId,
         status: 'created',
         createdAt: new Date(),
-        metadata: { dev: true, gender: user.profile.gender, amountLocal: price.major }
+        metadata: { dev: true, gender: user.profile.gender, amountLocal: quote.total, ...breakdown }
       });
-      return res.json({
-        devMode: true, orderId,
-        amount: price.minor, amountMajor: price.major, amountCHF: price.chf,
-        currency: price.code, symbol: price.symbol, purpose
-      });
+      return res.json({ devMode: true, orderId, ...clientQuote });
     }
 
     // Fail closed: never attempt a live order without a configured client.
     if (!razorpay) return res.status(503).json({ error: 'Payments are not configured.' });
     const order = await razorpay.orders.create({
-      amount: price.minor,
-      currency: price.code,
+      amount: quote.minor,
+      currency: quote.code,
       // Razorpay caps receipt at 40 chars — keep it short (timestamp in base36 +
       // last 6 of the user id). Full context lives in notes below.
       receipt: `sb_${Date.now().toString(36)}_${String(user._id).slice(-6)}`,
@@ -175,21 +231,133 @@ router.post('/create-order', requireAuth, async (req, res, next) => {
     await Payment.create({
       userId: req.userId,
       purpose: purpose.replace('_high', ''),
-      amountCHF: price.chf, currency: price.code,
+      amountCHF: quote.chf, currency: quote.code,
       razorpayOrderId: order.id,
       status: 'created',
       createdAt: new Date(),
-      metadata: { gender: user.profile.gender, amountLocal: price.major }
+      metadata: { gender: user.profile.gender, amountLocal: quote.total, ...breakdown }
     });
 
     res.json({
-      orderId: order.id,
-      amount: price.minor, amountMajor: price.major, amountCHF: price.chf,
-      currency: price.code, symbol: price.symbol,
-      purpose,
+      orderId: order.id, ...clientQuote,
       key: process.env.RAZORPAY_KEY_ID,
       prefill: { name: user.profile.firstName, contact: user.phone }
     });
+  } catch (err) { next(err); }
+});
+
+// GET /payment/quote?purpose=… — the itemized breakdown for display (server order is
+// authoritative). Lets checkout show base + tax lines + gateway fee → total before pay.
+router.get('/quote', requireAuth, async (req, res, next) => {
+  try {
+    const user = await User.findById(req.userId);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+    const purposeRaw = String(req.query.purpose || 'base_subscription');
+    const purpose = LEGACY_PURPOSES[purposeRaw] || purposeRaw;
+    const quote = await quoteFor(purpose, user);
+    if (!quote) return res.status(400).json({ error: 'Unknown purpose' });
+    res.json(quote);
+  } catch (e) { next(e); }
+});
+
+// Cancel membership. Policy (super-admin editable via commerce.cancellation):
+//   • within `windowDays` of the last payment → cancel + PRO-RATED refund of the
+//     unused portion of the paid period;
+//   • after the window → refused (the membership simply runs to its paid expiry).
+// The refund fraction and amounts are computed server-side from the STORED payment,
+// never the request, so the amount can't be inflated by the client.
+const SUB_PURPOSES = ['base_subscription', 'pro_subscription', 'max_subscription', 'base_annual', 'pro_annual', 'max_annual'];
+router.post('/cancel-subscription', requireAuth, async (req, res, next) => {
+  try {
+    const userId = req.userId;
+    if (!userId) return res.status(401).json({ error: 'Unauthenticated' });
+    const user = await User.findById(userId);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+    const m = (user.membership) || {};
+    const active = m.tier && m.tier !== 'free' && m.tierExpiresAt && new Date(m.tierExpiresAt) > new Date();
+    if (!active) return res.status(400).json({ error: 'No active membership to cancel.' });
+
+    const cfg = await commerce.getCommerce();
+    const windowDays = (cfg.cancellation && cfg.cancellation.windowDays) || 0;
+    const prorate = !cfg.cancellation || cfg.cancellation.prorate !== false;
+
+    const payment = await Payment.findOne({ userId, purpose: { $in: SUB_PURPOSES }, status: 'captured' }).sort({ capturedAt: -1 });
+    const paidAt = m.paidAt ? new Date(m.paidAt) : (payment && payment.capturedAt ? new Date(payment.capturedAt) : null);
+    if (!paidAt) return res.status(400).json({ error: 'No payment on record to cancel against.' });
+
+    const ageDays = (Date.now() - paidAt.getTime()) / 86400000;
+    if (ageDays > windowDays) {
+      return res.status(403).json({
+        error: `Cancellation is only available within ${windowDays} day(s) of payment. Your membership stays active until it expires.`,
+        windowDays, expiresAt: m.tierExpiresAt,
+      });
+    }
+
+    // Atomically CLAIM the payment (captured → refunding) BEFORE touching the gateway,
+    // so two concurrent cancels — or a retry after a crash — can never double-refund:
+    // only the request that wins the conditional update proceeds; the rest get 409.
+    let claimed = null;
+    if (payment) {
+      claimed = await Payment.findOneAndUpdate(
+        { _id: payment._id, status: 'captured' },
+        { $set: { status: 'refunding' } },
+        { new: true },
+      );
+      if (!claimed) return res.status(409).json({ error: 'A cancellation is already in progress or completed.' });
+    }
+
+    // Pro-rated refund of the UNUSED portion of the paid period (server-computed).
+    const expires = new Date(m.tierExpiresAt).getTime();
+    const period = Math.max(1, expires - paidAt.getTime());
+    const unused = Math.max(0, expires - Date.now());
+    const fraction = prorate ? Math.min(1, Math.max(0, unused / period)) : 1;
+    const paidTotal = (claimed && claimed.metadata && Number(claimed.metadata.total)) ||
+      (claimed && claimed.metadata && Number(claimed.metadata.amountLocal)) ||
+      (claimed && Number(claimed.amountCHF)) || 0;
+    const currency = (claimed && claimed.currency) || 'CHF';
+    const refundAmount = Math.round(paidTotal * fraction * 100) / 100;
+
+    // Refund at the gateway (real partial refund in prod; simulated in dev), then
+    // finalize the claimed row. On a gateway error, roll the claim back to 'captured'.
+    if (claimed) {
+      try {
+        if (refundAmount > 0 && !DEV_PAYMENTS && razorpay && claimed.razorpayPaymentId) {
+          await razorpay.payments.refund(claimed.razorpayPaymentId, {
+            amount: toMinor(refundAmount, currency), speed: 'normal',
+            notes: { idempotency: `refund_${claimed._id}` },
+          });
+        }
+        claimed.status = 'refunded';
+        claimed.refundedAt = new Date();
+        await claimed.save();
+      } catch (refundErr) {
+        await Payment.findOneAndUpdate({ _id: claimed._id, status: 'refunding' }, { $set: { status: 'captured' } });
+        throw refundErr;
+      }
+    }
+
+    await User.findByIdAndUpdate(userId, {
+      'membership.tier': 'free', 'membership.tierExpiresAt': null,
+      'membership.joinFeePaid': false, 'membership.cancelledAt': new Date(),
+    });
+
+    try {
+      const Notification = require('./models/Notification');
+      await Notification.create({
+        userId, type: 'membership_cancelled', severity: 'info', title: 'Membership cancelled',
+        body: refundAmount > 0
+          ? `Your membership is cancelled. A pro-rated refund of ${currency} ${refundAmount} (for the unused time) reaches your account in 5–7 working days.`
+          : 'Your membership is cancelled.',
+      });
+    } catch { /* notification is best-effort */ }
+
+    const AuditLog = require('./models/AuditLog');
+    await AuditLog.create({
+      actor: String(userId), action: 'membership_cancelled', targetType: 'user', targetId: String(userId),
+      detail: { refundAmount, currency, fraction: Math.round(fraction * 1000) / 1000, ageDays: Math.round(ageDays * 100) / 100 },
+    });
+
+    res.json({ ok: true, refunded: refundAmount > 0, refundAmount, currency, fraction: Math.round(fraction * 1000) / 1000 });
   } catch (err) { next(err); }
 });
 
@@ -198,7 +366,7 @@ router.get('/pricing', requireAuth, async (req, res, next) => {
   try {
     const user = await User.findById(req.userId);
     if (!user) return res.status(404).json({ error: 'User not found' });
-    const code = currencyForUser(user);
+    const code = await currencyForUser(user);
     /** @param {number} chf */
     const conv = (chf) => fx.convertFromCHF(chf, code);
     const gender = (user.profile && user.profile.gender) || 'other';
@@ -225,15 +393,17 @@ router.post('/verify', requireAuth, async (req, res, next) => {
     const { razorpay_order_id, razorpay_payment_id, razorpay_signature } = req.body;
 
     if (DEV_PAYMENTS && razorpay_order_id?.startsWith('order_dev_')) {
-      const payment = await Payment.findOne({ razorpayOrderId: razorpay_order_id, userId: req.userId });
-      if (!payment) return res.status(404).json({ error: 'Order not found' });
-      if (payment.status === 'captured') return res.json({ ok: true, alreadyProcessed: true, paymentId: payment._id });
-
-      payment.status = 'captured';
-      payment.capturedAt = new Date();
-      payment.razorpayPaymentId = 'pay_dev_' + crypto.randomBytes(8).toString('hex');
-      payment.method = 'dev_simulated';
-      await payment.save();
+      // Atomic claim (created → captured) so a duplicate submit can't double-grant.
+      const payment = await Payment.findOneAndUpdate(
+        { razorpayOrderId: razorpay_order_id, userId: req.userId, status: 'created' },
+        { $set: { status: 'captured', capturedAt: new Date(), razorpayPaymentId: 'pay_dev_' + crypto.randomBytes(8).toString('hex'), method: 'dev_simulated' } },
+        { new: true },
+      );
+      if (!payment) {
+        const done = await Payment.findOne({ razorpayOrderId: razorpay_order_id, userId: req.userId });
+        if (done) return res.json({ ok: true, alreadyProcessed: true, paymentId: done._id });
+        return res.status(404).json({ error: 'Order not found' });
+      }
 
       if (payment.purpose === 'join_fee') await markJoinFeePaid(userId, payment); // legacy stored orders
       if (/_(subscription|annual)$/.test(payment.purpose)) await activateTier(userId, payment.purpose, payment);
@@ -255,24 +425,24 @@ router.post('/verify', requireAuth, async (req, res, next) => {
       return res.status(400).json({ error: 'Invalid payment signature' });
     }
 
-    // Idempotency
-    const existing = await Payment.findOne({ razorpayPaymentId: razorpay_payment_id });
-    if (existing) return res.json({ ok: true, alreadyProcessed: true, paymentId: existing._id });
-
-    // The order we priced at create-order time is the ONLY authority on what was
-    // bought. req.body.purpose is attacker-controlled: the Razorpay signature
-    // covers order_id|payment_id only, so trusting it would let someone pay for
-    // base_subscription (CHF 5) and claim max_subscription (CHF 25) here.
-    const payment = await Payment.findOne({ razorpayOrderId: razorpay_order_id, userId: req.userId });
-    if (!payment) return res.status(404).json({ error: 'Order not found' });
-    if (payment.status === 'captured') return res.json({ ok: true, alreadyProcessed: true, paymentId: payment._id });
-
+    // ATOMIC idempotency + authority in ONE conditional update: transition the priced
+    // order created → captured. The order we priced at create-order time is the ONLY
+    // authority on what was bought (req.body.purpose is attacker-controlled — the
+    // Razorpay signature covers order_id|payment_id only, so trusting it would let
+    // someone pay for base_subscription (CHF 5) and claim max_subscription (CHF 25)).
+    // Because the flip is conditional on status:'created', two concurrent verifies can
+    // never both capture-and-grant — only the winner flips; the rest are already-processed.
+    const payment = await Payment.findOneAndUpdate(
+      { razorpayOrderId: razorpay_order_id, userId: req.userId, status: 'created' },
+      { $set: { status: 'captured', capturedAt: new Date(), razorpayPaymentId: razorpay_payment_id, razorpaySignature: razorpay_signature } },
+      { new: true },
+    );
+    if (!payment) {
+      const done = await Payment.findOne({ razorpayOrderId: razorpay_order_id, userId: req.userId });
+      if (done) return res.json({ ok: true, alreadyProcessed: true, paymentId: done._id, purpose: done.purpose });
+      return res.status(404).json({ error: 'Order not found' });
+    }
     const purpose = payment.purpose;                     // authoritative, from the DB
-    payment.status = 'captured';
-    payment.capturedAt = new Date();
-    payment.razorpayPaymentId = razorpay_payment_id;
-    payment.razorpaySignature = razorpay_signature;
-    await payment.save();
 
     if (purpose === 'join_fee') await markJoinFeePaid(userId, payment); // legacy stored orders
     if (/_(subscription|annual)$/.test(purpose)) await activateTier(userId, purpose, payment);
@@ -355,17 +525,35 @@ router.get('/history', requireAuth, async (req, res, next) => {
 // refund is promised anywhere in the product. Razorpay refund API in prod, simulated in dev.
 router.post('/admin/:paymentId/refund', requireAdmin, async (req, res, next) => {
   try {
-    const payment = await Payment.findById(req.params.paymentId);
-    if (!payment) return res.status(404).json({ error: 'Payment not found' });
-    if (payment.status !== 'captured') return res.status(400).json({ error: 'Only captured payments can be refunded' });
-
-    if (!DEV_PAYMENTS && razorpay && payment.razorpayPaymentId) {
-      await razorpay.payments.refund(payment.razorpayPaymentId, { speed: 'normal' });
+    // Atomically claim (captured → refunding) so two admins — or a retry — can't
+    // double-refund the same payment.
+    const payment = await Payment.findOneAndUpdate(
+      { _id: req.params.paymentId, status: 'captured' },
+      { $set: { status: 'refunding' } },
+      { new: true },
+    );
+    if (!payment) {
+      const existing = await Payment.findById(req.params.paymentId);
+      if (!existing) return res.status(404).json({ error: 'Payment not found' });
+      return res.status(400).json({ error: 'Only captured payments can be refunded' });
     }
 
-    payment.status = 'refunded';
-    payment.refundedAt = new Date();
-    await payment.save();
+    // Report the amount actually charged, in the currency actually charged (not CHF).
+    const currency = payment.currency || 'CHF';
+    const refundedLocal = (payment.metadata && Number(payment.metadata.total)) ||
+      (payment.metadata && Number(payment.metadata.amountLocal)) || Number(payment.amountCHF) || 0;
+
+    try {
+      if (!DEV_PAYMENTS && razorpay && payment.razorpayPaymentId) {
+        await razorpay.payments.refund(payment.razorpayPaymentId, { speed: 'normal', notes: { idempotency: `refund_${payment._id}` } });
+      }
+      payment.status = 'refunded';
+      payment.refundedAt = new Date();
+      await payment.save();
+    } catch (refundErr) {
+      await Payment.findOneAndUpdate({ _id: payment._id, status: 'refunding' }, { $set: { status: 'captured' } });
+      throw refundErr;
+    }
 
     if (payment.purpose === 'join_fee' || payment.purpose === 'base_subscription') {
       // Refunding the base membership removes access entirely (nothing is free)
@@ -384,17 +572,17 @@ router.post('/admin/:paymentId/refund', requireAdmin, async (req, res, next) => 
     await Notification.create({
       userId: payment.userId, type: 'refund_processed', severity: 'info',
       title: 'Refund processed',
-      body: `Your CHF ${payment.amountCHF} ${payment.purpose.replace(/_/g, ' ')} payment has been refunded. It reaches your account in 5–7 working days.`
+      body: `Your ${currency} ${refundedLocal} ${payment.purpose.replace(/_/g, ' ')} payment has been refunded. It reaches your account in 5–7 working days.`
     });
 
     const AuditLog = require('./models/AuditLog');
     await AuditLog.create({
       actor: req.userId, action: 'payment_refunded', targetType: 'payment',
       targetId: payment._id.toString(),
-      detail: { userId: payment.userId.toString(), amountCHF: payment.amountCHF, purpose: payment.purpose }
+      detail: { userId: payment.userId.toString(), amountCHF: payment.amountCHF, refundedLocal, currency, purpose: payment.purpose }
     });
 
-    res.json({ ok: true });
+    res.json({ ok: true, refundedAmount: refundedLocal, currency });
   } catch (err) { next(err); }
 });
 
@@ -444,7 +632,7 @@ async function createDirectOrder({ userId, purpose, amountCHF, currency = 'CHF',
   }
   if (!razorpay) throw new Error('Payments are not configured');
   const order = await razorpay.orders.create({
-    amount: Math.round(amt * 100), currency,
+    amount: toMinor(amt, currency), currency,
     receipt: `sb_${Date.now().toString(36)}_${String(userId).slice(-6)}`,
     notes: { userId: String(userId), purpose }
   });
