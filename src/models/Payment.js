@@ -8,7 +8,10 @@ const PaymentSchema = new mongoose.Schema({
   razorpayOrderId: String,
   razorpayPaymentId: { type: String, unique: true, sparse: true },
   razorpaySignature: String,
-  status: { type: String, enum: ['created', 'captured', 'failed', 'refunded'], default: 'created' },
+  // 'refunding' is a transient claim state: the refund path atomically flips
+  // captured→refunding BEFORE calling the gateway, so concurrent cancels/refunds
+  // can't double-refund; it settles to 'refunded' (or rolls back to 'captured').
+  status: { type: String, enum: ['created', 'captured', 'failed', 'refunding', 'refunded'], default: 'created' },
   method: String,
   createdAt: { type: Date, default: Date.now },
   capturedAt: Date, refundedAt: Date,
