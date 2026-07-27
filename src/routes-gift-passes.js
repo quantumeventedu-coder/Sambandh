@@ -44,7 +44,11 @@ router.post('/purchase', requireAuth, async (req, res) => {
     const out = await gp.purchasePass({ purchaserId: req.userId, ...p.data });
     res.status(201).json({
       pass: pub(out.pass, true),
-      order: out.order && { orderId: out.order.orderId, devMode: out.order.devMode, key: out.order.key, amountCHF: out.pass.amountCHF },
+      order: out.order && {
+        orderId: out.order.orderId, devMode: out.order.devMode, key: out.order.key,
+        amount: out.order.amount, amountMajor: out.order.amountMajor, amountCHF: out.pass.amountCHF,
+        currency: out.order.currency, symbol: out.order.symbol, breakdown: out.order.breakdown, prefill: out.order.prefill,
+      },
       payment: out.order && out.order.payment && { id: out.order.payment._id, amountCHF: out.order.payment.amountCHF, status: out.order.payment.status }
     });
   } catch (e) { return fail(res, e); }

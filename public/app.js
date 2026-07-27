@@ -1073,6 +1073,30 @@ async function ensureRazorpay() {
   if (!window.Razorpay) throw new Error('Could not load the payment gateway — check your connection and try again.');
 }
 
+// Take a quoted order (from a gift-pass / verification / any createQuotedOrder response)
+// all the way to a captured payment, then run onCaptured(). Dev mode auto-verifies the
+// simulated order; production opens the real Razorpay checkout and verifies in its
+// handler. This is what makes "complete payment to activate" actually payable.
+async function payDirectOrder(order, purpose, description, onCaptured) {
+  if (!order || !order.orderId) throw new Error('Could not start the payment. Please try again.');
+  if (order.devMode) {
+    await api('/payment/verify', { method: 'POST', body: { razorpay_order_id: order.orderId, purpose } });
+    return onCaptured();
+  }
+  await ensureRazorpay();
+  const rzp = new Razorpay({
+    key: order.key, amount: order.amount, currency: order.currency, name: 'Sambandh',
+    description, order_id: order.orderId, prefill: order.prefill || {},
+    handler: async resp => {
+      try {
+        await api('/payment/verify', { method: 'POST', body: { ...resp, purpose } });
+        await onCaptured();
+      } catch (e) { toast(e.message); }
+    },
+  });
+  rzp.open();
+}
+
 async function obPayNow() {
   try {
     const order = await api('/payment/create-order', { method: 'POST', body: { purpose: 'base_subscription' } });
@@ -2771,18 +2795,21 @@ async function buyPass(passType, btn) {
   if (btn) btn.disabled = true;
   try {
     const r = await api('/gift-passes/purchase', { method: 'POST', body: { passType } });
-    if (r.order && r.order.orderId && r.order.devMode) {
-      await api('/payment/verify', { method: 'POST', body: { razorpay_order_id: r.order.orderId } });
+    await payDirectOrder(r.order, 'gift_pass', 'Sambandh Gift Pass', async () => {
       const conf = await api('/gift-passes/' + r.pass.id + '/confirm-payment', { method: 'POST' });
-      const code = conf.pass.code;
-      openModal(`<h2 style="margin-top:0">Your gift is ready 🎁</h2>
-        <p class="hint">Share this code with anyone — they redeem it inside Sambandh to unlock <b>${esc(conf.pass.label || '')}</b>.</p>
-        <div class="card" style="text-align:center;font-size:20px;font-weight:800;letter-spacing:1px">${esc(code)}</div>
-        <button class="btn mt" onclick="navigator.clipboard&&navigator.clipboard.writeText('${esc(code)}');toast('Code copied ✓')">Copy code</button>
-        <button class="btn secondary" onclick="closeModal();renderServices()">Done</button>`);
-    } else { toast('Pass created — complete payment to activate.'); }
+      showGiftCode(conf.pass);
+      loadGiftPasses();
+    });
   } catch (e) { toast(e.message); }
-  finally { if (btn) btn.disabled = false; loadGiftPasses(); }
+  finally { if (btn) btn.disabled = false; }
+}
+function showGiftCode(pass) {
+  const code = pass.code || '';
+  openModal(`<h2 style="margin-top:0">Your gift is ready 🎁</h2>
+    <p class="hint">Share this code with anyone — they redeem it inside Sambandh to unlock <b>${esc(pass.label || '')}</b>.</p>
+    <div class="card" style="text-align:center;font-size:20px;font-weight:800;letter-spacing:1px">${esc(code)}</div>
+    <button class="btn mt" onclick="navigator.clipboard&&navigator.clipboard.writeText('${esc(code)}');toast('Code copied ✓')">Copy code</button>
+    <button class="btn secondary" onclick="closeModal();renderServices()">Done</button>`);
 }
 async function redeemGiftCode() {
   const inp = document.getElementById('gift-code'); const code = (inp && inp.value || '').trim();
@@ -2883,16 +2910,13 @@ async function verifySelf(tier, btn) {
   if (btn) { btn.disabled = true; btn.textContent = 'Working…'; }
   try {
     const r = await api('/verification-services/cases', { method: 'POST', body: { tier } });
-    if (r.order && r.order.orderId && r.order.devMode) {
-      await api('/payment/verify', { method: 'POST', body: { razorpay_order_id: r.order.orderId } });
+    await payDirectOrder(r.order, 'verification_service', 'Sambandh verification', async () => {
       const done = await api('/verification-services/cases/' + r.case.id + '/confirm-payment', { method: 'POST' });
       const rep = await api('/verification-services/cases/' + r.case.id);
       const lvl = rep.case && rep.case.report ? rep.case.report.verifiedLevel : done.case.status;
       toast('Verification complete — level: ' + lvl);
       loadTrust();
-    } else {
-      toast('Verification requested — complete payment to run it.');
-    }
+    });
   } catch (e) { toast(e.message); }
   finally { if (btn) { btn.disabled = false; btn.textContent = 'Verify me'; } }
 }
