@@ -1018,15 +1018,32 @@ function checkoutBreakdownHtml(q) {
     <div class="co-row co-total"><span>Total</span><span>${m(q.total)} ${esc(q.code)}</span></div>
     <div class="co-note">Canonical price CHF ${q.chf}${q.taxRate ? ` · incl. ${esc(q.taxName)} ${q.taxRate}%` : ''} · live rate</div>`;
 }
-// Fetch the server-authoritative quote and fill the breakdown container.
+// Honest fallback bill when the quote endpoint is briefly unreachable — NEVER leave
+// the checkout stuck on a spinner. Shows the base price; the exact tax/fee total is
+// confirmed on the (server-authoritative) payment screen.
+function checkoutFallbackHtml(purpose) {
+  const p = pricingView();
+  const g = (S.user && S.user.profile && S.user.profile.gender) || 'male';
+  const annual = purpose.endsWith('_annual');
+  const stem = purpose.replace(/_(subscription|annual)$/, '');
+  const base = annual ? (p.annual && p.annual[stem]) : (stem === 'base' ? (p.base[g] ?? p.base.male) : p[stem]);
+  return `<div class="co-row"><span>Membership</span><span>${p.sym}${fmtMoney('', base ?? 0)}</span></div>
+    <div class="co-row co-muted"><span>Applicable GST &amp; payment fee</span><span>added at payment</span></div>
+    <div class="co-note">Your exact total (with tax &amp; fee) is confirmed securely on the payment screen.</div>`;
+}
+// Fetch the server-authoritative quote and fill the breakdown — with a retry and a
+// graceful fallback so the bill can never hang on "Calculating…".
 async function loadCheckoutQuote(purpose, elId) {
   elId = elId || 'co-breakdown';
-  try {
-    const q = await api('/payment/quote?purpose=' + encodeURIComponent(purpose));
-    S._quote = Object.assign({}, q, { purpose });
-    const el = document.getElementById(elId);
-    if (el) el.innerHTML = checkoutBreakdownHtml(q);
-  } catch (e) { /* keep the loading state; Pay still uses the server total */ }
+  let q = null;
+  for (let i = 0; i < 2 && !q; i++) {
+    try { q = await api('/payment/quote?purpose=' + encodeURIComponent(purpose)); }
+    catch (e) { if (i === 0) await new Promise(r => setTimeout(r, 700)); }
+  }
+  const el = document.getElementById(elId);
+  if (!el) return;
+  if (q) { S._quote = Object.assign({}, q, { purpose }); el.innerHTML = checkoutBreakdownHtml(q); }
+  else { el.innerHTML = checkoutFallbackHtml(purpose); }
 }
 
 function obPay() {
