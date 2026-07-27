@@ -142,34 +142,40 @@ function chfAmount(purpose, gender) {
 }
 
 /**
- * The full, itemized, honest quote for a purpose (SHIG R-14): base (live fx-converted)
- * + every tax line (per the buyer's country/category) + the gateway fee → total. This
- * is what the buyer is actually charged. Country/gender come from the STORED user.
- * @param {string} purpose
- * @param {PricingUser | null | undefined} user
+ * The full, itemized, honest quote (SHIG R-14): base (live fx-converted) + every tax
+ * line (per the buyer's country/category) + the gateway fee → total. This is what the
+ * buyer is actually charged. Country comes from the STORED user. Used for variable-priced
+ * items (gift passes, verification) that can't derive their price from the purpose alone.
+ * @param {number|null|undefined} chf @param {string} category
+ * @param {PricingUser | null | undefined} user @param {string} [label]
  * @returns {Promise<null | { code:string, symbol:string, chf:number, base:number, taxName:string, taxRate:number, taxTotal:number, taxLines:Array<{label:string,rate:number,amount:number}>, gatewayFeePct:number, gatewayFee:number, total:number, minor:number, country:string, category:string }>}
  */
-async function quoteFor(purpose, user) {
-  const gender = (user && user.profile && user.profile.gender) || 'other';
-  const chf = chfAmount(purpose, gender);
-  if (chf == null) return null;
+async function quoteForAmount(chf, category, user, label = 'Membership') {
+  if (chf == null || !(Number(chf) > 0)) return null;
   const country = (user && user.profile && user.profile.country) || 'IN';
   const cc = await commerce.countryConfig(country);
   const cfg = await commerce.getCommerce();
   const code = cc.currency;
-  const base = await fx.convertFromCHF(chf, code);
-  const category = categoryForPurpose(purpose);
+  const base = await fx.convertFromCHF(Number(chf), code);
   const taxRate = await commerce.categoryRate(country, category);
   const q = tax.computeQuote({
-    components: [{ label: 'Membership', amount: base, rate: taxRate }],
+    components: [{ label, amount: base, rate: taxRate }],
     taxName: cc.taxName, gatewayFeePct: cfg.gatewayFeePct,
   });
   return {
     code, symbol: SYMBOLS[code] || (code + ' '),
-    chf, base: q.base, taxName: cc.taxName, taxRate, taxTotal: q.taxTotal, taxLines: q.lines,
+    chf: Number(chf), base: q.base, taxName: cc.taxName, taxRate, taxTotal: q.taxTotal, taxLines: q.lines,
     gatewayFeePct: q.gatewayFeePct, gatewayFee: q.gatewayFee,
     total: q.total, minor: toMinor(q.total, code), country, category,
   };
+}
+
+/** The itemized quote for a fixed-price purpose (membership tiers): price derived from
+ * the buyer's verified gender + the purpose. @param {string} purpose
+ * @param {PricingUser | null | undefined} user */
+async function quoteFor(purpose, user) {
+  const gender = (user && user.profile && user.profile.gender) || 'other';
+  return quoteForAmount(chfAmount(purpose, gender), categoryForPurpose(purpose), user);
 }
 
 // 1. Create order — join fee by default, or another purpose
@@ -610,39 +616,61 @@ router.post('/webhook', async (req, res, next) => {
 });
 
 /**
- * Create a Payment + order for a product priced DIRECTLY in CHF (marketplace,
- * consultation, verification services — NOT the gender-priced membership tiers).
- * Dev mode simulates the order id ('order_dev_…', captured by the normal /verify
- * dev path); prod creates a real Razorpay order. The returned payment is 'created'.
- * `metadata` (e.g. { caseId }) binds the payment to what it pays for, so a later
- * confirm step can verify purpose + amount + ownership before granting anything.
- * @param {{ userId:any, purpose:string, amountCHF:number, currency?:string, metadata?:Record<string,any> }} args
- * @returns {Promise<{ devMode:boolean, orderId:string, key?:string, payment:any }>}
+ * Create a Payment + order for a product priced in CHF (gift passes, verification
+ * services, marketplace/consultation — NOT the gender-priced membership tiers), CHARGED
+ * exactly like every other Sambandh order: live fx to the buyer's currency + category
+ * tax + gateway fee (SHIG R-14). The result is a SUPERSET of the /create-order response
+ * (key/amount/currency/orderId/prefill/breakdown), so the client opens Razorpay
+ * identically — no more "complete payment" dead-end. `payment.amountCHF` stays the
+ * canonical CHF base so a later confirm step can pin purpose + amount + ownership.
+ * `metadata` (e.g. { giftPassId }/{ caseId }) binds the payment to what it pays for.
+ * Dev mode simulates the order id ('order_dev_…', captured by the normal /verify path).
+ * @param {{ userId:any, purpose:string, amountCHF:number, category?:string, label?:string, metadata?:Record<string,any> }} args
  */
-async function createDirectOrder({ userId, purpose, amountCHF, currency = 'CHF', metadata = {} }) {
-  const amt = Math.round((Number(amountCHF) || 0) * 100) / 100;
-  if (!(amt > 0)) throw new Error('Invalid order amount');
+async function createQuotedOrder({ userId, purpose, amountCHF, category, label, metadata = {} }) {
+  const user = await User.findById(userId);
+  if (!user) throw new Error('User not found');
+  const quote = await quoteForAmount(Number(amountCHF), category || categoryForPurpose(purpose), user, label);
+  if (!quote) throw new Error('Invalid order amount');
+  // Persisted with the order so /verify, receipts and pro-rated refunds read the real
+  // charged amounts back from the DB, never from the request body.
+  const breakdown = {
+    base: quote.base, taxName: quote.taxName, taxRate: quote.taxRate,
+    taxTotal: quote.taxTotal, taxLines: quote.taxLines,
+    gatewayFeePct: quote.gatewayFeePct, gatewayFee: quote.gatewayFee,
+    total: quote.total, country: quote.country, category: quote.category,
+  };
+  const clientQuote = {
+    amount: quote.minor, amountMajor: quote.total, amountCHF: quote.chf,
+    currency: quote.code, symbol: quote.symbol, breakdown,
+  };
   if (DEV_PAYMENTS) {
     const orderId = 'order_dev_' + crypto.randomBytes(8).toString('hex');
     const payment = await Payment.create({
-      userId, purpose, amountCHF: amt, currency, razorpayOrderId: orderId,
-      status: 'created', createdAt: new Date(), metadata: { ...metadata, dev: true }
+      userId, purpose, amountCHF: quote.chf, currency: quote.code, razorpayOrderId: orderId,
+      status: 'created', createdAt: new Date(), metadata: { ...metadata, dev: true, amountLocal: quote.total, ...breakdown }
     });
-    return { devMode: true, orderId, payment };
+    return { devMode: true, orderId, payment, ...clientQuote };
   }
   if (!razorpay) throw new Error('Payments are not configured');
   const order = await razorpay.orders.create({
-    amount: toMinor(amt, currency), currency,
+    amount: quote.minor, currency: quote.code,
     receipt: `sb_${Date.now().toString(36)}_${String(userId).slice(-6)}`,
     notes: { userId: String(userId), purpose }
   });
   const payment = await Payment.create({
-    userId, purpose, amountCHF: amt, currency, razorpayOrderId: order.id,
-    status: 'created', createdAt: new Date(), metadata
+    userId, purpose, amountCHF: quote.chf, currency: quote.code, razorpayOrderId: order.id,
+    status: 'created', createdAt: new Date(), metadata: { ...metadata, amountLocal: quote.total, ...breakdown }
   });
-  return { devMode: false, orderId: order.id, key: process.env.RAZORPAY_KEY_ID, payment };
+  return {
+    devMode: false, orderId: order.id, key: process.env.RAZORPAY_KEY_ID, payment,
+    prefill: { name: user.profile && user.profile.firstName, contact: user.phone }, ...clientQuote
+  };
 }
 
 module.exports = router;
 module.exports.activateTier = activateTier;   // exported for tests (early-access flag integration)
-module.exports.createDirectOrder = createDirectOrder;
+module.exports.createQuotedOrder = createQuotedOrder;
+// Back-compat alias: existing callers used createDirectOrder; the quoted order is a
+// strict superset (adds fx/tax/fee + the client quote fields), so the name maps through.
+module.exports.createDirectOrder = createQuotedOrder;

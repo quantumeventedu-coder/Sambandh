@@ -47,6 +47,22 @@ describe('catalogue + purchase', () => {
     expect(bought.pass.code).toMatch(/^SB-[A-Z2-9]{4}-[A-Z2-9]{4}-[A-Z2-9]{4}$/);
     expect(bought.pass.status).toBe('created');   // not redeemable until paid
   });
+
+  test('purchase returns a PAYABLE order (regression: no more "complete payment" dead-end)', async () => {
+    const buyer = await mkUser();
+    const bought = await purchase(buyer, 'premium_1m');
+    const order = bought.order;
+    // The client needs all of this to open the gateway; without it the flow dead-ended.
+    expect(order.orderId).toBeTruthy();
+    expect(order.amount).toBeGreaterThan(0);            // minor units actually charged
+    expect(order.currency).toBeTruthy();                // buyer's local currency, not raw CHF
+    expect(order.amountCHF).toBe(15);                   // CHF base still pinned for confirm
+    // Charged like every other order: base + tax + gateway fee, itemised.
+    expect(order.breakdown).toBeTruthy();
+    expect(order.breakdown.taxTotal).toBeGreaterThanOrEqual(0);
+    expect(order.breakdown.gatewayFee).toBeGreaterThanOrEqual(0);
+    expect(order.breakdown.total).toBeCloseTo(order.amountMajor, 5);
+  });
 });
 
 describe('redeem lifecycle', () => {
