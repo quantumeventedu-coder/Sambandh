@@ -53,9 +53,9 @@
 
   <!-- LOGIN -->
   <div id="login" class="card" style="max-width:440px">
-    <label>Work email</label><input id="li-email" type="email" autocomplete="username" placeholder="you@sambandh.online"/>
-    <label>Password</label><input id="li-pass" type="password" autocomplete="current-password"/>
-    <div id="li-2fa" class="hidden"><label>2FA code (or a backup code)</label><input id="li-totp" inputmode="numeric" placeholder="123456"/></div>
+    <label>Work email</label><input aria-label="Email" id="li-email" type="email" autocomplete="username" placeholder="you@sambandh.online"/>
+    <label>Password</label><input aria-label="Password" id="li-pass" type="password" autocomplete="current-password"/>
+    <div id="li-2fa" class="hidden"><label>2FA code (or a backup code)</label><input aria-label="Authentication code" id="li-totp" inputmode="numeric" placeholder="123456"/></div>
     <div class="row" style="margin-top:14px"><button onclick="login()">Sign in</button><span id="li-status" class="status dis">not signed in</span></div>
     <div id="li-err" class="err"></div>
     <p class="muted" style="margin-top:12px"><a href="#" onclick="bootstrapOwner();return false">Owner? Set up the first staff with your super-admin key →</a></p>

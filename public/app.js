@@ -110,8 +110,8 @@ function askInput({ title, hint = '', label = '', placeholder = '', multiline = 
       <div class="field">
         ${label ? `<label>${esc(label)}</label>` : ''}
         ${multiline
-    ? `<textarea id="ask-in" rows="4" placeholder="${esc(placeholder)}"></textarea>`
-    : `<input id="ask-in" type="text" placeholder="${esc(placeholder)}" autocomplete="off"/>`}
+    ? `<textarea aria-label="Your question" id="ask-in" rows="4" placeholder="${esc(placeholder)}"></textarea>`
+    : `<input aria-label="Your question" id="ask-in" type="text" placeholder="${esc(placeholder)}" autocomplete="off"/>`}
       </div>
       <p id="ask-err" class="hint" style="display:none;color:var(--sindoor)"></p>
       <div class="row" style="gap:8px">
@@ -671,13 +671,13 @@ function obProfile() {
   return `<div class="section-pad">
     <h1>Tell us about yourself</h1>
     <p class="sub">No pressure, you can always update this.</p>
-    <div class="field"><label>First name</label><input id="ob-name" maxlength="50" placeholder="Your first name"/></div>
-    <div class="field"><label>Gender</label><select id="ob-gender">
+    <div class="field"><label>First name</label><input aria-label="First name" id="ob-name" maxlength="50" placeholder="Your first name"/></div>
+    <div class="field"><label>Gender</label><select aria-label="Gender" id="ob-gender">
       <option value="">Select…</option><option value="male">Male</option><option value="female">Female</option>
       <option value="non_binary">Non-binary</option><option value="other">Other</option></select></div>
-    <div class="field"><label>Date of birth</label><input id="ob-dob" type="date"/><div class="hint">You must be 18 or older.</div></div>
+    <div class="field"><label>Date of birth</label><input aria-label="Date of birth" id="ob-dob" type="date"/><div class="hint">You must be 18 or older.</div></div>
     <div class="field"><label>City</label>
-      <input id="ob-city" list="city-list" placeholder="Start typing… e.g. Guwahati" oninput="cityLookup(this.value)" autocomplete="off"/>
+      <input aria-label="City" id="ob-city" list="city-list" placeholder="Start typing… e.g. Guwahati" oninput="cityLookup(this.value)" autocomplete="off"/>
       <datalist id="city-list"></datalist>
       <div class="hint">Pick from the list — distance matching uses your city.</div>
     </div>
@@ -720,14 +720,14 @@ function obId() {
     <h1>Add a government-ID badge <span class="hint">(optional)</span></h1>
     <p class="sub">You're already photo-verified. Add a government ID for an extra trust badge on your profile. Fully automated — no waiting, no human review.</p>
     <div class="card mt">
-      <div class="field"><label>ID type</label><select id="ob-idtype">
+      <div class="field"><label>ID type</label><select aria-label="ID type" id="ob-idtype">
         <option value="passport">Passport (any country)</option>
         <option value="national_id">National ID card</option>
         <option value="driving_licence">Driving Licence</option>
         <option value="residence_permit">Residence permit</option>
         <option value="aadhaar">Aadhaar (India)</option>
         <option value="pan">PAN (India)</option></select></div>
-      <div class="field"><label>Photo of your ID</label><input id="ob-idfile" type="file" accept="image/*"/></div>
+      <div class="field"><label>Photo of your ID</label><input aria-label="ID document" id="ob-idfile" type="file" accept="image/*"/></div>
       <button class="btn" onclick="obUploadId()">Add ID badge</button>
       <button class="btn ghost" onclick="S.user._skippedId=true;renderOnboarding()">Skip for now</button>
       <div id="ob-id-area"></div>
@@ -760,7 +760,7 @@ function obSelfie() {
       </div>
     </div>
     <details style="margin-top:14px"><summary class="hint" style="cursor:pointer">No camera? Upload a selfie instead</summary>
-      <div class="field mt"><input id="ob-selfie" type="file" accept="image/*" capture="user"/></div>
+      <div class="field mt"><input aria-label="Selfie photo" id="ob-selfie" type="file" accept="image/*" capture="user"/></div>
       <button class="btn secondary" onclick="obSendSelfie()">Verify uploaded selfie</button>
     </details>
     <div class="notice forest ic-row" style="display:flex;margin-top:12px">${ic('shieldCheck')} <span>The same face can't be enrolled on two accounts — our engine detects duplicate identities to stop catfishing and ban-evasion.</span></div>
@@ -925,7 +925,7 @@ function obProfession() {
   return `<div class="section-pad">
     <h1>What do you do?</h1>
     <p class="sub">Every profession on Sambandh is verified. Doctors, lawyers, CAs and architects verify instantly against public registries.</p>
-    <div class="field"><label>Category</label><select id="ob-cat" onchange="obCatChange()">
+    <div class="field"><label>Category</label><select aria-label="Profession category" id="ob-cat" onchange="obCatChange()">
       <option value="engineer">Engineer / Tech</option>
       <option value="doctor">Doctor (instant ✓)</option>
       <option value="lawyer">Lawyer (instant ✓)</option>
@@ -935,10 +935,10 @@ function obProfession() {
       <option value="business_owner">Business owner</option>
       <option value="student">Student</option>
       <option value="other">Other</option></select></div>
-    <div class="field"><label>Job title</label><input id="ob-title" placeholder="e.g. Product Designer"/></div>
-    <div class="field"><label>Company / Institution</label><input id="ob-company" placeholder="e.g. Infosys"/></div>
-    <div id="ob-reg" style="display:none" class="field"><label>Registration number</label><input id="ob-regno" placeholder="e.g. NMC/BCI/ICAI number"/><div class="hint">Checked against the public registry — verifies instantly.</div></div>
-    <div id="ob-docs" class="field"><label>Proof document (offer letter / company ID / college ID)</label><input id="ob-doc" type="file" accept="image/*,.pdf"/><div class="hint">Automated document check — instant. The document must name your employer. No human reviews it.</div></div>
+    <div class="field"><label>Job title</label><input aria-label="Profession title" id="ob-title" placeholder="e.g. Product Designer"/></div>
+    <div class="field"><label>Company / Institution</label><input aria-label="Company" id="ob-company" placeholder="e.g. Infosys"/></div>
+    <div id="ob-reg" style="display:none" class="field"><label>Registration number</label><input aria-label="Registration number" id="ob-regno" placeholder="e.g. NMC/BCI/ICAI number"/><div class="hint">Checked against the public registry — verifies instantly.</div></div>
+    <div id="ob-docs" class="field"><label>Proof document (offer letter / company ID / college ID)</label><input aria-label="Profession document" id="ob-doc" type="file" accept="image/*,.pdf"/><div class="hint">Automated document check — instant. The document must name your employer. No human reviews it.</div></div>
     <button class="btn" onclick="obSendProfession()">Verify instantly</button>
     <button class="btn ghost" onclick="S.user._skippedProfession=true;renderOnboarding()">Skip for now</button>
     <p class="hint center" style="margin-top:6px">You can add a verified profession later from your profile — it's optional.</p>
@@ -1090,9 +1090,9 @@ function obAstrology() {
   return `<div class="section-pad">
     <h1>Astrology details</h1>
     <p class="sub">Optional but recommended — powers Vedic guna milan compatibility. For insight, never deterministic.</p>
-    <div class="field"><label>Birth date</label><input id="ob-bdate" type="date" value="${esc(S.user.profile.dob || '')}"/></div>
-    <div class="field"><label>Birth time (needed for guna milan)</label><input id="ob-btime" type="time"/><div class="hint">Don't know it? Skip — we'll use sun-sign compatibility only.</div></div>
-    <div class="field"><label>Birth place (city)</label><input id="ob-bplace" placeholder="e.g. Guwahati"/></div>
+    <div class="field"><label>Birth date</label><input aria-label="Birth date" id="ob-bdate" type="date" value="${esc(S.user.profile.dob || '')}"/></div>
+    <div class="field"><label>Birth time (needed for guna milan)</label><input aria-label="Birth time" id="ob-btime" type="time"/><div class="hint">Don't know it? Skip — we'll use sun-sign compatibility only.</div></div>
+    <div class="field"><label>Birth place (city)</label><input aria-label="Birth place" id="ob-bplace" placeholder="e.g. Guwahati"/></div>
     <button class="btn" onclick="obSaveAstro()">Save astrology</button>
     <button class="btn ghost" onclick="S.user._skippedAstro=true;renderOnboarding()">Skip for now</button>
   </div>`;
@@ -1115,7 +1115,7 @@ function obPhotos() {
     <h1>Add photos</h1>
     <p class="sub">1–6 photos. The first becomes your primary. Location data is stripped automatically.</p>
     <div class="photo-grid" id="ob-grid"></div>
-    <input id="ob-photo-input" type="file" accept="image/*" multiple style="display:none" onchange="obAddPhotos(this.files)"/>
+    <input aria-label="Add photos" id="ob-photo-input" type="file" accept="image/*" multiple style="display:none" onchange="obAddPhotos(this.files)"/>
     <button class="btn" onclick="obSavePhotos()" id="ob-photos-save" disabled>Finish & start discovering</button>
     <button class="btn ghost" onclick="document.getElementById('ob-photo-input').click()">+ Add photo</button>
   </div>`;
@@ -1341,20 +1341,20 @@ function openFilters() {
   const f = S.filters;
   openModal(`
     <h2 style="margin-top:0">Filters</h2>
-    <div class="field"><label>Looking for</label><select id="f-intent">
+    <div class="field"><label>Looking for</label><select aria-label="Looking for" id="f-intent">
       ${[['all', 'Any intent'], ['marriage', 'Marriage'], ['dating', 'Dating'], ['casual', 'Casual'], ['friendship', 'Friendship'], ['networking', 'Networking / business']].map(([v, l]) => `<option value="${v}" ${f.intent === v ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
     <div class="row">
-      <div class="field"><label>Min age</label><input id="f-min" type="number" min="18" max="60" value="${f.minAge}"/></div>
-      <div class="field"><label>Max age</label><input id="f-max" type="number" min="18" max="60" value="${f.maxAge}"/></div>
+      <div class="field"><label>Min age</label><input aria-label="Minimum age" id="f-min" type="number" min="18" max="60" value="${f.minAge}"/></div>
+      <div class="field"><label>Max age</label><input aria-label="Maximum age" id="f-max" type="number" min="18" max="60" value="${f.maxAge}"/></div>
     </div>
-    <div class="field"><label>Verification level</label><select id="f-ver">
+    <div class="field"><label>Verification level</label><select aria-label="Verification level" id="f-ver">
       <option value="any" ${f.verification === 'any' ? 'selected' : ''}>Photo-verified (all)</option>
       <option value="id" ${f.verification === 'id' ? 'selected' : ''}>Government-ID verified</option>
       <option value="profession" ${f.verification === 'profession' ? 'selected' : ''}>Profession verified</option>
       <option value="fully_verified" ${f.verification === 'fully_verified' ? 'selected' : ''}>Fully verified</option></select></div>
-    <div class="field"><label>Minimum Lakshan grade</label><select id="f-karma">
+    <div class="field"><label>Minimum Lakshan grade</label><select aria-label="Lakshan grade" id="f-karma">
       ${['any','A+','A','B+','B','C'].map(g => `<option value="${g}" ${f.karmaGrade === g ? 'selected' : ''}>${g === 'any' ? 'Any' : g + ' and above'}</option>`).join('')}</select></div>
-    <div class="field"><label>Max distance</label><select id="f-km">
+    <div class="field"><label>Max distance</label><select aria-label="Distance" id="f-km">
       ${['5','25','50','100','anywhere'].map(k => `<option value="${k}" ${String(f.maxKm) === k ? 'selected' : ''}>${k === 'anywhere' ? 'Anywhere in India' : k + ' km'}</option>`).join('')}</select></div>
     <div class="setting-row"><span>Show anonymous profiles</span>
       <label class="switch"><input id="f-anon" type="checkbox" ${f.showAnonymous ? 'checked' : ''}/><span class="sl"></span></label></div>
@@ -1591,12 +1591,12 @@ function openReport(userId) {
   openModal(`
     <h2 style="margin-top:0">Report this user</h2>
     <p class="sub">Reviewed by a human within 24 hours.</p>
-    <div class="field"><label>Category</label><select id="rep-cat">
+    <div class="field"><label>Category</label><select aria-label="Report category" id="rep-cat">
       <option value="harassment">Harassment</option><option value="fake_profile">Fake profile</option>
       <option value="scam">Scam / money request</option><option value="underage">Underage</option>
       <option value="hate_speech">Hate speech</option><option value="non_consensual_image">Non-consensual image</option>
       <option value="other">Other</option></select></div>
-    <div class="field"><label>What happened?</label><textarea id="rep-desc" rows="4" placeholder="Describe what happened (min 10 characters)"></textarea></div>
+    <div class="field"><label>What happened?</label><textarea aria-label="Report details" id="rep-desc" rows="4" placeholder="Describe what happened (min 10 characters)"></textarea></div>
     <button class="btn" onclick="sendReport('${userId}')">Submit report</button>`);
 }
 
@@ -1647,7 +1647,7 @@ async function renderChat(chatId) {
     <div class="chat-msgs" id="msgs"></div>
     <div class="typing" id="typing-line"></div>
     <div class="chat-input">
-      <input id="msg-input" placeholder="Type a message…" maxlength="5000"
+      <input aria-label="Message" id="msg-input" placeholder="Type a message…" maxlength="5000"
         onkeydown="if(event.key==='Enter')sendMsg('${chatId}')" oninput="emitTyping('${chatId}')"/>
       <button aria-label="Send message" onclick="sendMsg('${chatId}')" style="display:flex;align-items:center;justify-content:center">${ic('send', 'ic-lg')}</button>
     </div>
@@ -1990,9 +1990,9 @@ function toggleRoomForm() {
   const el = $('#room-form'); if (!el) return;
   if (el.innerHTML) { el.innerHTML = ''; return; }
   el.innerHTML = `<div class="card">
-    <div class="field"><label>Room name</label><input id="nr-name" placeholder="e.g. Delhi Foodies" maxlength="60"/></div>
-    <div class="field"><label>Description</label><input id="nr-desc" placeholder="What's it about?" maxlength="200"/></div>
-    <div class="field"><label>Visibility</label><select id="nr-vis"><option value="public">Public — anyone can find &amp; join</option><option value="private">Private — invite code only</option></select></div>
+    <div class="field"><label>Room name</label><input aria-label="Community name" id="nr-name" placeholder="e.g. Delhi Foodies" maxlength="60"/></div>
+    <div class="field"><label>Description</label><input aria-label="Community description" id="nr-desc" placeholder="What's it about?" maxlength="200"/></div>
+    <div class="field"><label>Visibility</label><select aria-label="Community visibility" id="nr-vis"><option value="public">Public — anyone can find &amp; join</option><option value="private">Private — invite code only</option></select></div>
     <button class="btn" onclick="createRoom()">Create room</button></div>`;
 }
 async function createRoom() {
@@ -2021,7 +2021,7 @@ async function renderRoom(slug) {
   screen.innerHTML = `<div class="app-header"><button class="back" style="background:none;border:none;font-size:22px;cursor:pointer" onclick="nav('#/community')">←</button><div style="flex:1;padding-left:8px"><b id="room-title">Room</b><div class="hint" id="room-sub"></div></div></div>
     <div id="room-msgs" style="padding:12px 14px 92px;display:flex;flex-direction:column;gap:8px"><div class="empty">Loading…</div></div>
     <div style="position:fixed;bottom:0;left:0;right:0;background:#fff;border-top:1px solid var(--sand-mid);padding:10px 12px;display:flex;gap:8px;max-width:640px;margin:0 auto">
-      <input id="room-input" placeholder="Say something…" style="flex:1" onkeydown="if(event.key==='Enter')postRoom('${slug}')"/><button class="btn" style="width:auto" onclick="postRoom('${slug}')">Send</button></div>`;
+      <input aria-label="Message" id="room-input" placeholder="Say something…" style="flex:1" onkeydown="if(event.key==='Enter')postRoom('${slug}')"/><button class="btn" style="width:auto" onclick="postRoom('${slug}')">Send</button></div>`;
   S._room = { slug, last: null, timer: null };
   await loadRoom(slug, true);
   S._room.timer = setInterval(() => { if (location.hash === '#/room/' + slug) loadRoom(slug, false); else if (S._room) clearInterval(S._room.timer); }, 4000);
@@ -2330,7 +2330,7 @@ async function setup2FA() {
       <b>Scan with your authenticator app</b>
       <div style="text-align:center;margin:12px 0"><img src="${qr}" alt="Two-factor authentication setup QR code" style="border-radius:10px" onerror="this.style.display='none'"/></div>
       <p class="hint">Or enter this key manually: <b style="letter-spacing:1px">${esc(r.secret)}</b></p>
-      <div class="field mt"><label>Enter the 6-digit code to confirm</label><input id="tf-code" class="otp-boxes" maxlength="6" inputmode="numeric" placeholder="••••••"/></div>
+      <div class="field mt"><label>Enter the 6-digit code to confirm</label><input aria-label="Authentication code" id="tf-code" class="otp-boxes" maxlength="6" inputmode="numeric" placeholder="••••••"/></div>
       <button class="btn forest" onclick="confirm2FA()">Confirm &amp; enable</button>
       <button class="btn small secondary mt" onclick="load2FA()">Cancel</button>`;
     $('#tf-code')?.focus();
@@ -2512,7 +2512,7 @@ function settingSwitch(key, label, on) {
 function notifPrefRow(key, label, current) {
   const val = current || (key === 'new_match' || key === 'verification' ? 'both' : 'push');
   return `<div class="setting-row"><span>${label}</span>
-    <select style="padding:6px 8px;border:1px solid var(--sand-mid);border-radius:8px;font-size:13px;background:var(--white)"
+    <select aria-label="${label}" style="padding:6px 8px;border:1px solid var(--sand-mid);border-radius:8px;font-size:13px;background:var(--white)"
       onchange="saveNotifPref('${key}', this.value)">
       ${['push','email','both','none'].map(o => `<option value="${o}" ${o === val ? 'selected' : ''}>${o === 'none' ? 'Off' : o[0].toUpperCase() + o.slice(1)}</option>`).join('')}
     </select></div>`;
@@ -2615,11 +2615,11 @@ function openEditProfile() {
   const u = S.user;
   openModal(`
     <h2 style="margin-top:0">Edit profile</h2>
-    <div class="field"><label>Bio (max 500)</label><textarea id="ep-bio" rows="4" maxlength="500">${esc(u.profile?.bio || '')}</textarea></div>
+    <div class="field"><label>Bio (max 500)</label><textarea aria-label="About you" id="ep-bio" rows="4" maxlength="500">${esc(u.profile?.bio || '')}</textarea></div>
     <div class="field"><label>Intent (max 2)</label>
       ${INTENTS.map(i => `<span class="tag ic-row ${(u.intent || []).includes(i.v) ? 'rose' : 'plain'}" data-v="${i.v}" style="cursor:pointer;padding:6px 14px;font-size:13px" onclick="this.classList.toggle('rose');this.classList.toggle('plain')">${ic(i.icon)} ${i.t}</span>`).join('')}</div>
-    <div class="field"><label>Add photos (your verified selfie always stays first)</label><input id="ep-photos" type="file" accept="image/*" multiple/></div>
-    <div class="field"><label>Birth time (for guna milan)</label><input id="ep-btime" type="time" value="${esc(u.astrology?.birthTime || '')}"/></div>
+    <div class="field"><label>Add photos (your verified selfie always stays first)</label><input aria-label="Add photos" id="ep-photos" type="file" accept="image/*" multiple/></div>
+    <div class="field"><label>Birth time (for guna milan)</label><input aria-label="Birth time" id="ep-btime" type="time" value="${esc(u.astrology?.birthTime || '')}"/></div>
     <button class="btn" onclick="saveEditProfile()">Save</button>`);
 }
 
@@ -2688,7 +2688,7 @@ async function renderServices() {
     <p class="hint" style="margin:0 0 8px">Gift premium or chat access to anyone — they redeem a code, no account needed to receive it.</p>
     <div id="svc-gifts"><div class="empty">Loading passes…</div></div>
     <div class="card" style="margin-top:10px"><b>Have a gift code?</b>
-      <div class="row" style="gap:8px;margin-top:8px"><input id="gift-code" placeholder="SB-XXXX-XXXX-XXXX" style="flex:1"/><button class="btn" style="width:auto" onclick="redeemGiftCode()">Redeem</button></div></div>
+      <div class="row" style="gap:8px;margin-top:8px"><input aria-label="Gift code" id="gift-code" placeholder="SB-XXXX-XXXX-XXXX" style="flex:1"/><button class="btn" style="width:auto" onclick="redeemGiftCode()">Redeem</button></div></div>
   </div>`;
   loadTrust(); loadCommerce(); loadVault(); loadVerifyTiers(); loadGiftPasses();
   if (S._pendingGiftCode) { const el = document.getElementById('gift-code'); if (el) el.value = S._pendingGiftCode; S._pendingGiftCode = null; }
