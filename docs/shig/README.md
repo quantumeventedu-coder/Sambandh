@@ -28,12 +28,19 @@ Higher tiers are lexicographic over lower ones — a gain at a lower tier never 
 | [0005](SHIG-0005-information-architecture.md) | Information Architecture | How information is organized ecosystem-wide (`IA-n`). |
 | [0006](SHIG-0006-user-mental-models.md) | User Mental Models | Aligning the interface to human cognition (`MM-n`). |
 | [0007](SHIG-0007-visual-language.md) | Visual Language | Visual principles & semantics, no values (`VL-n`). |
-| 0008 | Design Vocabulary | Controlled semantic vocabulary (`DV-n`) — *regeneration pending*. |
+| [0008](SHIG-0008-design-vocabulary.md) | Design Vocabulary | Controlled semantic vocabulary — one canonical term per concept (`DV-n`). |
 | [0009](SHIG-0009-emotional-design-system.md) | Emotional Design System | Ethical emotional design, no manipulation (`ED-n`). |
 | [0010](SHIG-0010-premium-experience-principles.md) | Premium Experience Principles | What "premium" means — restraint, not excess (`PX-n`). |
 | [0011](SHIG-0011-accessibility-inclusive-design.md) | Accessibility & Inclusive Design | Accessibility as a core quality attribute (`AX-n`). |
 | [0012](SHIG-0012-interaction-design-system.md) | Interaction Design System | Universal interaction principles (`IX-n`). |
 | [0013](SHIG-0013-navigation-wayfinding.md) | Navigation & Wayfinding | Orientation, discoverability, wayfinding (`NAV-n`). |
+| [0014](SHIG-0014-content-editorial-system.md) | Content & Editorial System | Voice, tone, microcopy, honesty-in-language (`CE-n`). |
+| [0015](SHIG-0015-layout-spatial-system.md) | Layout & Spatial System | Grid, spacing, density, composition, responsive space (`LS-n`). |
+| [0016](SHIG-0016-motion-choreography-system.md) | Motion & Choreography System | Motion purpose, continuity, calm, reduced-motion (`MC-n`). |
+| [0017](SHIG-0017-color-theming-system.md) | Color & Theming System | Semantic color roles, contrast, theming, never-color-alone (`CT-n`). |
+| [0018](SHIG-0018-typography-reading-system.md) | Typography & Reading System | Type roles, hierarchy, legibility, multi-script (`TY-n`). |
+| [0019](SHIG-0019-iconography-imagery-system.md) | Iconography & Imagery System | Icon grammar, imagery honesty/provenance, accessible names (`IM-n`). |
+| [0020](SHIG-0020-forms-feedback-state-system.md) | Forms, Feedback & System-State System | Inputs, validation/recovery, honest states, feedback (`FS-n`). |
 
 ## Implementation
 
