@@ -776,3 +776,60 @@ button:focus:not(:focus-visible) { outline: none; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .001ms !important; animation-iteration-count: 1 !important; transition-duration: .001ms !important; }
 }
+
+/* ---------------------------------------------------------------------
+   SCREEN REDESIGN — Discover (Nature Dial)
+   Was an off-brand orange-brown with heavy haldi glow. Re-based on the
+   brand plum with restrained depth and cleaner, hairline facets (C-14/C-15).
+   --------------------------------------------------------------------- */
+.dd {
+  color: #efe3e8;
+  background:
+    radial-gradient(78% 58% at 50% 26%, #3b1526 0%, #250f1c 50%, #140a11 100%);
+}
+.dd-name { letter-spacing: -0.015em; }
+.dd-name .likes { background: var(--haldi); color: var(--sindoor-deep); font-weight: 750; border-radius: var(--r-sm); }
+.dd-sub { color: #d4bcc6; }
+.dd-ver { color: #93ecb8; background: rgba(46,167,95,.16); border-color: rgba(147,236,184,.34); }
+.dd-lak { color: var(--haldi); background: rgba(250,199,117,.12); border-color: rgba(250,199,117,.34); }
+.dd-figure {
+  border-radius: var(--r-xl);
+  border: 1px solid rgba(255,255,255,0.14);
+  box-shadow: 0 28px 64px rgba(0,0,0,0.55);   /* refined depth, no orange glow */
+}
+.dd-figure .ini { background: linear-gradient(160deg, #43182f, #1c0f22); }
+.facet {
+  background: linear-gradient(160deg, rgba(255,255,255,0.065), rgba(255,255,255,0.02));
+  border: 1px solid rgba(255,255,255,0.10); border-radius: var(--r-md);
+}
+.facet .lab { color: var(--haldi); letter-spacing: 0.16em; }
+.facet h4 { color: #fff; letter-spacing: -0.01em; }
+.facet p { color: #dcc9d1; }
+.facet.locked .up { background: linear-gradient(135deg, #ffd97a, var(--haldi)); color: var(--sindoor-deep); border-radius: var(--r-md); }
+.dd-actions button {
+  background: rgba(255,255,255,0.07); border: 1px solid rgba(255,255,255,0.14);
+  backdrop-filter: blur(12px); box-shadow: 0 10px 28px rgba(0,0,0,0.42);
+  transition: transform var(--dur-1) var(--ease);
+}
+.dd-actions button:active { transform: scale(0.93); }
+.dd-actions .like { background: linear-gradient(135deg, var(--rose), var(--sindoor)); border: none; box-shadow: 0 10px 28px rgba(153,53,86,0.5); }
+
+/* ---------------------------------------------------------------------
+   SCREEN REDESIGN — Welcome hero (first impression)
+   --------------------------------------------------------------------- */
+.welcome { background: linear-gradient(158deg, var(--sindoor-deep) 0%, #5c1a30 60%, #3b1121 100%); }
+.welcome .wordmark { letter-spacing: -0.02em; }
+.welcome .tagline { opacity: 0.72; }
+.welcome .points div { display: flex; gap: 10px; align-items: flex-start; opacity: 0.9; }
+
+/* ---------------------------------------------------------------------
+   SCREEN REDESIGN — list & settings rows (calmer rhythm, hairline rules)
+   --------------------------------------------------------------------- */
+.kv { border-bottom-color: var(--hair); padding: 10px 2px; }
+.setting-row { border-bottom-color: var(--hair); padding: 14px 2px; }
+.switch input:checked + .sl { background: var(--forest); }
+.chat-item { border-bottom-color: var(--hair); }
+.chat-item .cname { letter-spacing: -0.006em; }
+/* Karma / score heroes: restrained, brand-tinted */
+.karma-hero, .compat-score b { letter-spacing: -0.02em; }
+.evidence { border-radius: 0 var(--r-md) var(--r-md) 0; }
