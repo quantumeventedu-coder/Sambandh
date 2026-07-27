@@ -833,3 +833,29 @@ button:focus:not(:focus-visible) { outline: none; }
 /* Karma / score heroes: restrained, brand-tinted */
 .karma-hero, .compat-score b { letter-spacing: -0.02em; }
 .evidence { border-radius: 0 var(--r-md) var(--r-md) 0; }
+
+/* ---------------------------------------------------------------------
+   SCREEN REDESIGN — Onboarding & remaining surfaces
+   --------------------------------------------------------------------- */
+/* Progress: thinner rail, brand gradient on completed steps */
+.progress i { height: 3px; border-radius: var(--r-pill); background: var(--hair); transition: background var(--dur-2) var(--ease); }
+.progress i.done { background: linear-gradient(90deg, var(--sindoor), var(--rose)); }
+/* OTP entry: calmer letter-spacing */
+.otp-boxes { letter-spacing: 0.55em; }
+/* Photo grid: cleaner tiles on the token radius */
+.photo-grid { gap: 10px; }
+.photo-grid .ph { border-radius: var(--r-md); border: 1.5px dashed var(--hair); }
+.photo-grid .ph img { border-radius: inherit; }
+.photo-grid .ph .primary-tag { border-radius: var(--r-sm); }
+/* Karma hero: restrained container */
+.karma-hero { border-radius: var(--r-lg); border: 1px solid var(--hair); }
+/* Compatibility koota bars: token radius */
+.guna-koota .gbar, .guna-koota .gbar i { border-radius: var(--r-pill); }
+.trait .bar, .trait .bar i { border-radius: var(--r-pill); }
+/* Toast: crafted pill with real elevation */
+#toast { border-radius: var(--r-pill); box-shadow: var(--e-3); }
+/* Empty states: calmer spacing */
+.empty { padding: 48px 28px; }
+/* Chat composer: token radius, ≥44px send */
+.chat-input input { border-radius: var(--r-pill); border-color: var(--hair); }
+.chat-input button { min-width: 44px; min-height: 44px; background: linear-gradient(135deg, var(--rose), var(--sindoor)); }
