@@ -40,5 +40,46 @@
 <script src="/badge.js?v=1"></script>
 <script src="/geometry-map.js?v=1"></script>
 <script src="/app.js?v=3"></script>
+<script>
+/* Accessibility (SHIG C-8 / WCAG 2.1.1): the SPA builds many controls as
+   div/span with only onclick. Make every such element keyboard-operable —
+   focusable + Enter/Space activatable — across the initial render, every
+   re-render (screen.innerHTML), and modals. Native controls are left alone. */
+(function () {
+  var NATIVE = { BUTTON:1, A:1, INPUT:1, SELECT:1, TEXTAREA:1, LABEL:1, SUMMARY:1 };
+  function enhance(el) {
+    if (!el || el.nodeType !== 1) return;
+    var list = el.hasAttribute && el.hasAttribute('onclick') ? [el] : [];
+    if (el.querySelectorAll) list = list.concat([].slice.call(el.querySelectorAll('[onclick]')));
+    for (var i = 0; i < list.length; i++) {
+      var n = list[i];
+      if (NATIVE[n.tagName]) continue;
+      if (!n.hasAttribute('role')) n.setAttribute('role', 'button');
+      if (!n.hasAttribute('tabindex')) n.setAttribute('tabindex', '0');
+    }
+  }
+  document.addEventListener('keydown', function (e) {
+    if (e.key !== 'Enter' && e.key !== ' ' && e.key !== 'Spacebar') return;
+    var t = e.target;
+    if (!t || !t.getAttribute || NATIVE[t.tagName]) return;
+    if (t.getAttribute('role') === 'button' && t.hasAttribute('onclick')) {
+      e.preventDefault(); t.click();
+    }
+  });
+  function boot() {
+    enhance(document.body);
+    try {
+      new MutationObserver(function (muts) {
+        for (var i = 0; i < muts.length; i++) {
+          var added = muts[i].addedNodes;
+          for (var j = 0; j < added.length; j++) enhance(added[j]);
+        }
+      }).observe(document.body, { childList: true, subtree: true });
+    } catch (e) { /* MutationObserver always present in target browsers */ }
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
+  else boot();
+})();
+</script>
 </body>
 </html>
