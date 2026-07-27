@@ -50,13 +50,13 @@
       <button id="m-owner" class="mini ghost" onclick="setMode('owner')">Owner (key)</button>
     </div>
     <div id="staff-form">
-      <div class="field"><label>Work email</label><input id="s-email" type="email" placeholder="you@sambandh.in"/></div>
-      <div class="field"><label>Password</label><input id="s-pass" type="password"/></div>
-      <div id="totp-row" class="field" style="display:none"><label>2FA code</label><input id="s-totp" inputmode="numeric" placeholder="6-digit code"/></div>
+      <div class="field"><label>Work email</label><input aria-label="Email" id="s-email" type="email" placeholder="you@sambandh.in"/></div>
+      <div class="field"><label>Password</label><input aria-label="Password" id="s-pass" type="password"/></div>
+      <div id="totp-row" class="field" style="display:none"><label>2FA code</label><input aria-label="6-digit code" id="s-totp" inputmode="numeric" placeholder="6-digit code"/></div>
       <button onclick="staffLogin()">Sign in</button>
     </div>
     <div id="owner-form" style="display:none">
-      <div class="field"><label>Super admin key</label><input id="o-key" type="password"/></div>
+      <div class="field"><label>Super admin key</label><input aria-label="Owner key" id="o-key" type="password"/></div>
       <button onclick="ownerLogin()">Connect</button>
       <p class="hint" style="margin-top:8px">For bootstrapping before staff accounts exist. Day-to-day, employees should use their own sign-in.</p>
     </div>
