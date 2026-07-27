@@ -53,4 +53,13 @@ describe('activateTier never downgrades or shortens', () => {
     expect(endMs(after)).toBeGreaterThan(Date.now() + 29 * DAY);
     expect(endMs(after)).toBeLessThan(Date.now() + 31 * DAY);
   });
+
+  test('an ANNUAL purchase grants 365 days, not 30', async () => {
+    const u = await mkUser({ tier: 'free', joinFeePaid: false });
+    await activateTier(u._id, 'pro_annual', pay);
+    const after = await User.findById(u._id);
+    expect(after.membership.tier).toBe('pro');
+    expect(endMs(after)).toBeGreaterThan(Date.now() + 360 * DAY);
+    expect(endMs(after)).toBeLessThan(Date.now() + 370 * DAY);
+  });
 });

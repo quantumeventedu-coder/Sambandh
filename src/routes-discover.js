@@ -105,7 +105,7 @@ router.get('/', requireAuth, requireLaunched, async (req, res, next) => {
 
     // Karma-grade filtering is a Sambandh Max perk — validate before any DB work.
     if (req.query.karmaGrade && req.query.karmaGrade !== 'any' && !maxTierActive(me)) {
-      return res.status(403).json({ error: 'Filtering by karma grade is a Sambandh Max perk (CHF 15/month).', requiredTier: 'max' });
+      return res.status(403).json({ error: 'Filtering by karma grade is a Sambandh Signature perk (CHF 25/month).', requiredTier: 'max' });
     }
     const wantGrade = req.query.karmaGrade && req.query.karmaGrade !== 'any' ? GRADE_MIN[req.query.karmaGrade] : null;
 
