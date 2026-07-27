@@ -58,8 +58,8 @@ async function purchasePass({ purchaserId, passType, message, deliverAt, expires
     expiresAt: expiresAt ? new Date(expiresAt) : null,
     grant, createdAt: new Date(), updatedAt: new Date()
   });
-  const order = await paymentRail().createDirectOrder({
-    userId: purchaserId, purpose: 'gift_pass', amountCHF,
+  const order = await paymentRail().createQuotedOrder({
+    userId: purchaserId, purpose: 'gift_pass', amountCHF, category: 'gift', label: CATALOG[passType].label,
     metadata: { giftPassId: String(pass._id), passType }
   });
   await GiftPass.findByIdAndUpdate(pass._id, { paymentId: order.payment._id });

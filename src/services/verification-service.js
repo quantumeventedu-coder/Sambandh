@@ -157,14 +157,21 @@ async function createCase({ requesterId, subjectId, tier, documents }) {
     kase.consentId = consent._id;
   }
 
-  const order = await paymentRail().createDirectOrder({
-    userId: requesterId, purpose: 'verification_service', amountCHF,
+  const order = await paymentRail().createQuotedOrder({
+    userId: requesterId, purpose: 'verification_service', amountCHF, category: 'verification', label: 'Verification',
     metadata: { caseId: String(kase._id), tier }
   });
   await VerificationCase.findByIdAndUpdate(kase._id, { paymentId: order.payment._id });
   kase.paymentId = order.payment._id;
 
-  return { case: kase, consent, payment: order.payment, order: { orderId: order.orderId, devMode: order.devMode, key: order.key, amountCHF } };
+  return {
+    case: kase, consent, payment: order.payment,
+    order: {
+      orderId: order.orderId, devMode: order.devMode, key: order.key,
+      amount: order.amount, amountMajor: order.amountMajor, amountCHF,
+      currency: order.currency, symbol: order.symbol, breakdown: order.breakdown, prefill: order.prefill,
+    }
+  };
 }
 
 // ---- payment confirmation --------------------------------------------------

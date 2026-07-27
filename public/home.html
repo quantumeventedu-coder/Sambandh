@@ -2,262 +2,224 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8"/>
-<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>Sambandh — India's verified, honesty-first dating</title>
-<meta name="description" content="Sambandh is India's verified, honesty-first dating platform. Every member is face-verified. An AI Lakshan Book keeps people honest. Real intent, real people."/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover"/>
+<title>Sambandh — meet people who are actually who they say they are</title>
+<meta name="description" content="India's verified, honesty-first way to meet someone real. Every member is face-verified. An AI Lakshan Book quietly keeps people honest. You match on real intent and true compatibility — not just photos."/>
+<meta name="theme-color" content="#33101f"/>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='38' cy='50' r='26' fill='none' stroke='%23F3C14B' stroke-width='9'/><circle cx='62' cy='50' r='26' fill='none' stroke='%23D4537E' stroke-width='9'/></svg>"/>
 <link rel="manifest" href="/manifest.webmanifest"/>
-<meta name="theme-color" content="#993556"/>
 <link rel="apple-touch-icon" href="/icon-192.png"/>
+<meta name="apple-mobile-web-app-capable" content="yes"/>
 <script>if('serviceWorker' in navigator){window.addEventListener('load',function(){navigator.serviceWorker.register('/sw.js').catch(function(){});});}</script>
 <style>
+  /* ================================================================
+     SAMBANDH — mobile-first landing. Built for a 390px thumb first;
+     desktop is the adaptation (min-width media queries only widen).
+     Palette grounded in the Indian-wedding world: sindoor red, haldi
+     gold, warm sand — chosen, not defaulted. One action per screen.
+     ================================================================ */
   :root{
     --sindoor:#993556; --bright:#D4537E; --deep:#4B1528; --deeper:#33101f;
-    --haldi:#F3C14B; --gold:#e0a92e; --forest:#1f7a4d; --sand:#f6efe8; --sand2:#efe4d8;
-    --ink:#2a1a20; --mut:#8a6f7a; --line:rgba(75,21,40,.10); --white:#fff;
-    --radius:24px;
+    --haldi:#F3C14B; --gold:#e0a92e; --forest:#1f7a4d;
+    --sand:#F6EFE8; --sand-2:#EFE4D8; --card:#FFFFFF;
+    --ink:#241319; --ink-soft:#6E5A62; --line:rgba(75,21,40,.10);
+    /* fluid type scale (mobile→up), one scale, stay on it */
+    --t-eyebrow:12px; --t-body:16px; --t-lead:clamp(16px,4.4vw,19px);
+    --t-h3:clamp(19px,5vw,22px); --t-h2:clamp(26px,7vw,38px);
+    --t-h1:clamp(34px,9vw,60px);
+    --sp:16px; --r:20px; --r-pill:999px;
+    --safe-b:env(safe-area-inset-bottom,0px);
+  }
+  @media (prefers-color-scheme: dark){
+    :root{ --sand:#1B0E15; --sand-2:#241019; --card:#26141C; --ink:#F3E9EC;
+           --ink-soft:#B79CA6; --line:rgba(255,255,255,.12); }
   }
   *{margin:0;padding:0;box-sizing:border-box}
-  html{scroll-behavior:smooth}
-  body{font-family:-apple-system,"Segoe UI",Roboto,Arial,sans-serif;color:var(--ink);background:var(--sand);line-height:1.6;overflow-x:hidden;-webkit-font-smoothing:antialiased}
-  h1,h2,h3,.serif{font-family:Georgia,"Times New Roman",serif}
+  html{scroll-behavior:smooth;-webkit-text-size-adjust:100%}
+  body{font-family:-apple-system,"Segoe UI",Roboto,system-ui,Arial,sans-serif;
+    color:var(--ink);background:var(--sand);line-height:1.55;font-size:var(--t-body);
+    overflow-x:hidden;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+  h1,h2,h3,.serif{font-family:Georgia,"Times New Roman",serif;text-wrap:balance;letter-spacing:-.01em}
   a{color:inherit;text-decoration:none}
-  .wrap{max-width:1180px;margin:0 auto;padding:0 22px}
-  .btn{display:inline-flex;align-items:center;gap:8px;padding:13px 26px;border-radius:999px;font-weight:700;font-size:15px;border:0;cursor:pointer;transition:transform .18s ease,box-shadow .18s ease}
-  .btn.primary{background:linear-gradient(135deg,var(--bright),var(--sindoor));color:#fff;box-shadow:0 6px 18px rgba(153,53,86,.26)}
-  .btn.gold{background:linear-gradient(135deg,#ffd97a,var(--haldi));color:var(--deep);box-shadow:0 6px 18px rgba(243,193,75,.28)}
-  .btn.ghost{background:rgba(255,255,255,.14);color:#fff;border:1px solid rgba(255,255,255,.28);backdrop-filter:blur(6px)}
-  .btn:hover{transform:translateY(-2px)}
-  .btn:active{transform:translateY(0) scale(.98)}
+  img{max-width:100%;display:block}
+  .wrap{width:100%;max-width:560px;margin:0 auto;padding:0 20px}
+  @media(min-width:820px){ .wrap{max-width:1000px;padding:0 32px} }
+  .eyebrow{font-size:var(--t-eyebrow);font-weight:800;letter-spacing:.18em;text-transform:uppercase;color:var(--sindoor)}
+  .lead{font-size:var(--t-lead);color:var(--ink-soft);line-height:1.5}
+  :focus-visible{outline:none;box-shadow:0 0 0 3px rgba(153,53,86,.45);border-radius:12px}
+
+  /* ---------- Buttons (>=48px targets, thumb-friendly) ---------- */
+  .btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;
+    min-height:52px;padding:15px 24px;border-radius:var(--r-pill);font:inherit;
+    font-weight:700;font-size:16px;border:0;cursor:pointer;width:100%;
+    transition:transform .16s ease,box-shadow .16s ease,background .16s ease}
+  .btn.primary{background:linear-gradient(135deg,var(--bright),var(--sindoor));color:#fff;
+    box-shadow:0 8px 22px rgba(153,53,86,.30)}
+  .btn.gold{background:linear-gradient(135deg,#ffd97a,var(--haldi));color:var(--deep);
+    box-shadow:0 8px 22px rgba(243,193,75,.32)}
+  .btn.ghost{background:transparent;color:var(--ink);border:1px solid var(--line)}
+  .btn.on-dark{background:rgba(255,255,255,.10);color:#fff;border:1px solid rgba(255,255,255,.28);backdrop-filter:blur(6px)}
+  .btn:active{transform:scale(.985)}
+  @media(hover:hover){ .btn:hover{transform:translateY(-1px)} }
 
   /* ---------- Header ---------- */
-  header{position:fixed;top:0;left:0;right:0;z-index:50;transition:all .3s ease}
-  header .bar{display:flex;align-items:center;justify-content:space-between;height:66px}
-  header.solid{background:rgba(246,239,232,.82);backdrop-filter:blur(14px);box-shadow:0 1px 0 var(--line)}
-  .brand{display:flex;align-items:center;gap:10px;font-family:Georgia,serif;font-size:22px;font-weight:700;color:#fff;transition:color .3s}
-  header.solid .brand{color:var(--deep)}
-  .brand .rings{width:26px;height:26px;flex:0 0 26px}
-  .navlinks{display:flex;gap:26px;align-items:center;font-size:14px;font-weight:600}
-  .navlinks a{color:rgba(255,255,255,.9)} header.solid .navlinks a{color:var(--ink)}
-  .navlinks a.link:hover{color:var(--haldi)}
-  @media(max-width:760px){.navlinks .link{display:none}}
+  header{position:fixed;top:0;left:0;right:0;z-index:60;transition:background .3s,box-shadow .3s;padding-top:env(safe-area-inset-top,0)}
+  header .bar{display:flex;align-items:center;justify-content:space-between;height:60px;width:100%;max-width:1000px;margin:0 auto;padding:0 20px}
+  header.solid{background:color-mix(in srgb,var(--sand) 86%,transparent);backdrop-filter:blur(14px);box-shadow:0 1px 0 var(--line)}
+  .brand{display:flex;align-items:center;gap:9px;font-family:Georgia,serif;font-size:20px;font-weight:700;color:#fff;transition:color .3s}
+  header.solid .brand{color:var(--ink)}
+  .brand svg{width:24px;height:24px;flex:0 0 24px}
+  .hdr-cta{font-size:14px;font-weight:700;color:#fff;padding:9px 15px;border-radius:var(--r-pill);border:1px solid rgba(255,255,255,.3)}
+  header.solid .hdr-cta{color:var(--ink);border-color:var(--line)}
 
-  /* ---------- Hero ---------- */
-  .hero{position:relative;min-height:100vh;display:flex;align-items:center;overflow:hidden;
-        background:radial-gradient(120% 120% at 50% 0%,#7e2a47 0%,var(--sindoor) 40%,var(--deep) 78%,var(--deeper) 100%)}
-  .aurora{position:absolute;inset:-30%;z-index:0;filter:blur(70px);opacity:.55;pointer-events:none}
-  .aurora span{position:absolute;border-radius:50%;mix-blend-mode:screen;animation:float 18s ease-in-out infinite}
-  .aurora .a{width:46vw;height:46vw;left:-6%;top:6%;background:radial-gradient(circle,#ff8fb2,transparent 60%)}
-  .aurora .b{width:40vw;height:40vw;right:-4%;top:0;background:radial-gradient(circle,#f3c14b,transparent 60%);animation-delay:-6s}
-  .aurora .c{width:52vw;height:52vw;left:20%;bottom:-24%;background:radial-gradient(circle,#7a45c9,transparent 60%);animation-delay:-11s}
-  @keyframes float{0%,100%{transform:translate(0,0) scale(1)}33%{transform:translate(4%,-5%) scale(1.08)}66%{transform:translate(-3%,4%) scale(.96)}}
-  .grain{position:absolute;inset:0;z-index:1;opacity:.06;pointer-events:none;
-    background-image:radial-gradient(rgba(255,255,255,.9) 1px,transparent 1px);background-size:4px 4px}
-  .hero .wrap{position:relative;z-index:2;display:grid;grid-template-columns:1.15fr .85fr;gap:40px;align-items:center;padding-top:90px;padding-bottom:60px}
-  @media(max-width:900px){.hero .wrap{grid-template-columns:1fr;text-align:center}}
-  .htag{display:inline-flex;align-items:center;gap:8px;background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.22);
-        color:#fff;font-size:12.5px;font-weight:700;padding:7px 15px;border-radius:999px;backdrop-filter:blur(6px);margin-bottom:20px;
-        letter-spacing:.3px}
-  .htag i{width:7px;height:7px;border-radius:50%;background:#4ADE80;box-shadow:0 0 10px #4ADE80}
-  .hero h1{font-size:clamp(38px,6vw,68px);line-height:1.05;color:#fff;letter-spacing:-.5px;margin-bottom:18px}
-  .hero h1 .grad{background:linear-gradient(100deg,#ffd97a,#ff9ebb,#ffd97a);-webkit-background-clip:text;background-clip:text;color:transparent;
-        background-size:200% auto;animation:shimmer 5s linear infinite}
-  @keyframes shimmer{to{background-position:200% center}}
-  .hero p.sub{color:rgba(255,255,255,.86);font-size:clamp(15px,2vw,18.5px);max-width:520px;margin-bottom:30px}
-  @media(max-width:900px){.hero p.sub{margin-left:auto;margin-right:auto}}
-  .cta-row{display:flex;gap:14px;flex-wrap:wrap}
-  @media(max-width:900px){.cta-row{justify-content:center}}
-  /* waiting-list capture */
-  .waitform{display:flex;gap:10px;flex-wrap:wrap;max-width:480px}
-  .waitform input{flex:1 1 220px;min-width:0;padding:14px 16px;border-radius:12px;border:1px solid rgba(255,255,255,.28);
-    background:rgba(255,255,255,.1);color:#fff;font-size:15px;outline:none}
-  .waitform input::placeholder{color:rgba(255,255,255,.6)}
-  .waitform input:focus{border-color:var(--haldi);background:rgba(255,255,255,.16)}
-  .waitform .btn{white-space:nowrap}
-  .waitmsg{margin-top:12px;font-size:14.5px;color:var(--haldi);min-height:20px;font-weight:600}
-  .waitnote{margin-top:10px;font-size:13px;color:rgba(255,255,255,.62)}
-  .final .waitform{margin:0 auto}
-  .final .waitform input{background:rgba(255,255,255,.14);border-color:rgba(255,255,255,.3)}
-  @media(max-width:900px){.waitform{margin-left:auto;margin-right:auto}}
-  .hero-metrics{display:flex;gap:28px;margin-top:34px}
-  @media(max-width:900px){.hero-metrics{justify-content:center}}
-  .hero-metrics .m b{font-family:Georgia,serif;font-size:26px;color:var(--haldi);display:block;line-height:1}
-  .hero-metrics .m span{font-size:12px;color:rgba(255,255,255,.7)}
+  /* ---------- HERO (dark, full-bleed, the thesis) ---------- */
+  .hero{position:relative;background:radial-gradient(120% 90% at 50% 0%,#7e2a47 0%,var(--sindoor) 34%,var(--deep) 72%,var(--deeper) 100%);
+    color:#fff;padding:96px 0 40px;overflow:hidden}
+  .hero .glow{position:absolute;inset:-20% -20% auto -20%;height:60%;z-index:0;pointer-events:none;
+    background:radial-gradient(50% 60% at 30% 20%,rgba(243,193,75,.18),transparent 70%),radial-gradient(50% 60% at 80% 10%,rgba(255,143,178,.20),transparent 70%);filter:blur(30px)}
+  .hero .wrap{position:relative;z-index:1;text-align:center}
+  .hero .eyebrow{color:var(--haldi)}
+  .hero h1{font-size:var(--t-h1);line-height:1.04;color:#fff;margin:14px 0 14px}
+  .hero h1 .grad{background:linear-gradient(100deg,#ffd97a,#ff9ebb,#ffd97a);-webkit-background-clip:text;background-clip:text;color:transparent}
+  .hero p.sub{font-size:var(--t-lead);color:rgba(255,255,255,.86);max-width:34ch;margin:0 auto 22px}
+  .hero-form{display:flex;flex-direction:column;gap:10px;max-width:380px;margin:0 auto}
+  .hero-form input{min-height:52px;padding:15px 18px;border-radius:14px;border:1px solid rgba(255,255,255,.26);
+    background:rgba(255,255,255,.10);color:#fff;font-size:16px;outline:none;width:100%}
+  .hero-form input::placeholder{color:rgba(255,255,255,.62)}
+  .hero-form input:focus{border-color:var(--haldi);background:rgba(255,255,255,.16)}
+  .hero-note{margin-top:12px;font-size:13px;color:rgba(255,255,255,.62);min-height:18px}
+  .hero-trust{display:flex;flex-wrap:wrap;gap:8px 14px;justify-content:center;margin-top:16px;font-size:12.5px;color:rgba(255,255,255,.78)}
+  .hero-trust span{display:inline-flex;align-items:center;gap:6px}
+  .hero-trust i{width:6px;height:6px;border-radius:50%;background:var(--haldi);display:inline-block}
 
-  /* Floating card mockup */
-  .stage{position:relative;height:520px;perspective:1200px}
-  @media(max-width:900px){.stage{height:440px;margin-top:10px}}
-  .pcard{position:absolute;width:290px;border-radius:26px;overflow:hidden;box-shadow:0 40px 80px rgba(0,0,0,.4);
-         background:linear-gradient(160deg,#e7b1c2,var(--bright) 55%,var(--sindoor))}
-  .pcard.main{left:50%;top:8%;z-index:3;animation:bobmain 6s ease-in-out infinite}
-  .pcard .ph{height:230px;position:relative;display:flex;align-items:flex-end}
-  .pcard .ini{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-family:Georgia,serif;font-size:120px;color:rgba(255,255,255,.4);font-weight:700}
-  .pcard .chip{position:absolute;top:12px;font-size:10px;font-weight:800;padding:4px 9px;border-radius:999px;background:rgba(255,255,255,.94);letter-spacing:.05em}
-  .pcard .chip.tl{left:12px;color:var(--sindoor)} .pcard .chip.tr{right:12px;color:var(--forest);display:flex;gap:4px;align-items:center}
-  .pcard .info{width:100%;padding:34px 16px 14px;color:#fff;background:linear-gradient(transparent,rgba(51,16,31,.94))}
-  .pcard .info .nm{font-weight:800;font-size:18px}
-  .pcard .info .mt{font-size:12px;opacity:.9;display:flex;align-items:center;gap:5px;margin-top:2px}
-  .pcard .info .why{font-size:11.5px;color:var(--haldi);margin-top:8px}
-  .gauge{position:absolute;right:-6%;bottom:2%;width:190px;background:linear-gradient(165deg,var(--deep),#6d2340);border-radius:22px;
-         padding:20px 18px;color:#fff;text-align:center;box-shadow:0 30px 60px rgba(0,0,0,.4);z-index:4;animation:bob 6s ease-in-out infinite;animation-delay:-2s}
-  .gauge .num{font-family:Georgia,serif;font-size:44px;line-height:1}
-  .gauge .grade{display:inline-block;margin-top:4px;background:var(--haldi);color:var(--deep);font-weight:800;padding:2px 12px;border-radius:999px;font-size:13px}
-  .gauge .lbl{font-size:10.5px;color:rgba(255,255,255,.75);text-transform:uppercase;letter-spacing:.1em;margin-top:8px}
-  .float2{position:absolute;left:-4%;bottom:16%;background:#fff;border-radius:16px;padding:12px 14px;box-shadow:0 24px 50px rgba(0,0,0,.28);
-          font-size:12px;font-weight:700;color:var(--deep);display:flex;align-items:center;gap:9px;z-index:5;animation:bob 6s ease-in-out infinite;animation-delay:-3.5s}
-  .float2 .dot{width:30px;height:30px;border-radius:50%;background:linear-gradient(135deg,var(--forest),#0e7a55);display:flex;align-items:center;justify-content:center;color:#fff}
-  @keyframes bob{0%,100%{transform:translateY(0)}50%{transform:translateY(-14px)}}
-  @keyframes bobmain{0%,100%{transform:translateX(-50%) translateY(0) rotate(-4deg)}50%{transform:translateX(-50%) translateY(-14px) rotate(-4deg)}}
-
-  /* ---------- Reveal ---------- */
-  .reveal{opacity:0;transform:translateY(30px);transition:opacity .7s cubic-bezier(.2,.7,.3,1),transform .7s cubic-bezier(.2,.7,.3,1)}
-  .reveal.in{opacity:1;transform:none}
-  .reveal.d1{transition-delay:.08s}.reveal.d2{transition-delay:.16s}.reveal.d3{transition-delay:.24s}
-
-  /* ---------- Marquee ---------- */
-  .strip{background:var(--deeper);color:rgba(255,255,255,.92);padding:20px 0;overflow:hidden}
-  .marq{display:flex;gap:48px;white-space:nowrap;animation:scrollx 26s linear infinite;font-family:Georgia,serif;font-size:20px;width:max-content}
-  .marq span{display:inline-flex;align-items:center;gap:12px} .marq b{color:var(--haldi)}
-  @keyframes scrollx{to{transform:translateX(-50%)}}
+  /* Nature Dial — the distinctive visual (the picture IS the design) */
+  .nd-stage{position:relative;height:auto;display:flex;flex-direction:column;align-items:center;gap:12px;margin:26px auto 0;max-width:470px}
+  #nd-toggle{display:inline-flex;gap:2px;background:rgba(18,10,8,.72);border:1px solid rgba(243,193,75,.32);border-radius:var(--r-pill);padding:5px}
+  #nd-toggle button{font:inherit;font-size:13.5px;font-weight:700;color:#d9c2cb;background:transparent;border:0;min-height:auto;padding:8px 20px;border-radius:var(--r-pill);cursor:pointer;transition:.2s}
+  #nd-toggle button.on{background:linear-gradient(135deg,#ffd97a,var(--haldi));color:var(--deep)}
+  .nd-frame{position:relative;width:100%;border-radius:18px;overflow:hidden;line-height:0;box-shadow:0 30px 70px rgba(0,0,0,.5),0 0 0 1px rgba(243,193,75,.14)}
+  #nd-scene{width:100%;height:auto;margin-bottom:var(--nd-crop,0)}
+  .nd-frame.crop{--nd-crop:-4.2%}
+  .nd-badges{display:flex;gap:8px;justify-content:center;flex-wrap:wrap}
+  .nd-badge-fact{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:800;color:#69d18e;background:rgba(31,122,77,.18);border:1px solid rgba(63,191,114,.5);border-radius:var(--r-pill);padding:5px 12px}
+  .nd-badge-read{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:800;color:#e7c04f;background:rgba(243,193,75,.12);border:1px solid rgba(243,193,75,.4);border-radius:var(--r-pill);padding:4px 11px}
+  .nd-note{color:rgba(255,255,255,.5);font-size:11.5px}
 
   /* ---------- Sections ---------- */
-  section.block{padding:96px 0}
-  .kicker{text-transform:uppercase;letter-spacing:3px;font-size:12px;font-weight:800;color:var(--bright);margin-bottom:12px}
-  .block h2{font-size:clamp(28px,4.4vw,44px);color:var(--deep);letter-spacing:-.5px;margin-bottom:14px;line-height:1.1}
-  .block .lead{color:var(--mut);font-size:17px;max-width:640px;margin-bottom:44px}
-  .center{text-align:center}.center .lead{margin-left:auto;margin-right:auto}
+  section{padding:52px 0}
+  .sec-head{text-align:center;margin-bottom:26px}
+  .sec-head h2{font-size:var(--t-h2);color:var(--deep);margin:8px 0 8px}
+  @media (prefers-color-scheme: dark){ .sec-head h2{color:#fff} .hero h1{color:#fff} }
 
-  /* Feature grid — neumorphic tilt cards */
-  .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:22px}
-  @media(max-width:880px){.grid{grid-template-columns:1fr}}
-  .feat{position:relative;background:#fff;border-radius:20px;padding:30px 26px 28px;
-        box-shadow:0 2px 8px rgba(75,21,40,.06),0 12px 30px rgba(75,21,40,.045);
-        border:1px solid var(--line);transition:transform .25s ease,box-shadow .25s ease;transform-style:preserve-3d;will-change:transform}
-  .feat:hover{transform:translateY(-3px);box-shadow:0 20px 46px rgba(75,21,40,.12)}
-  .feat .ic{width:50px;height:50px;border-radius:14px;display:flex;align-items:center;justify-content:center;font-size:23px;margin-bottom:16px;
-            box-shadow:0 6px 16px rgba(153,53,86,.22);transform:translateZ(30px)}
-  .feat .num{position:absolute;top:16px;right:22px;font-family:Georgia,serif;font-size:46px;font-weight:700;color:rgba(153,53,86,.10)}
-  .feat h3{font-size:19px;color:var(--deep);margin-bottom:8px;transform:translateZ(20px)}
-  .feat p{font-size:14px;color:#5c4650}.feat p b{color:var(--deep)}
-  .ic.rose{background:linear-gradient(135deg,var(--bright),var(--sindoor))}
-  .ic.gold{background:linear-gradient(135deg,#ffd97a,var(--gold))}
-  .ic.green{background:linear-gradient(135deg,#3fbf72,var(--forest))}
-  .ic.violet{background:linear-gradient(135deg,#a06bd6,#6f45c9)}
+  /* Trust pillars — three, not nine (each must earn its place) */
+  .pillars{display:flex;flex-direction:column;gap:14px}
+  .pillar{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:22px;
+    box-shadow:0 1px 2px rgba(75,21,40,.05),0 12px 30px rgba(75,21,40,.05)}
+  .pillar .ic{width:46px;height:46px;border-radius:14px;display:flex;align-items:center;justify-content:center;font-size:22px;margin-bottom:12px}
+  .pillar .ic.rose{background:rgba(212,83,126,.14)} .pillar .ic.gold{background:rgba(243,193,75,.18)} .pillar .ic.green{background:rgba(31,122,77,.14)}
+  .pillar h3{font-size:var(--t-h3);color:var(--deep);margin-bottom:6px}
+  @media (prefers-color-scheme: dark){ .pillar h3{color:#fff} }
+  .pillar p{color:var(--ink-soft);font-size:15px;line-height:1.55}
+  @media(min-width:820px){ .pillars{flex-direction:row} .pillar{flex:1} }
 
-  /* Lakshan showcase */
-  .showcase{background:linear-gradient(150deg,var(--deep),var(--deeper));color:#fff;border-radius:34px;padding:56px 44px;
-            display:grid;grid-template-columns:1fr .8fr;gap:44px;align-items:center;position:relative;overflow:hidden}
-  @media(max-width:860px){.showcase{grid-template-columns:1fr;padding:40px 26px}}
-  .showcase::before{content:"";position:absolute;width:340px;height:340px;right:-80px;top:-80px;border-radius:50%;
-      background:radial-gradient(circle,rgba(243,193,75,.28),transparent 70%)}
-  .showcase h2{color:#fff}.showcase .lead{color:rgba(255,255,255,.8)}
-  .ring-wrap{display:flex;justify-content:center;position:relative;z-index:1}
-  .ring{width:210px;height:210px;border-radius:50%;display:flex;align-items:center;justify-content:center;position:relative;
-        background:conic-gradient(var(--haldi) 0 86%,rgba(255,255,255,.14) 0)}
-  .ring::after{content:"";position:absolute;inset:14px;border-radius:50%;background:var(--deeper)}
-  .ring .val{position:relative;z-index:1;text-align:center}
-  .ring .val b{font-family:Georgia,serif;font-size:52px;display:block;line-height:1}
-  .ring .val span{font-size:12px;color:rgba(255,255,255,.7);text-transform:uppercase;letter-spacing:.1em}
-  .flags{margin-top:22px;display:flex;flex-direction:column;gap:10px}
-  .flagline{display:flex;align-items:center;gap:10px;font-size:14px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);border-radius:12px;padding:11px 14px}
-  .flagline .k{width:22px;height:22px;border-radius:6px;display:flex;align-items:center;justify-content:center;flex:0 0 22px;font-weight:800}
+  /* How it works — three steps */
+  .steps{display:flex;flex-direction:column;gap:12px}
+  .step{display:flex;gap:14px;align-items:flex-start;background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:18px}
+  .step .n{flex:0 0 34px;width:34px;height:34px;border-radius:11px;background:linear-gradient(135deg,var(--bright),var(--sindoor));color:#fff;
+    display:flex;align-items:center;justify-content:center;font-weight:800;font-family:Georgia,serif}
+  .step h3{font-size:16.5px;color:var(--deep);margin-bottom:2px}
+  @media (prefers-color-scheme: dark){ .step h3{color:#fff} }
+  .step p{color:var(--ink-soft);font-size:14px}
 
-  /* Steps */
-  .steps{display:grid;grid-template-columns:repeat(4,1fr);gap:20px}
-  @media(max-width:860px){.steps{grid-template-columns:1fr 1fr}}@media(max-width:520px){.steps{grid-template-columns:1fr}}
-  .step{background:#fff;border-radius:18px;padding:26px 22px;border:1px solid var(--line);box-shadow:0 2px 8px rgba(75,21,40,.05),0 10px 26px rgba(75,21,40,.04)}
-  .step .n{width:40px;height:40px;border-radius:12px;background:linear-gradient(135deg,var(--bright),var(--sindoor));color:#fff;
-           font-family:Georgia,serif;font-size:20px;font-weight:700;display:flex;align-items:center;justify-content:center;margin-bottom:14px}
-  .step h3{font-size:16px;color:var(--deep);margin-bottom:6px}.step p{font-size:13.5px;color:var(--mut)}
-
-  /* Pricing */
-  /* Premium pricing — calm, minimal, trust-forward (Apple/Linear register).
-     One dominant price, generous whitespace, hairline elevation; the "most chosen"
-     plan lifts and gains a subtle border rather than a heavy dark fill. */
-  .price-lead{max-width:600px;margin-left:auto;margin-right:auto}
-  .bill-toggle{display:inline-flex;gap:3px;padding:5px;margin:28px auto 4px;border:1px solid var(--line);border-radius:999px;background:#fff;box-shadow:0 2px 8px rgba(75,21,40,.05)}
-  .bill-toggle button{font:inherit;font-size:14px;font-weight:700;color:var(--mut);background:transparent;border:0;padding:9px 22px;border-radius:999px;cursor:pointer;transition:background .2s,color .2s;display:inline-flex;align-items:center;gap:8px}
+  /* Pricing — one honest promise */
+  .price-note{text-align:center;color:var(--ink-soft);font-size:13.5px;max-width:44ch;margin:0 auto 18px}
+  .bill-toggle{display:inline-flex;gap:3px;padding:5px;margin:0 auto 16px;border:1px solid var(--line);border-radius:var(--r-pill);background:var(--card)}
+  .bill-toggle button{font:inherit;font-size:14px;font-weight:700;color:var(--ink-soft);background:transparent;border:0;min-height:auto;padding:9px 20px;border-radius:var(--r-pill);cursor:pointer;transition:.2s;width:auto}
   .bill-toggle button.on{background:var(--deep);color:#fff}
-  .bill-toggle .save{font-size:11px;font-weight:700;color:var(--forest);background:rgba(8,80,65,.1);padding:2px 8px;border-radius:999px}
-  .bill-toggle button.on .save{color:var(--deep);background:var(--haldi)}
-  .prices{display:grid;grid-template-columns:repeat(3,1fr);gap:26px;margin-top:36px;align-items:start}
-  @media(max-width:860px){.prices{grid-template-columns:1fr;max-width:430px;margin-left:auto;margin-right:auto}}
-  .price{background:#fff;border-radius:22px;padding:40px 32px;border:1px solid var(--line);position:relative;transition:transform .25s ease,box-shadow .25s ease}
-  .price:hover{transform:translateY(-4px);box-shadow:0 20px 44px rgba(75,21,40,.09)}
-  .price.pop{border-color:rgba(153,53,86,.30);box-shadow:0 20px 50px rgba(75,21,40,.12)}
-  @media(min-width:861px){.price.pop{transform:translateY(-12px)}.price.pop:hover{transform:translateY(-16px)}}
-  .price .tag{position:absolute;top:-12px;left:50%;transform:translateX(-50%);background:linear-gradient(135deg,#ffd97a,var(--haldi));color:var(--deep);font-size:11px;font-weight:800;letter-spacing:.03em;text-transform:uppercase;padding:5px 14px;border-radius:999px;white-space:nowrap}
-  .price h3{font-family:Georgia,serif;font-size:22px;color:var(--deep);margin-bottom:4px}
-  .price .plan-sub{font-size:12.5px;color:var(--mut);margin-bottom:24px;min-height:34px;line-height:1.4}
-  .price .amt{font-family:Georgia,serif;font-size:54px;line-height:1;color:var(--deep);letter-spacing:-1px}
-  .price .per{font-size:13px;color:var(--mut);margin-top:9px;letter-spacing:.2px}
-  .price ul{list-style:none;margin:28px 0 30px;display:flex;flex-direction:column;gap:14px}
-  .price li{font-size:14px;line-height:1.5;display:flex;gap:10px;align-items:flex-start;color:var(--ink)}
-  .price li svg{width:16px;height:16px;flex:0 0 16px;color:var(--forest);margin-top:3px}
-  .price .btn{width:100%;justify-content:center;padding:15px 26px;font-size:15px;letter-spacing:.2px;box-shadow:none}
-  .price .btn.outline{background:transparent;border:1px solid rgba(75,21,40,.28);color:var(--deep)}
-  .price .btn.outline:hover{background:var(--deep);color:#fff;border-color:var(--deep)}
-  .trust-row{display:flex;flex-wrap:wrap;justify-content:center;gap:10px 24px;margin-top:44px}
-  .trust-row span{font-size:13px;color:var(--mut);display:inline-flex;align-items:center;gap:7px}
+  .bill-toggle .save{font-size:11px;font-weight:800;color:var(--forest)}
+  .bill-toggle button.on .save{color:var(--haldi)}
+  .plans{display:flex;flex-direction:column;gap:12px}
+  .plan{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:20px 22px;display:flex;justify-content:space-between;align-items:center;gap:16px}
+  .plan.pop{border-color:rgba(153,53,86,.32);box-shadow:0 14px 34px rgba(75,21,40,.10)}
+  .plan .pn{font-family:Georgia,serif;font-size:18px;color:var(--deep)}
+  @media (prefers-color-scheme: dark){ .plan .pn{color:#fff} }
+  .plan .pd{font-size:12.5px;color:var(--ink-soft);margin-top:2px}
+  .plan .amt{font-family:Georgia,serif;font-size:28px;color:var(--deep);text-align:right;white-space:nowrap}
+  @media (prefers-color-scheme: dark){ .plan .amt{color:#fff} }
+  .plan .per{font-size:11.5px;color:var(--ink-soft);text-align:right}
+  .plan .tag{font-size:10.5px;font-weight:800;letter-spacing:.03em;text-transform:uppercase;color:var(--sindoor)}
+  .trust-row{display:flex;flex-wrap:wrap;justify-content:center;gap:8px 18px;margin-top:20px}
+  .trust-row span{font-size:13px;color:var(--ink-soft);display:inline-flex;align-items:center;gap:6px}
   .trust-row span::before{content:"✓";color:var(--forest);font-weight:800}
-  .price-philosophy{max-width:56ch;margin:18px auto 0;text-align:center;font-size:13.5px;color:var(--mut);font-style:italic;line-height:1.6}
+
+  /* Safety reassurance */
+  .safe{background:var(--sand-2)}
+  .safe-list{display:flex;flex-direction:column;gap:14px}
+  .safe-item{display:flex;gap:12px;align-items:flex-start}
+  .safe-item .k{flex:0 0 30px;width:30px;height:30px;border-radius:9px;background:rgba(31,122,77,.14);color:var(--forest);display:flex;align-items:center;justify-content:center;font-size:16px}
+  .safe-item b{color:var(--deep)} @media (prefers-color-scheme: dark){ .safe-item b{color:#fff} }
+  .safe-item p{color:var(--ink-soft);font-size:14px;margin-top:1px}
 
   /* Final CTA */
-  .final{background:radial-gradient(120% 140% at 50% 0%,#7e2a47,var(--sindoor) 45%,var(--deep));color:#fff;text-align:center;
-         border-radius:36px;padding:70px 30px;position:relative;overflow:hidden}
-  .final h2{color:#fff;font-size:clamp(28px,5vw,46px);margin-bottom:14px}
-  .final p{color:rgba(255,255,255,.85);max-width:520px;margin:0 auto 28px}
+  .final{background:radial-gradient(120% 120% at 50% 0%,var(--sindoor),var(--deeper));color:#fff;text-align:center;border-radius:var(--r);padding:40px 24px;margin:0 20px}
+  .final h2{color:#fff;font-size:var(--t-h2)}
+  .final p{color:rgba(255,255,255,.82);max-width:38ch;margin:10px auto 22px}
+  .final .hero-form{max-width:360px}
 
-  footer{padding:44px 0 60px;color:var(--mut);font-size:13.5px}
-  footer .row{display:flex;justify-content:space-between;flex-wrap:wrap;gap:16px;align-items:center;border-top:1px solid var(--line);padding-top:26px}
-  footer a{color:var(--sindoor);font-weight:600}
+  footer{padding:30px 0 calc(96px + var(--safe-b));text-align:center;color:var(--ink-soft);font-size:12.5px}
+  footer .fbrand{font-family:Georgia,serif;font-weight:700;color:var(--deep);font-size:16px}
+  @media (prefers-color-scheme: dark){ footer .fbrand{color:#fff} }
+  footer a{text-decoration:underline;text-underline-offset:2px}
 
-  @media(prefers-reduced-motion:reduce){*{animation:none!important}.reveal{opacity:1;transform:none}}
+  /* Sticky thumb-zone CTA (mobile only) */
+  .dock{position:fixed;left:0;right:0;bottom:0;z-index:55;padding:10px 16px calc(10px + var(--safe-b));
+    background:color-mix(in srgb,var(--sand) 88%,transparent);backdrop-filter:blur(14px);border-top:1px solid var(--line);
+    transform:translateY(120%);transition:transform .28s ease}
+  .dock.show{transform:translateY(0)}
+  .dock .btn{box-shadow:0 6px 18px rgba(153,53,86,.28)}
+  @media(min-width:820px){ .dock{display:none} footer{padding-bottom:30px} }
+
+  @media (prefers-reduced-motion: reduce){ *{animation:none!important;transition:none!important;scroll-behavior:auto!important} .dock{transition:none} }
+  .reveal{opacity:0;transform:translateY(14px);transition:opacity .6s ease,transform .6s ease}
+  .reveal.in{opacity:1;transform:none}
 </style>
 </head>
 <body>
 
 <header id="hdr">
-  <div class="wrap bar">
-    <a href="#top" class="brand">
-      <svg class="rings" viewBox="0 0 100 100"><circle cx="38" cy="50" r="26" fill="none" stroke="#F3C14B" stroke-width="9"/><circle cx="62" cy="50" r="26" fill="none" stroke="#D4537E" stroke-width="9"/></svg>
-      sambandh
+  <div class="bar">
+    <a class="brand" href="#top" aria-label="Sambandh home">
+      <svg viewBox="0 0 100 100" aria-hidden="true"><circle cx="38" cy="50" r="26" fill="none" stroke="#F3C14B" stroke-width="9"/><circle cx="62" cy="50" r="26" fill="none" stroke="#D4537E" stroke-width="9"/></svg>
+      Sambandh
     </a>
-    <nav class="navlinks">
-      <a href="#features" class="link">Why Sambandh</a>
-      <a href="#karma" class="link">Lakshan Book</a>
-      <a href="#pricing" class="link">Pricing</a>
-      <a href="/app" class="btn gold" id="ctaTop">Open the app</a>
-    </nav>
+    <a class="hdr-cta" href="/app" id="hdrCta">Open app</a>
   </div>
 </header>
 
-<!-- HERO -->
+<!-- ============ HERO — the single thesis ============ -->
 <section class="hero" id="top">
-  <div class="aurora"><span class="a"></span><span class="b"></span><span class="c"></span></div>
-  <div class="grain"></div>
+  <div class="glow"></div>
   <div class="wrap">
-    <div>
-      <div class="htag"><i></i> India's verified, honesty-first dating</div>
+    <div class="hero-copy">
+      <div class="eyebrow">India · verified · honesty-first</div>
       <h1>Meet people who are <span class="grad">actually who they say</span> they are.</h1>
-      <p class="sub">Every member is face-verified. An AI <b>Lakshan Book</b> quietly keeps people honest. You match on real intent and deep compatibility — not just photos.</p>
-      <form class="waitform" id="waitHero" onsubmit="return joinWaitlist(event,'hero')">
+      <p class="sub">Every member is face-verified. An AI Lakshan Book quietly keeps people honest. You match on real intent and true compatibility — not just photos.</p>
+
+      <form class="hero-form" id="waitHero" onsubmit="return joinWaitlist(event,'hero')">
         <input type="email" name="email" inputmode="email" autocomplete="email" placeholder="Enter your email" required aria-label="Email address"/>
         <button type="submit" class="btn gold">Join the waiting list</button>
       </form>
-      <div class="waitmsg" id="waitHeroMsg"></div>
-      <div class="waitnote" id="waitCount">Be among the first — we open the doors soon.</div>
-      <div class="cta-row" style="margin-top:16px">
-        <a href="/app" class="btn ghost" id="ctaHero">Open the app →</a>
-        <a href="#features" class="btn ghost">See how it works</a>
-      </div>
-      <div class="hero-metrics">
-        <div class="m reveal"><b data-count="100">0</b><span>% face-verified</span></div>
-        <div class="m reveal d1"><b data-count="27">0</b><span>nakshatra profiles</span></div>
-        <div class="m reveal d2"><b data-count="8">0</b><span>compatibility signals</span></div>
+      <div class="hero-note" id="waitHeroMsg">Be among the first — we open the doors soon.</div>
+
+      <div class="hero-trust" aria-label="What makes Sambandh different">
+        <span><i></i> 100% face-verified</span>
+        <span><i></i> Lakshan honesty engine</span>
+        <span><i></i> Consent-first, always</span>
       </div>
     </div>
-    <div class="stage nd-stage">
+
+    <!-- The Nature Dial: see who someone is, in plain words -->
+    <div class="nd-stage" role="group" aria-label="A preview of a member's Nature Dial">
       <div id="nd-toggle" role="group" aria-label="Preview the dial for a woman or a man">
         <button type="button" data-p="woman" class="on">Woman</button>
         <button type="button" data-p="man">Man</button>
@@ -276,281 +238,185 @@
   </div>
 </section>
 
-<!-- TRUST STRIP -->
-<div class="strip"><div class="marq">
-  <span>Face-verified members</span><span>·</span><span><b>Honesty</b>-first</span><span>·</span>
-  <span>Real intent</span><span>·</span><span>AI <b>Lakshan Book</b></span><span>·</span>
-  <span>Astrology + engagement fit</span><span>·</span><span>Anonymous-first chat</span><span>·</span>
-  <span>Your data, your rights</span><span>·</span>
-  <span>Face-verified members</span><span>·</span><span><b>Honesty</b>-first</span><span>·</span>
-  <span>Real intent</span><span>·</span><span>AI <b>Lakshan Book</b></span><span>·</span>
-  <span>Astrology + engagement fit</span><span>·</span><span>Anonymous-first chat</span><span>·</span>
-</div></div>
-
-<!-- FEATURES -->
-<section class="block" id="features">
-  <div class="wrap center">
-    <div class="kicker reveal">Why Sambandh</div>
-    <h2 class="reveal">Built so you can trust who's on the other side.</h2>
-    <p class="lead reveal">Nine things dating apps quietly skip — done properly, and honestly.</p>
-    <div class="grid" style="text-align:left">
-      <div class="feat reveal tilt"><span class="num">01</span><div class="ic rose">🛡️</div><h3>Everyone is verified</h3><p>A <b>live selfie face-check</b> — our own tech, right in your browser — confirms every member is a real, unique person, and becomes their first photo. Add a government ID or a registry-checked profession (doctors, lawyers, CAs, architects) for extra trust badges. Aadhaar numbers are never stored.</p></div>
-      <div class="feat reveal tilt d1"><span class="num">02</span><div class="ic gold">💳</div><h3>Nothing is free</h3><p>Membership is monthly — <b>CHF 5 for everyone</b>, one transparent price. It's a bot barrier that keeps the community real — bots and time-wasters don't pay.</p></div>
-      <div class="feat reveal tilt d2"><span class="num">03</span><div class="ic green">📖</div><h3>The Lakshan Book</h3><p>An AI honesty engine scores every member <b>0–100</b>. It reads what people <i>claim</i> and checks it against what they actually <i>do</i>. First slip: a private nudge. Repeat patterns: visible flags. Honesty heals — <b>+1 Lakshan per 30 clean days</b>.</p></div>
-      <div class="feat reveal tilt"><span class="num">04</span><div class="ic violet">👁️</div><h3>Evidence, with guard-rails</h3><p>See a flag on a profile? Pay <b>CHF 0.50–1</b> to read the anonymised statements behind it. The flagged person learns <i>someone</i> looked — never who. Capped at 3/day. <b>Fraud &amp; safety alerts are always free.</b></p></div>
-      <div class="feat reveal tilt d1"><span class="num">05</span><div class="ic gold">🎯</div><h3>Say what you want</h3><p>Four explicit intents — <b>marriage, dating, casual, friendship</b> (pick up to two). You only ever see people whose intent overlaps yours. No more mismatched expectations.</p></div>
-      <div class="feat reveal tilt d2"><span class="num">06</span><div class="ic green">👻</div><h3>Anonymous-first chat</h3><p>Start any chat with your name and photos hidden. Identities reveal only when <b>both people consent</b>. Block anyone instantly — you vanish from each other completely.</p></div>
-      <div class="feat reveal tilt"><span class="num">07</span><div class="ic rose">✨</div><h3>Astrology + real chemistry</h3><p>A genuine <b>36-point Guna Milan</b>, your <b>nakshatra personality</b>, and how you two <i>actually</i> talk — balance, rhythm, depth — blend into one honest compatibility score.</p></div>
-      <div class="feat reveal tilt d1"><span class="num">08</span><div class="ic violet">🚩</div><h3>Real moderation</h3><p>Money requests, coercion, love-bombing, off-platform lures — caught automatically and acted on. A human oversight trail sits behind it, with strict privacy on chat access.</p></div>
-      <div class="feat reveal tilt d2"><span class="num">09</span><div class="ic green">🔒</div><h3>Your data, your rights</h3><p>Export everything as JSON, pause or delete anytime (erased within 30 days), and control exactly who sees your profile. DPDP-Act aligned, by design.</p></div>
-    </div>
-  </div>
-</section>
-
-<!-- KARMA SHOWCASE -->
-<section class="block" id="karma">
+<!-- ============ WHY — three trust pillars ============ -->
+<section id="why">
   <div class="wrap">
-    <div class="showcase reveal">
-      <div>
-        <div class="kicker">The honesty engine</div>
-        <h2>Nobody can quietly play three people at once.</h2>
-        <p class="lead">The Lakshan Book reads real behaviour — claims, contradictions, manipulation patterns — and turns it into a score you can see. It describes the <i>behaviour</i>, never labels the person.</p>
-        <div class="flags">
-          <div class="flagline"><span class="k" style="background:rgba(224,92,92,.2);color:#ff9b9b">!</span> "Told 4 people they were exclusive this month."</div>
-          <div class="flagline"><span class="k" style="background:rgba(243,193,75,.2);color:var(--haldi)">~</span> "Made intense declarations within the first 3 messages."</div>
-          <div class="flagline"><span class="k" style="background:rgba(63,191,114,.2);color:#8be0a8">✓</span> "Consistent, respectful, follows through — 92 days clean."</div>
-        </div>
+    <div class="sec-head">
+      <div class="eyebrow reveal">Why Sambandh</div>
+      <h2 class="reveal">Trust you can actually see.</h2>
+    </div>
+    <div class="pillars">
+      <div class="pillar reveal">
+        <div class="ic rose">🛡️</div>
+        <h3>Everyone is verified</h3>
+        <p>A live selfie face-check — our own tech, in your browser — confirms every member is a real, unique person. Aadhaar numbers are never stored.</p>
       </div>
-      <div class="ring-wrap">
-        <div class="ring"><div class="val"><b>86</b><span>Lakshan · Grade A</span></div></div>
+      <div class="pillar reveal">
+        <div class="ic green">📖</div>
+        <h3>The Lakshan Book</h3>
+        <p>An honesty engine reads what people <i>claim</i> against what they <i>do</i>. First slip: a private nudge. Real patterns: a visible flag. Honesty heals over time.</p>
+      </div>
+      <div class="pillar reveal">
+        <div class="ic gold">✨</div>
+        <h3>Real intent &amp; chemistry</h3>
+        <p>Say what you're here for — you only see people who want the same. A 36-point Guna Milan and how you actually talk blend into one honest compatibility score.</p>
       </div>
     </div>
   </div>
 </section>
 
-<!-- STEPS -->
-<section class="block" style="padding-top:20px">
-  <div class="wrap center">
-    <div class="kicker reveal">How it works</div>
-    <h2 class="reveal">Four steps. About two minutes.</h2>
-    <p class="lead reveal">Low friction on purpose — register, then a quick face check, then you're in.</p>
-    <div class="steps" style="text-align:left">
-      <div class="step reveal"><div class="n">1</div><h3>Join</h3><p>Sign up with email &amp; password, then start your monthly membership.</p></div>
-      <div class="step reveal d1"><div class="n">2</div><h3>Verify it's you</h3><p>A quick live selfie — in your browser — proves you're a real, unique person.</p></div>
-      <div class="step reveal d2"><div class="n">3</div><h3>Set intent</h3><p>Say what you're here for and add a photo or two. Birth details unlock deeper matching.</p></div>
-      <div class="step reveal d3"><div class="n">4</div><h3>Meet honestly</h3><p>Browse a verified community, chat anonymously, and let the Lakshan Book keep it safe.</p></div>
+<!-- ============ HOW — three steps ============ -->
+<section id="how">
+  <div class="wrap">
+    <div class="sec-head">
+      <div class="eyebrow reveal">How it works</div>
+      <h2 class="reveal">Three steps. About two minutes.</h2>
+    </div>
+    <div class="steps">
+      <div class="step reveal"><div class="n">1</div><div><h3>Join</h3><p>Sign up with email &amp; password, then start your membership.</p></div></div>
+      <div class="step reveal"><div class="n">2</div><div><h3>Verify it's you</h3><p>A quick live selfie proves you're a real, unique person — right in your browser.</p></div></div>
+      <div class="step reveal"><div class="n">3</div><div><h3>Meet honestly</h3><p>Browse a verified community, chat anonymously, and let the Lakshan Book keep it safe.</p></div></div>
     </div>
   </div>
 </section>
 
-<!-- Nature Dial styles — the finished design scene IS the hero visual (see .stage.nd-stage).
-     The toggle swaps woman/man; the frame crops the baked-in preview chrome off the
-     woman scene ("Tips to use the dial" + icons). The man scene has no chrome. -->
-<style>
-  #nd-toggle{display:inline-flex;gap:2px;background:rgba(18,10,8,.72);border:1px solid rgba(243,193,75,.32);border-radius:99px;padding:5px}
-  #nd-toggle button{font:inherit;font-size:13.5px;font-weight:700;color:#d9c2cb;background:transparent;border:0;padding:8px 20px;border-radius:99px;cursor:pointer;transition:.2s}
-  #nd-toggle button.on{background:linear-gradient(135deg,#ffd97a,var(--haldi));color:var(--deep)}
-  #nd-toggle button:hover:not(.on){color:#fff}
-  .nd-stage{position:relative;height:auto;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px}
-  .nd-frame{position:relative;width:100%;max-width:470px;border-radius:18px;overflow:hidden;line-height:0;box-shadow:0 34px 80px rgba(0,0,0,.5),0 0 0 1px rgba(243,193,75,.14)}
-  #nd-scene{display:block;width:100%;height:auto;margin-bottom:var(--nd-crop,0)}
-  .nd-frame.crop{--nd-crop:-4.2%}          /* clip ~50px of baked-in bottom chrome off the woman scene */
-  .nd-badges{display:flex;gap:8px;justify-content:center;flex-wrap:wrap}
-  .nd-badge-fact{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:800;color:#69d18e;background:rgba(31,122,77,.18);border:1px solid rgba(63,191,114,.5);border-radius:99px;padding:5px 13px}
-  .nd-badge-read{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:800;color:#e7c04f;background:rgba(243,193,75,.12);border:1px solid rgba(243,193,75,.4);border-radius:99px;padding:4px 11px}
-  .nd-note{color:rgba(255,255,255,.5);font-size:11.5px;letter-spacing:.2px}
-</style>
-<script>
-(function(){
-  var SCENE={woman:'/dial-scene-woman.jpg?v=2', man:'/dial-scene-man.jpg?v=2'};
-  var SIZE={woman:[1200,770], man:[1000,1025]};
-  var img=document.getElementById('nd-scene');
-  var frame=document.querySelector('.nd-frame');
-  Array.prototype.forEach.call(document.querySelectorAll('#nd-toggle button'),function(b){
-    b.addEventListener('click',function(){
-      Array.prototype.forEach.call(document.querySelectorAll('#nd-toggle button'),function(x){x.classList.remove('on')});
-      b.classList.add('on');
-      var p=b.getAttribute('data-p')||'woman';
-      if(img){ img.src=SCENE[p]||SCENE.woman; if(SIZE[p]){ img.width=SIZE[p][0]; img.height=SIZE[p][1]; } }
-      if(frame){ frame.classList.toggle('crop', p==='woman'); }  /* only the woman scene has baked-in chrome */
-    });
-  });
-})();
-</script>
-
-<!-- PRICING -->
-<section class="block" id="pricing">
-  <div class="wrap center">
-    <div class="kicker reveal">Membership</div>
-    <h2 class="reveal">Monthly. Honest. No games.</h2>
-    <p class="lead reveal price-lead">One transparent price for everyone. You're paying for a safer, verified relationship community — not boosts, ads, or addictive mechanics.</p>
-
-    <div class="bill-toggle reveal" role="group" aria-label="Billing period">
-      <button type="button" data-bill="monthly" class="on" onclick="setBill('monthly')">Monthly</button>
-      <button type="button" data-bill="annual" onclick="setBill('annual')">Annual <span class="save">save ~20%</span></button>
+<!-- ============ PRICING — one honest promise ============ -->
+<section id="pricing">
+  <div class="wrap">
+    <div class="sec-head">
+      <div class="eyebrow reveal">Membership</div>
+      <h2 class="reveal">Monthly. Honest. No games.</h2>
     </div>
-    <p class="reveal" style="color:var(--mut);font-size:13px;margin-top:8px">Prices shown are the base membership. Applicable taxes and the payment-gateway fee are added and itemised at checkout.</p>
-
-    <div class="prices" style="text-align:left">
-      <div class="price reveal">
-        <h3>Sambandh Essential</h3>
-        <div class="plan-sub">Everything you need to meet honestly.</div>
-        <div class="amt" data-m="CHF 5" data-a="CHF 48">CHF 5</div>
-        <div class="per" data-m="per month" data-a="per year · CHF 4/mo">per month</div>
-        <ul>
-          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 6L9 17l-5-5"/></svg> Full verification &amp; a photo-verified community</li>
-          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 6L9 17l-5-5"/></svg> The Lakshan Book &amp; real-time safety alerts</li>
-          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 6L9 17l-5-5"/></svg> Astrology &amp; compatibility insights</li>
-          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 6L9 17l-5-5"/></svg> Connect and message without the noise</li>
-        </ul>
-        <a href="/app" class="btn outline">Get started</a>
-      </div>
-      <div class="price pop reveal d1">
-        <span class="tag">Most chosen</span>
-        <h3>Sambandh Plus</h3>
-        <div class="plan-sub">For members who want to reach further.</div>
-        <div class="amt" data-m="CHF 12" data-a="CHF 120">CHF 12</div>
-        <div class="per" data-m="per month" data-a="per year · CHF 10/mo">per month</div>
-        <ul>
-          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 6L9 17l-5-5"/></svg> Communicate without daily limits</li>
-          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 6L9 17l-5-5"/></svg> Greater visibility among compatible, verified members</li>
-          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 6L9 17l-5-5"/></svg> Everything in Essential</li>
-        </ul>
-        <a href="/app" class="btn gold">Choose Plus</a>
-      </div>
-      <div class="price reveal d2">
-        <h3>Sambandh Signature</h3>
-        <div class="plan-sub">A higher level of service — not just more features.</div>
-        <div class="amt" data-m="CHF 25" data-a="CHF 240">CHF 25</div>
-        <div class="per" data-m="per month" data-a="per year · CHF 20/mo">per month</div>
-        <ul>
-          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 6L9 17l-5-5"/></svg> Enhanced compatibility insights</li>
-          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 6L9 17l-5-5"/></svg> Advanced discovery controls</li>
-          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 6L9 17l-5-5"/></svg> Priority concierge support</li>
-          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 6L9 17l-5-5"/></svg> Early access to new experiences</li>
-        </ul>
-        <a href="/app" class="btn outline">Choose Signature</a>
+    <p class="price-note reveal">One transparent price for everyone. You're paying for a safer, verified community — not boosts, ads, or addictive mechanics.</p>
+    <div style="text-align:center">
+      <div class="bill-toggle reveal" role="group" aria-label="Billing period">
+        <button type="button" data-bill="monthly" class="on" onclick="setBill('monthly')">Monthly</button>
+        <button type="button" data-bill="annual" onclick="setBill('annual')">Annual <span class="save">save ~20%</span></button>
       </div>
     </div>
-
+    <div class="plans">
+      <div class="plan pop reveal">
+        <div><span class="tag">Most chosen</span><div class="pn">Sambandh Essential</div><div class="pd">Everything you need to meet honestly.</div></div>
+        <div><div class="amt" data-m="CHF 5" data-a="CHF 48">CHF 5</div><div class="per" data-m="per month" data-a="per year">per month</div></div>
+      </div>
+      <div class="plan reveal">
+        <div><div class="pn">Sambandh Plus</div><div class="pd">Reach further — no daily limits.</div></div>
+        <div><div class="amt" data-m="CHF 12" data-a="CHF 120">CHF 12</div><div class="per" data-m="per month" data-a="per year">per month</div></div>
+      </div>
+      <div class="plan reveal">
+        <div><div class="pn">Sambandh Signature</div><div class="pd">A higher level of service.</div></div>
+        <div><div class="amt" data-m="CHF 25" data-a="CHF 240">CHF 25</div><div class="per" data-m="per month" data-a="per year">per month</div></div>
+      </div>
+    </div>
     <div class="trust-row reveal">
-      <span>Cancel within 2 days for a pro-rated refund</span><span>Secure payments</span><span>Verified members only</span>
-      <span>Taxes &amp; fees itemised at checkout</span><span>Privacy-first</span>
+      <span>Cancel within 2 days for a pro-rated refund</span><span>Verified members only</span><span>Taxes &amp; fees itemised at checkout</span>
     </div>
-    <p class="price-philosophy reveal">Membership supports a safer, verified relationship community — not advertising or engagement tricks.</p>
   </div>
 </section>
 
-<!-- FINAL CTA -->
-<section class="block">
+<!-- ============ SAFETY — reassurance ============ -->
+<section class="safe" id="safety">
   <div class="wrap">
-    <div class="final reveal">
-      <div class="aurora" style="opacity:.4"><span class="a"></span><span class="b"></span></div>
-      <div style="position:relative;z-index:1">
-        <h2>Be first in line.</h2>
-        <p>We're building the most premium, honesty-first dating platform in the world — and opening the doors soon. Join the waiting list and we'll invite you the moment we launch.</p>
-        <form class="waitform" id="waitFinal" onsubmit="return joinWaitlist(event,'final')">
-          <input type="email" name="email" inputmode="email" autocomplete="email" placeholder="Enter your email" required aria-label="Email address"/>
-          <button type="submit" class="btn gold">Join the waiting list</button>
-        </form>
-        <div class="waitmsg" id="waitFinalMsg" style="text-align:center"></div>
-        <a href="/app" class="btn ghost" id="ctaFinal" style="margin-top:14px">Open the app →</a>
-      </div>
+    <div class="sec-head">
+      <div class="eyebrow reveal">Your safety, by design</div>
+      <h2 class="reveal">You stay in control.</h2>
     </div>
+    <div class="safe-list">
+      <div class="safe-item reveal"><div class="k">👻</div><div><b>Anonymous-first chat.</b><p>Start with your name and photos hidden. Identities reveal only when both people agree.</p></div></div>
+      <div class="safe-item reveal"><div class="k">🚫</div><div><b>Block anytime.</b><p>Block anyone instantly — you disappear from each other completely. Report &amp; safety help is always one tap away.</p></div></div>
+      <div class="safe-item reveal"><div class="k">🔒</div><div><b>Your data, your rights.</b><p>Export everything, pause, or delete anytime — erased within 30 days. DPDP-Act aligned, by design.</p></div></div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ FINAL CTA ============ -->
+<section id="join">
+  <div class="final reveal">
+    <h2>Be first in line.</h2>
+    <p>We're building the most trusted, honesty-first way to meet someone real — and opening the doors soon.</p>
+    <form class="hero-form" id="waitFinal" onsubmit="return joinWaitlist(event,'final')">
+      <input type="email" name="email" inputmode="email" autocomplete="email" placeholder="Enter your email" required aria-label="Email address"/>
+      <button type="submit" class="btn gold">Join the waiting list</button>
+    </form>
+    <div class="hero-note" id="waitFinalMsg"></div>
   </div>
 </section>
 
 <footer>
   <div class="wrap">
-    <div class="row">
-      <div><b class="serif" style="color:var(--deep);font-size:18px">sambandh</b> · verified, honest dating<span style="opacity:.55"> · a product of AIHuA</span></div>
-      <div>© 2026 Sambandh · <a href="/app">Open the app</a> · Grievances: grievance@sambandh.in</div>
-    </div>
+    <div><span class="fbrand">sambandh</span> · verified, honest connections</div>
+    <div style="margin-top:6px;opacity:.85">© 2026 Sambandh · a product of AIHuA · <a href="/app">Open the app</a></div>
+    <div style="margin-top:4px;opacity:.7">Grievances: grievance@sambandh.in</div>
   </div>
 </footer>
 
+<!-- Sticky thumb-zone CTA (mobile) -->
+<div class="dock" id="dock">
+  <a class="btn primary" href="#join" onclick="document.getElementById('waitFinal')?.querySelector('input')?.focus()">Join the waiting list</a>
+</div>
+
 <script>
-  const hdr = document.getElementById('hdr');
-  const onScroll = () => hdr.classList.toggle('solid', window.scrollY > 40);
-  onScroll(); window.addEventListener('scroll', onScroll, { passive: true });
-
-  const io = new IntersectionObserver((entries) => {
-    entries.forEach(e => { if (e.isIntersecting) { e.target.classList.add('in'); io.unobserve(e.target); } });
-  }, { threshold: 0.14 });
-  document.querySelectorAll('.reveal').forEach(el => io.observe(el));
-
-  const cio = new IntersectionObserver((entries) => {
-    entries.forEach(e => {
-      if (!e.isIntersecting) return; cio.unobserve(e.target);
-      const el = e.target, target = +el.dataset.count; let n = 0;
-      const step = Math.max(1, Math.round(target / 40));
-      const t = setInterval(() => { n += step; if (n >= target) { n = target; clearInterval(t); } el.textContent = n; }, 22);
-    });
-  }, { threshold: .5 });
-  document.querySelectorAll('[data-count]').forEach(c => cio.observe(c));
-
-  document.querySelectorAll('.tilt').forEach(card => {
-    card.addEventListener('pointermove', ev => {
-      const r = card.getBoundingClientRect();
-      const px = (ev.clientX - r.left) / r.width - .5, py = (ev.clientY - r.top) / r.height - .5;
-      card.style.transform = `perspective(700px) rotateX(${(-py * 7).toFixed(2)}deg) rotateY(${(px * 9).toFixed(2)}deg) translateY(-4px)`;
-    });
-    card.addEventListener('pointerleave', () => { card.style.transform = ''; });
-  });
-
-  // ---- Pricing: monthly / annual toggle (presentational — real purchase happens in-app) ----
-  window.setBill = function (mode) {
-    document.querySelectorAll('.bill-toggle button').forEach(b =>
-      b.classList.toggle('on', b.getAttribute('data-bill') === mode));
-    document.querySelectorAll('#pricing .amt, #pricing .per').forEach(el => {
-      const v = el.getAttribute(mode === 'annual' ? 'data-a' : 'data-m');
-      if (v != null) el.textContent = v;
-    });
-  };
-
-  if (location.hash && location.hash.startsWith('#/')) location.replace('/app' + location.hash);
-  try {
-    if (localStorage.getItem('sb_token')) {
-      ['ctaHero','ctaFinal'].forEach(id => { const el = document.getElementById(id); if (el) el.textContent = 'Back to Sambandh →'; });
-    }
-  } catch (e) {}
-
-  // ---- Waiting list ----
-  window.joinWaitlist = async function (ev, source) {
-    ev.preventDefault();
-    const form = ev.target;
-    const email = (form.querySelector('input[name=email]') || {}).value || '';
-    const btn = form.querySelector('button');
-    const msg = document.getElementById(source === 'final' ? 'waitFinalMsg' : 'waitHeroMsg');
-    btn.disabled = true; const label = btn.textContent; btn.textContent = 'Joining…';
-    try {
-      const r = await fetch('/api/waitlist', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: email, source: source })
-      });
-      const data = await r.json().catch(() => ({}));
-      if (r.ok) {
-        form.reset();
-        msg.textContent = data.position ? ('✓ You\'re #' + data.position + ' on the list — check your inbox soon.') : '✓ You\'re on the list — we\'ll be in touch.';
-        loadWaitCount();
-      } else {
-        msg.textContent = (data && data.error) || 'Please enter a valid email.';
-      }
-    } catch (e) {
-      msg.textContent = 'Network hiccup — please try again.';
-    } finally {
-      btn.disabled = false; btn.textContent = label;
-    }
-    return false;
-  };
-  async function loadWaitCount() {
-    try {
-      const r = await fetch('/api/waitlist/count'); const d = await r.json();
-      const el = document.getElementById('waitCount');
-      if (el && d && d.count > 0) el.textContent = d.count.toLocaleString() + (d.count === 1 ? ' person' : ' people') + ' already waiting — join them.';
-    } catch (e) {}
+  // Header: solid after a little scroll.
+  var hdr = document.getElementById('hdr');
+  var dock = document.getElementById('dock');
+  function onScroll(){
+    var y = window.scrollY;
+    hdr.classList.toggle('solid', y > 30);
+    dock.classList.toggle('show', y > 520);   // appear once past the hero
   }
-  loadWaitCount();
+  onScroll(); window.addEventListener('scroll', onScroll, { passive:true });
+
+  // Reveal on scroll (respects reduced-motion via CSS).
+  try{
+    var io = new IntersectionObserver(function(es){
+      es.forEach(function(e){ if(e.isIntersecting){ e.target.classList.add('in'); io.unobserve(e.target); } });
+    }, { threshold:.12, rootMargin:'0px 0px -8% 0px' });
+    document.querySelectorAll('.reveal').forEach(function(el){ io.observe(el); });
+  }catch(e){ document.querySelectorAll('.reveal').forEach(function(el){ el.classList.add('in'); }); }
+
+  // Nature Dial toggle (woman/man). Only the woman scene has baked-in chrome → crop it.
+  (function(){
+    var SCENE={woman:'/dial-scene-woman.jpg?v=2', man:'/dial-scene-man.jpg?v=2'};
+    var SIZE={woman:[1200,770], man:[1000,1025]};
+    var img=document.getElementById('nd-scene'), frame=document.querySelector('.nd-frame');
+    Array.prototype.forEach.call(document.querySelectorAll('#nd-toggle button'),function(b){
+      b.addEventListener('click',function(){
+        Array.prototype.forEach.call(document.querySelectorAll('#nd-toggle button'),function(x){x.classList.remove('on')});
+        b.classList.add('on');
+        var p=b.getAttribute('data-p')||'woman';
+        if(img){ img.src=SCENE[p]||SCENE.woman; if(SIZE[p]){ img.width=SIZE[p][0]; img.height=SIZE[p][1]; } }
+        if(frame){ frame.classList.toggle('crop', p==='woman'); }
+      });
+    });
+  })();
+
+  // Pricing: monthly / annual toggle (presentational; real purchase happens in-app).
+  window.setBill = function(mode){
+    document.querySelectorAll('.bill-toggle button').forEach(function(b){ b.classList.toggle('on', b.getAttribute('data-bill')===mode); });
+    document.querySelectorAll('#pricing .amt, #pricing .per').forEach(function(el){
+      var v = el.getAttribute(mode==='annual'?'data-a':'data-m'); if(v!=null) el.textContent = v;
+    });
+  };
+
+  // If already a member, point CTAs into the app.
+  try{ if(localStorage.getItem('sb_token')){ document.getElementById('hdrCta').textContent='Open Sambandh'; } }catch(e){}
+
+  // Waiting list.
+  window.joinWaitlist = async function(ev, source){
+    ev.preventDefault();
+    var form = ev.target;
+    var email = (form.querySelector('input[name=email]')||{}).value || '';
+    var btn = form.querySelector('button');
+    var msg = document.getElementById(source==='final' ? 'waitFinalMsg' : 'waitHeroMsg');
+    btn.disabled = true; var label = btn.textContent; btn.textContent = 'Joining…';
+    try{
+      var r = await fetch('/api/waitlist', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ email:email, source:source }) });
+      var data = await r.json().catch(function(){ return {}; });
+      if(r.ok){ if(msg){ msg.textContent = "You're on the list — we'll invite you the moment we open."; msg.style.color = '#ffd97a'; } form.reset(); }
+      else { if(msg){ msg.textContent = data.error || 'Something went wrong. Please try again.'; msg.style.color = '#ffb4c4'; } }
+    }catch(e){ if(msg){ msg.textContent = 'Network error — please try again.'; msg.style.color = '#ffb4c4'; } }
+    finally{ btn.disabled = false; btn.textContent = label; }
+  };
 </script>
 </body>
 </html>
