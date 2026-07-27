@@ -4,8 +4,11 @@
 // Strict-type-checked via JSDoc rather than a .ts rename — see ADR-004 (Node runs
 // this file directly; there is no build step). Enforced by `tsc --noEmit` in CI.
 //
-// ALL amounts in CHF. Join fee (computed SERVER-SIDE from the user's stored
-// gender — never from the request): male CHF 1 · female CHF 5 · non-binary CHF 3.
+// ALL amounts in CHF. Base membership is a SINGLE FLAT PRICE for every member —
+// CHF 5/month — computed server-side (never taken from the request). No gender
+// differential: one transparent price, easier to explain and equal by design.
+// Tiers (display → internal key): Essential=base CHF 5 · Plus=pro CHF 12 ·
+// Signature=max CHF 25 per month; annual is CHF 48 · 120 · 240. Keys stay base/pro/max.
 //
 // Dev mode: when Razorpay keys are not configured (or DEV_PAYMENTS=true),
 // orders are simulated locally so the full flow works without a live account.
@@ -65,11 +68,14 @@ function webhookSecret() {
 // Split in two so every lookup has a precise type: base pricing is keyed by
 // gender, everything else by purpose. One mixed object types each read as
 // `number | Record<string, number>` — true, but useless to the checker.
-/** @type {Record<string, number>} */
-const BASE_CHF = { male: 1, female: 5, non_binary: 3, other: 3 };
+/** Base membership — a single flat price for every member (no gender differential).
+ * Kept as a per-gender map so existing callers/readers need no change; the values
+ * are deliberately identical. @type {Record<string, number>} */
+const BASE_CHF = { male: 5, female: 5, non_binary: 5, other: 5 };
 /** @type {Record<string, number>} */
 const PURPOSE_CHF = {
-  pro_subscription: 6, max_subscription: 15,
+  pro_subscription: 12, max_subscription: 25,
+  base_annual: 48, pro_annual: 120, max_annual: 240,
   karma_escalation: 0.5, karma_escalation_high: 1, boost: 1
 };
 /** @type {Record<string, string>} */
@@ -196,13 +202,16 @@ router.get('/pricing', requireAuth, async (req, res, next) => {
     /** @param {number} chf */
     const conv = (chf) => fx.convertFromCHF(chf, code);
     const gender = (user.profile && user.profile.gender) || 'other';
-    const [male, female, nb, yours, pro, max, esc, escH, boost] = await Promise.all([
+    const [male, female, nb, yours, pro, max, baseYr, proYr, maxYr, esc, escH, boost] = await Promise.all([
       conv(BASE_CHF.male), conv(BASE_CHF.female), conv(BASE_CHF.non_binary), conv(BASE_CHF[gender] ?? BASE_CHF.other),
       conv(PURPOSE_CHF.pro_subscription), conv(PURPOSE_CHF.max_subscription),
+      conv(PURPOSE_CHF.base_annual), conv(PURPOSE_CHF.pro_annual), conv(PURPOSE_CHF.max_annual),
       conv(PURPOSE_CHF.karma_escalation), conv(PURPOSE_CHF.karma_escalation_high), conv(PURPOSE_CHF.boost)
     ]);
     res.json({ currency: code, symbol: SYMBOLS[code] || (code + ' '),
-      base: { male, female, non_binary: nb, yours }, pro, max, escalation: esc, escalationHigh: escH, boost });
+      base: { male, female, non_binary: nb, yours }, pro, max,
+      annual: { base: baseYr, pro: proYr, max: maxYr },
+      escalation: esc, escalationHigh: escH, boost });
   } catch (e) { next(e); }
 });
 
@@ -227,7 +236,7 @@ router.post('/verify', requireAuth, async (req, res, next) => {
       await payment.save();
 
       if (payment.purpose === 'join_fee') await markJoinFeePaid(userId, payment); // legacy stored orders
-      if (payment.purpose.endsWith('_subscription')) await activateTier(userId, payment.purpose, payment);
+      if (/_(subscription|annual)$/.test(payment.purpose)) await activateTier(userId, payment.purpose, payment);
       return res.json({ ok: true, devMode: true, paymentId: payment._id, purpose: payment.purpose });
     }
 
@@ -252,8 +261,8 @@ router.post('/verify', requireAuth, async (req, res, next) => {
 
     // The order we priced at create-order time is the ONLY authority on what was
     // bought. req.body.purpose is attacker-controlled: the Razorpay signature
-    // covers order_id|payment_id only, so trusting it would let someone pay CHF 1
-    // for base_subscription and claim max_subscription (CHF 15) here.
+    // covers order_id|payment_id only, so trusting it would let someone pay for
+    // base_subscription (CHF 5) and claim max_subscription (CHF 25) here.
     const payment = await Payment.findOne({ razorpayOrderId: razorpay_order_id, userId: req.userId });
     if (!payment) return res.status(404).json({ error: 'Order not found' });
     if (payment.status === 'captured') return res.json({ ok: true, alreadyProcessed: true, paymentId: payment._id });
@@ -266,7 +275,7 @@ router.post('/verify', requireAuth, async (req, res, next) => {
     await payment.save();
 
     if (purpose === 'join_fee') await markJoinFeePaid(userId, payment); // legacy stored orders
-    if (purpose.endsWith('_subscription')) await activateTier(userId, purpose, payment);
+    if (/_(subscription|annual)$/.test(purpose)) await activateTier(userId, purpose, payment);
 
     res.json({ ok: true, paymentId: payment._id, purpose });
   } catch (err) { next(err); }
@@ -281,8 +290,12 @@ router.post('/verify', requireAuth, async (req, res, next) => {
  * @param {{ _id: unknown, amountCHF?: number } | null} [payment]
  */
 async function activateTier(userId, purpose, payment) {
-  const tier = purpose === 'max_subscription' ? 'max'
-    : purpose === 'pro_subscription' ? 'pro' : 'base';
+  // The tier is the purpose stem (base|pro|max), independent of the billing period.
+  // Annual purchases ('_annual') grant 365 days; monthly ('_subscription') grant 30.
+  const annual = purpose.endsWith('_annual');
+  const stem = purpose.replace(/_(subscription|annual)$/, '');
+  const tier = stem === 'max' ? 'max' : stem === 'pro' ? 'pro' : 'base';
+  const days = annual ? 365 : 30;
   const user = await User.findById(userId);
   // Never DOWNGRADE an active higher tier or SHORTEN paid time. Rank the tiers and
   // keep the better of {current active, purchased}: a same-or-lower purchase stacks
@@ -296,7 +309,7 @@ async function activateTier(userId, purpose, payment) {
   const purchasedRank = tierRank(tier);
   const effectiveTier = curRank > purchasedRank ? m.tier : tier;
   const from = (active && curRank >= purchasedRank) ? curEnd : Date.now();
-  const newEnd = Math.max(from + 30 * 86400000, curEnd);
+  const newEnd = Math.max(from + days * 86400000, curEnd);
   // Paying during pre-launch → early-access member. Their 30 days will be (re)started
   // at launch so gated time isn't burned (site-mode.setPrelaunch grants the trial).
   let earlyAccess = false;

@@ -395,9 +395,10 @@ function renderFeatures() {
        (doctors, lawyers, CAs, architects) for extra trust badges. We never store Aadhaar numbers.`)}
 
     ${section('card', 'Nothing is free',
-      `Membership is monthly — <b>CHF 1 men · CHF 5 women · CHF 3 non-binary</b> — and that's what
-       keeps bots out. Upgrades: <b>Pro, CHF 6/month</b> for
-       unlimited messaging; <b>Max, CHF 15/month</b> for the rest — who liked you, advanced filters, priority.`)}
+      `Membership is monthly — <b>CHF 5 for everyone</b>, one transparent price — and that's what
+       keeps bots out. Upgrades: <b>Plus, CHF 12/month</b> for communication without daily limits;
+       <b>Signature, CHF 25/month</b> — a higher level of service with enhanced insights, advanced
+       discovery, priority support and early access.`)}
 
     ${section('book', 'The Lakshan Book',
       `Our AI compares what people say with what they do here. "You're the only one" while running four
@@ -415,7 +416,7 @@ function renderFeatures() {
 
     ${section('ghost', 'Anonymous-first chat',
       `Start with your name and photos hidden. Nothing is revealed until <b>both</b> of you agree.
-       Block anyone and you disappear from each other completely. Pro removes the daily limits.`)}
+       Block anyone and you disappear from each other completely. Plus removes the daily limits.`)}
 
     ${section('sliders', 'A ranking we publish',
       `Trust 30% · karma 25% · intent 20% · distance 15% · astrology 10%. That's the whole formula.
@@ -435,11 +436,9 @@ function renderFeatures() {
 
     <div class="card mt" style="text-align:center">
       <div style="font-weight:700;font-size:16px">Membership at a glance</div>
-      <div class="kv" style="margin-top:10px"><span>Base · men</span><b>CHF 1 / month</b></div>
-      <div class="kv"><span>Base · women</span><b>CHF 5 / month</b></div>
-      <div class="kv"><span>Base · non-binary</span><b>CHF 3 / month</b></div>
-      <div class="kv"><span>Sambandh Pro</span><b>CHF 6 / month</b></div>
-      <div class="kv"><span>Sambandh Max</span><b>CHF 15 / month</b></div>
+      <div class="kv" style="margin-top:10px"><span>Sambandh Essential</span><b>CHF 5 / month</b></div>
+      <div class="kv"><span>Sambandh Plus</span><b>CHF 12 / month</b></div>
+      <div class="kv"><span>Sambandh Signature</span><b>CHF 25 / month</b></div>
       <div class="kv"><span>Lakshan evidence reveal</span><b>CHF 0.50–1</b></div>
       <div class="kv"><span>Fraud alerts</span><b>Free, always</b></div>
       <p class="hint" style="margin-top:8px">Your base price is set by your verified profile. Membership is monthly — cancel anytime.</p>
@@ -460,14 +459,14 @@ function renderLogin() {
   let card;
   if (tab === 'signup') {
     card = `
-      <div class="field"><label>Email</label><input id="rg-email" type="email" inputmode="email" autocomplete="email" placeholder="you@example.com"/></div>
-      <div class="field"><label>Password</label><input id="rg-pw" type="password" autocomplete="new-password" placeholder="at least 8 characters"/></div>
-      <button class="btn mt" onclick="passwordRegister()">Create account</button>`;
+      <div class="field"><label for="rg-email">Email</label><input id="rg-email" type="email" inputmode="email" autocomplete="email" placeholder="you@example.com" aria-describedby="rg-email-err" oninput="clearFieldError('rg-email')"/><div class="field-err" id="rg-email-err" aria-live="polite"></div></div>
+      <div class="field"><label for="rg-pw">Password</label><input id="rg-pw" type="password" autocomplete="new-password" placeholder="At least 8 characters" aria-describedby="rg-pw-err" oninput="clearFieldError('rg-pw')"/><div class="field-err" id="rg-pw-err" aria-live="polite"></div></div>
+      <button class="btn mt" id="rg-submit" onclick="passwordRegister()">Create account</button>`;
   } else {
     card = `
-      <div class="field"><label>Email</label><input id="li-id" type="email" inputmode="email" autocomplete="username" placeholder="you@example.com"/></div>
-      <div class="field"><label>Password</label><input id="li-pw" type="password" autocomplete="current-password" placeholder="••••••••"/></div>
-      <button class="btn mt" onclick="passwordLogin()">Sign in</button>
+      <div class="field"><label for="li-id">Email</label><input id="li-id" type="email" inputmode="email" autocomplete="username" placeholder="you@example.com" aria-describedby="li-id-err" oninput="clearFieldError('li-id')"/><div class="field-err" id="li-id-err" aria-live="polite"></div></div>
+      <div class="field"><label for="li-pw">Password</label><input id="li-pw" type="password" autocomplete="current-password" placeholder="••••••••" aria-describedby="li-pw-err" oninput="clearFieldError('li-pw')"/><div class="field-err" id="li-pw-err" aria-live="polite"></div></div>
+      <button class="btn mt" id="li-submit" onclick="passwordLogin()">Sign in</button>
       <div id="otp-area"></div>`;
   }
 
@@ -483,6 +482,7 @@ function renderLogin() {
     <div class="card mt">
       <div class="center" style="font-weight:700;font-size:16px">${heading}</div>
       <p class="hint center" style="margin-bottom:12px">${subline}</p>
+      <div class="form-err" id="auth-form-err" role="alert" aria-live="assertive"></div>
       ${card}
     </div>
     <div class="row" style="align-items:center;gap:10px;margin:14px 0"><div style="flex:1;height:1px;background:var(--sand-mid)"></div><span class="hint">or</span><div style="flex:1;height:1px;background:var(--sand-mid)"></div></div>
@@ -493,29 +493,52 @@ function renderLogin() {
   initGoogleButton(tab);
 }
 
+// ---- Accessible inline form validation (shared) ----
+function setFieldError(id, msg) { const el = document.getElementById(id); if (el) el.setAttribute('aria-invalid', 'true'); const e = document.getElementById(id + '-err'); if (e) e.textContent = msg; }
+function clearFieldError(id) { const el = document.getElementById(id); if (el) el.removeAttribute('aria-invalid'); const e = document.getElementById(id + '-err'); if (e) e.textContent = ''; }
+function showFormError(msg) { const e = document.getElementById('auth-form-err'); if (e) e.textContent = msg || ''; }
+function focusFirstInvalid() { const el = document.querySelector('[aria-invalid="true"]'); if (el && el.focus) el.focus(); }
+function btnLoading(id, on, doneLabel) {
+  const b = document.getElementById(id); if (!b) return;
+  if (on) { if (b.dataset.label == null) b.dataset.label = b.textContent; b.textContent = 'Please wait…'; b.classList.add('is-loading'); b.setAttribute('aria-busy', 'true'); }
+  else { b.textContent = doneLabel || b.dataset.label || b.textContent; b.classList.remove('is-loading'); b.removeAttribute('aria-busy'); }
+}
+
 async function passwordRegister() {
+  showFormError(''); clearFieldError('rg-email'); clearFieldError('rg-pw');
   const email = ($('#rg-email').value || '').trim().toLowerCase();
   const password = $('#rg-pw').value || '';
-  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return toast('Enter a valid email address.');
-  if (password.length < 8) return toast('Password must be at least 8 characters.');
+  let bad = false;
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) { setFieldError('rg-email', 'Enter a valid email address.'); bad = true; }
+  if (password.length < 8) { setFieldError('rg-pw', 'Use at least 8 characters.'); bad = true; }
+  if (bad) return focusFirstInvalid();
+  btnLoading('rg-submit', true);
   try {
     const r = await api('/auth/register', { method: 'POST', body: { email, password } });
     S.token = r.token; localStorage.setItem('sb_token', r.token);
     S.user = (await api('/auth/me')).user;
     connectSocket(); captureLocation();
     nav(onboardingStep() === 'done' ? '#/discover' : '#/onboarding');
-  } catch (e) { toast(e.message); }
+  } catch (e) { btnLoading('rg-submit', false, 'Create account'); showFormError(e.message); }
 }
 
 async function passwordLogin(totp) {
+  if (!totp) { showFormError(''); clearFieldError('li-id'); clearFieldError('li-pw'); }
   const identifier = ($('#li-id') ? $('#li-id').value : S._pwId || '').trim();
   const password = $('#li-pw') ? $('#li-pw').value : S._pwPass;
   S._pwId = identifier; S._pwPass = password;
-  if (!identifier || !password) return toast('Enter your username/email and password.');
+  if (!totp) {
+    let bad = false;
+    if (!identifier) { setFieldError('li-id', 'Enter your email.'); bad = true; }
+    if (!password) { setFieldError('li-pw', 'Enter your password.'); bad = true; }
+    if (bad) return focusFirstInvalid();
+  }
+  btnLoading('li-submit', true);
   try {
     const r = await api('/auth/login', { method: 'POST', body: { identifier, password, ...(totp ? { totp } : {}) } });
     if (r.twoFactorRequired) {
-      $('#otp-area').innerHTML = `<div class="field mt"><label>Authenticator code (2FA)</label><input id="li-totp" class="otp-boxes" maxlength="6" inputmode="numeric" placeholder="••••••"/></div>
+      btnLoading('li-submit', false, 'Sign in');
+      $('#otp-area').innerHTML = `<div class="field mt"><label for="li-totp">Authenticator code (2FA)</label><input id="li-totp" class="otp-boxes" maxlength="6" inputmode="numeric" placeholder="••••••"/></div>
         <button class="btn forest" onclick='passwordLogin(document.getElementById("li-totp").value.trim())'>Verify</button>`;
       $('#li-totp')?.focus(); return;
     }
@@ -523,7 +546,7 @@ async function passwordLogin(totp) {
     S.user = (await api('/auth/me')).user;
     connectSocket();
     nav(onboardingStep() === 'done' ? '#/discover' : '#/onboarding');
-  } catch (e) { toast(e.message); }
+  } catch (e) { btnLoading('li-submit', false, 'Sign in'); showFormError(e.message); }
 }
 
 // ---- Google Sign-In (loads Google Identity Services if a client id is configured) ----
@@ -957,14 +980,16 @@ async function obSendProfession() {
 // (Indian users → INR so UPI/wallets/netbanking show; amount is live-converted CHF).
 function localPricing() {
   const country = (S.user && S.user.profile && S.user.profile.country) || 'IN';
+  // Flat base for everyone (CHF 5). Plus CHF 12 · Signature CHF 25 monthly;
+  // annual CHF 48 · 120 · 240. INR mirror at ≈95/CHF (a display fallback only).
   return country === 'IN'
-    ? { sym: '₹', base: { male: 95, female: 475, non_binary: 285 }, pro: 570, max: 1425 }
-    : { sym: 'CHF ', base: { male: 1, female: 5, non_binary: 3 }, pro: 6, max: 15 };
+    ? { sym: '₹', base: { male: 475, female: 475, non_binary: 475 }, pro: 1140, max: 2375, annual: { base: 4560, pro: 11400, max: 22800 } }
+    : { sym: 'CHF ', base: { male: 5, female: 5, non_binary: 5 }, pro: 12, max: 25, annual: { base: 48, pro: 120, max: 240 } };
 }
 // Prefer the live, server-computed price (CHF converted at today's rate).
 function pricingView() {
   const s = S._pricing;
-  return s ? { sym: s.symbol, base: s.base, pro: s.pro, max: s.max } : localPricing();
+  return s ? { sym: s.symbol, base: s.base, pro: s.pro, max: s.max, annual: s.annual || localPricing().annual } : localPricing();
 }
 async function loadPricing() {
   try { S._pricing = await api('/payment/pricing'); if (['#/onboarding', '#/settings'].includes(location.hash)) route(); } catch { /* mirror used */ }
@@ -972,25 +997,30 @@ async function loadPricing() {
 // The canonical price is in CHF (Swiss francs). Indian members are billed the local
 // equivalent via Razorpay (so UPI works); that local figure is an APPROXIMATE estimate,
 // shown as "≈", never as the headline price.
-const CHF_BASE = { male: 1, female: 5, non_binary: 3 };
+// Base membership is a single flat price for every member (CHF 5/month). The canonical
+// price is CHF; Indian members are billed the local ≈ equivalent so UPI works.
+const BASE_CHF_FLAT = 5;
 function obPay() {
-  const g = S.user.profile.gender;
-  const chf = CHF_BASE[g] ?? CHF_BASE.non_binary;
   const p = pricingView();
+  const g = S.user.profile.gender;
   const country = (S.user.profile && S.user.profile.country) || 'IN';
-  const localFee = p.base[g] ?? p.base.non_binary;
+  const localFee = p.base[g] ?? p.base.male;
   const showLocal = country === 'IN' && p.sym && p.sym.trim() !== 'CHF';
   return `<div class="section-pad">
     <h1>Start your membership</h1>
-    <p class="sub">Nothing here is free — every member pays monthly. That's what keeps the bots and time-wasters out.</p>
-    <div class="card center" style="background:var(--rose-soft);border-color:var(--rose)">
-      <div style="font-size:38px;font-weight:700;color:var(--sindoor-deep);font-family:Georgia,serif">CHF ${chf}<span style="font-size:15px;color:var(--sindoor)"> / month</span></div>
-      ${showLocal ? `<div style="font-size:13px;color:var(--sindoor)">≈ ${p.sym}${localFee} — billed in ₹ (INR) so UPI works · approx</div>` : ''}
-      <div style="font-size:12px;color:var(--sindoor)">30 days per payment · renew when it suits you</div>
-      <div class="hint">Men CHF ${CHF_BASE.male} · Women CHF ${CHF_BASE.female} · Non-binary CHF ${CHF_BASE.non_binary} per month — your price is set by your verified profile, not by this page.</div>
+    <p class="sub">Nothing here is free — every member pays the same, honestly. That's what keeps bots and time-wasters out.</p>
+    <div class="card center price-hero">
+      <div class="price-big">CHF ${BASE_CHF_FLAT}</div>
+      <div class="price-per">per month · one price for everyone</div>
+      ${showLocal ? `<div class="price-approx">≈ ${p.sym}${localFee} · billed in ₹ so UPI works · approx</div>` : ''}
+      <ul class="trust-points">
+        <li>Full verified access — the Lakshan Book &amp; safety alerts</li>
+        <li>Astrology &amp; compatibility insights, every day</li>
+        <li>30 days per payment — renew when it suits you</li>
+      </ul>
     </div>
     <button class="btn" onclick="obPayNow()">Pay with UPI / Card</button>
-    <p class="hint center mt">Powered by Razorpay · Secure payment · Monthly membership, cancel anytime</p>
+    <div class="pay-trust">Cancel anytime · Secure payment via Razorpay · Verified members only · No hidden charges</div>
   </div>`;
 }
 
@@ -1013,7 +1043,7 @@ async function obPayNow() {
     await ensureRazorpay();
     const rzp = new Razorpay({
       key: order.key, amount: order.amount, currency: order.currency, name: 'Sambandh',
-      description: 'Base membership (monthly)', order_id: order.orderId, prefill: order.prefill,
+      description: 'Sambandh Essential membership (monthly)', order_id: order.orderId, prefill: order.prefill,
       handler: async resp => {
         await api('/payment/verify', { method: 'POST', body: { ...resp, purpose: 'base_subscription' } });
         toast('Payment successful ✓');
@@ -1189,7 +1219,7 @@ function ddShow() {
     strengths ? facet('Strengths', esc(strengths), 'What people consistently say about them.') : '',
     isPro
       ? `<div class="facet" style="cursor:pointer" onclick="nav('#/profile/${p.userId}')"><div class="lab">Nature Dial</div><h4>Open full reading →</h4><p>Persona, energy, drive & how they connect.</p></div>`
-      : `<div class="facet locked"><div class="lab">Nature Dial</div><h4>🔒 Unlock their full nature</h4><p>Persona, energy, drive & how they connect.</p><button class="up" onclick="buyTier('pro_subscription')">Upgrade to Pro · CHF 6/mo</button></div>`
+      : `<div class="facet locked"><div class="lab">Nature Dial</div><h4>🔒 Unlock their full nature</h4><p>Persona, energy, drive & how they connect.</p><button class="up" onclick="buyTier('pro_subscription')">Upgrade to Plus · CHF 12/mo</button></div>`
   ].filter(Boolean).join('');
   const core = p.anonymous
     ? `<div class="ini">${ic('ghost', 'ic-xl')}</div>`
@@ -1278,7 +1308,7 @@ async function showWhoLikedMe() {
       <h2 style="margin-top:0" class="ic-row">${ic('heart')} Who liked you</h2>
       <div class="karma-hero good" style="padding:14px"><b>${r.count}</b><span>${r.count === 1 ? 'person likes' : 'people like'} your profile</span></div>
       ${r.upgradeRequired
-        ? `<div class="notice rose">Seeing <b>who</b> liked you is a Sambandh Max perk (CHF 15/month). Like people back in Discover — mutual likes always match.</div>`
+        ? `<div class="notice rose">Seeing <b>who</b> liked you is a Sambandh Signature perk (CHF 25/month). Like people back in Discover — mutual likes always match.</div>`
         : (r.profiles || []).map(p => `
           <div class="chat-item" style="border-radius:12px;margin-bottom:8px" onclick="closeModal();nav('#/profile/${p.userId}')">
             <div class="avatar">${p.photo ? `<img alt="" src="${esc(p.photo)}" data-i="${esc((p.firstName || '?')[0])}" onerror="imgFail(this)"/>` : esc((p.firstName || '?')[0])}</div>
@@ -1449,13 +1479,13 @@ async function renderProfile(userId) {
       api('/reading/' + userId).catch(() => null)   // reading is a nicety — never break the profile
     ]);
     // Full plain-language reading for the viewed user (READING badge, jargon-guarded).
-    // The full Nature Dial reading is a Sambandh Pro feature; free/base see a teaser.
+    // The full Nature Dial reading is a Sambandh Plus feature; free/base see a teaser.
     const readingBlock = (rdg && rdg.locked)
       ? `<div class="card" style="text-align:center;padding:20px 18px;background:linear-gradient(160deg,#fff8ec,#fdeef4);border:1px solid #f0d9a8">
            <div style="font-size:24px">🔒</div>
            <b style="display:block;margin:8px 0 4px;font-size:16px">Unlock their Nature Dial</b>
-           <p class="hint" style="margin:0 0 14px">See ${esc(p.firstName)}'s full nature — persona, energy, drive and how they connect — with Sambandh Pro.</p>
-           <button class="btn" onclick="buyTier('pro_subscription')">Upgrade to Pro · CHF 6/mo</button>
+           <p class="hint" style="margin:0 0 14px">See ${esc(p.firstName)}'s full nature — persona, energy, drive and how they connect — with Sambandh Plus.</p>
+           <button class="btn" onclick="buyTier('pro_subscription')">Upgrade to Plus · CHF 12/mo</button>
          </div>`
       : (rdg ? readingCardsHtml([
           ['Their nature', rdg.line],
@@ -2389,56 +2419,70 @@ async function passkeyLogin() {
   } catch (e) { toast(e.name === 'NotAllowedError' ? 'Passkey cancelled' : (e.message || 'Passkey sign-in failed')); }
 }
 
-// Membership tiers (CHF, all monthly — nothing is free):
-// Base 1/5/3 by gender · Sambandh Pro 6 · Sambandh Max 15
+function setBilling(mode) { S._billing = mode; renderSettings(); }
+
+// Membership plans (CHF, nothing is free): Essential (base) 5 · Plus (pro) 12 ·
+// Signature (max) 25 per month; annual 48 · 120 · 240. One flat base price for everyone.
 function tierCards(u) {
   const tier = u.membership?.tier || 'free';
   const active = tier !== 'free' && (!u.membership?.tierExpiresAt || new Date(u.membership.tierExpiresAt) > new Date());
   const cur = active ? tier : 'free';
   const until = active && u.membership?.tierExpiresAt ? new Date(u.membership.tierExpiresAt).toLocaleDateString() : null;
+  const p = pricingView();
+  const annual = S._billing === 'annual';
+  const per = annual ? '/year' : '/month';
+  const g = u.profile?.gender;
+  const priceOf = (id) => annual ? (p.annual?.[id] ?? '') : (id === 'base' ? (p.base[g] ?? p.base.male) : p[id]);
+  const purposeOf = (id) => id + (annual ? '_annual' : '_subscription');
 
-  const card = (id, name, price, features, buy) => `
-    <div class="card" style="${cur === id ? 'border-color:var(--forest);border-width:2px' : ''}">
-      <div style="display:flex;justify-content:space-between;align-items:baseline">
-        <b style="font-size:16px;font-family:Georgia,serif;color:var(--sindoor-deep)">${name}</b>
-        <b style="color:var(--sindoor)">${price}</b>
-      </div>
-      <ul class="feature-list" style="padding-left:18px;font-size:12.5px;color:var(--ink-mid);margin:8px 0">
-        ${features.map(f => `<li>${f}</li>`).join('')}
-      </ul>
+  const card = (id, name, tagline, features, popular) => `
+    <div class="plan-card${cur === id ? ' current' : ''}${popular ? ' popular' : ''}">
+      ${popular ? '<span class="plan-badge">Most chosen</span>' : ''}
+      <div class="plan-name">${name}</div>
+      <div class="plan-tagline">${tagline}</div>
+      <div class="plan-price"><span class="pp-amt">${p.sym}${priceOf(id)}</span><span class="pp-per">${per}</span></div>
+      <ul class="plan-features">${features.map(f => `<li>${esc(f)}</li>`).join('')}</ul>
       ${cur === id
-        ? `<span class="tag forest">Current plan${until && id !== 'free' ? ' · until ' + until : ''}</span>`
-        : buy ? `<button class="btn small" onclick="buyTier('${buy}')">Upgrade</button>` : ''}
+        ? `<span class="tag forest">Current plan${until ? ' · until ' + until : ''}</span>`
+        : `<button class="btn plan-cta" onclick="buyTier('${purposeOf(id)}')">Choose ${name.replace('Sambandh ', '')}</button>`}
     </div>`;
 
-  const g = u.profile?.gender;
-  const p = pricingView();
-  const baseFee = `${p.sym}${p.base[g] ?? p.base.non_binary}`;
-  return card('base', 'Base membership', `${baseFee}/month`, [
-    `Nothing is free — every member subscribes (men ${p.sym}${p.base.male} · women ${p.sym}${p.base.female} · non-binary ${p.sym}${p.base.non_binary} per month)`,
-    'Fully verified, photo-verified community',
-    'Daily allowance: 10 msgs men · 20 msgs women, non-binary & others',
-    'Full Lakshan Book, compatibility & discover'
-  ], 'base_subscription')
-  + card('pro', 'Sambandh Pro', `${p.sym}${p.pro}/month`, [
-    'Unlimited messages & new chats',
-    'No daily limits, ever',
-    'Includes everything in Base'
-  ], 'pro_subscription')
-  + card('max', 'Sambandh Max', `${p.sym}${p.max}/month`, [
-    'Everything in Pro (unlimited messaging)',
-    'See exactly who liked you',
-    'Advanced filters (Lakshan grade)',
-    'Priority verification & support'
-  ], 'max_subscription');
+  return `<div class="billing-toggle" role="group" aria-label="Billing period">
+      <button type="button" class="${!annual ? 'on' : ''}" onclick="setBilling('monthly')">Monthly</button>
+      <button type="button" class="${annual ? 'on' : ''}" onclick="setBilling('annual')">Annual <span class="save">save ~20%</span></button>
+    </div>
+    <div class="plan-grid">`
+    + card('base', 'Sambandh Essential', 'Everything you need to meet honestly.', [
+        'Full verification & a photo-verified community',
+        'The Lakshan Book & real-time safety alerts',
+        'Astrology & compatibility insights',
+        'Connect and message without the noise'
+      ], false)
+    + card('pro', 'Sambandh Plus', 'For members who want to reach further.', [
+        'Communicate without daily limits',
+        'Greater visibility among compatible, verified members',
+        'Everything in Essential'
+      ], true)
+    + card('max', 'Sambandh Signature', 'A higher level of service — not just more features.', [
+        'Enhanced compatibility insights',
+        'Advanced discovery controls',
+        'See who values your profile',
+        'Priority support & early access to new experiences'
+      ], false)
+    + `</div>
+    <div class="plan-trust">Cancel anytime · Secure payments · Verified members only · No hidden charges · Privacy-first</div>
+    <p class="plan-philosophy">Membership supports a safer, verified relationship community — not advertising or engagement tricks.</p>`;
 }
 
 async function buyTier(purpose) {
   const p = pricingView();
-  const name = purpose === 'max_subscription' ? `Sambandh Max (${p.sym}${p.max}/month)`
-    : purpose === 'pro_subscription' ? `Sambandh Pro (${p.sym}${p.pro}/month)`
-    : 'Base membership (monthly, priced by your profile)';
-  if (!confirm(`Subscribe to ${name}? 30 days from today.`)) return;
+  const annual = purpose.endsWith('_annual');
+  const stem = purpose.replace(/_(subscription|annual)$/, '');
+  const label = stem === 'max' ? 'Sambandh Signature' : stem === 'pro' ? 'Sambandh Plus' : 'Sambandh Essential';
+  const price = annual ? (p.annual?.[stem] ?? '') : (stem === 'base' ? (p.base[S.user.profile?.gender] ?? p.base.male) : p[stem]);
+  const per = annual ? 'year' : 'month';
+  const name = `${label} (${p.sym}${price}/${per})`;
+  if (!confirm(`Subscribe to ${name}? ${annual ? '365' : '30'} days from today.`)) return;
   try {
     const order = await api('/payment/create-order', { method: 'POST', body: { purpose } });
     if (order.devMode) {

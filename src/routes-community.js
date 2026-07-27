@@ -35,7 +35,7 @@ async function requireMember(req, res, next) {
     if (!user) return res.status(401).json({ error: 'Not found' });
     if (user.status?.banned || user.status?.suspended) return res.status(403).json({ error: 'Account not eligible.' });
     if (!user.verification?.selfieVerified) return res.status(403).json({ error: 'Complete photo verification to join the community.' });
-    if (!user.membership?.joinFeePaid) return res.status(403).json({ error: 'An active membership is required to join the community (from CHF 1/month).' });
+    if (!user.membership?.joinFeePaid) return res.status(403).json({ error: 'An active membership is required to join the community (CHF 5/month).' });
     req.member = user;
     next();
   } catch (e) { next(e); }

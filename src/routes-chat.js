@@ -133,7 +133,7 @@ router.post('/start', requireAuth, requireLaunched, async (req, res, next) => {
       return res.status(403).json({ error: 'Both users must complete photo verification first' });
     }
     if (!me.membership.joinFeePaid) {
-      return res.status(403).json({ error: 'An active membership is required to chat (from CHF 1/month)' });
+      return res.status(403).json({ error: 'An active membership is required to chat (CHF 5/month)' });
     }
     if (me.status?.suspended) return res.status(403).json({ error: 'Account suspended' });
 

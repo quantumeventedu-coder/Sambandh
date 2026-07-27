@@ -171,20 +171,36 @@
   .step h4{font-size:16px;color:var(--deep);margin-bottom:6px}.step p{font-size:13.5px;color:var(--mut)}
 
   /* Pricing */
-  .prices{display:grid;grid-template-columns:repeat(3,1fr);gap:22px}
-  @media(max-width:860px){.prices{grid-template-columns:1fr}}
-  .price{background:#fff;border-radius:20px;padding:32px 28px;border:1px solid var(--line);position:relative;transition:transform .2s ease,box-shadow .2s ease;box-shadow:0 2px 8px rgba(75,21,40,.05)}
-  .price:hover{transform:translateY(-4px);box-shadow:0 18px 40px rgba(75,21,40,.10)}
-  .price.pop{background:linear-gradient(160deg,var(--deep),var(--deeper));color:#fff;box-shadow:0 30px 70px rgba(75,21,40,.35)}
-  .price.pop .amt{color:#fff}.price.pop .per,.price.pop li{color:rgba(255,255,255,.82)}
-  .price .tag{position:absolute;top:-12px;left:28px;background:var(--haldi);color:var(--deep);font-size:11px;font-weight:800;padding:4px 12px;border-radius:999px}
-  .price h3{font-size:18px;color:var(--deep);margin-bottom:6px}.price.pop h3{color:#fff}
-  .price .amt{font-family:Georgia,serif;font-size:40px;color:var(--deep)}
-  .price .per{font-size:13px;color:var(--mut)}
-  .price ul{list-style:none;margin:18px 0 22px;display:flex;flex-direction:column;gap:10px}
-  .price li{font-size:14px;display:flex;gap:9px;align-items:flex-start}
-  .price li svg{width:16px;height:16px;flex:0 0 16px;color:var(--forest);margin-top:2px}
-  .price.pop li svg{color:var(--haldi)}
+  /* Premium pricing — calm, minimal, trust-forward (Apple/Linear register).
+     One dominant price, generous whitespace, hairline elevation; the "most chosen"
+     plan lifts and gains a subtle border rather than a heavy dark fill. */
+  .price-lead{max-width:600px;margin-left:auto;margin-right:auto}
+  .bill-toggle{display:inline-flex;gap:3px;padding:5px;margin:28px auto 4px;border:1px solid var(--line);border-radius:999px;background:#fff;box-shadow:0 2px 8px rgba(75,21,40,.05)}
+  .bill-toggle button{font:inherit;font-size:14px;font-weight:700;color:var(--mut);background:transparent;border:0;padding:9px 22px;border-radius:999px;cursor:pointer;transition:background .2s,color .2s;display:inline-flex;align-items:center;gap:8px}
+  .bill-toggle button.on{background:var(--deep);color:#fff}
+  .bill-toggle .save{font-size:11px;font-weight:700;color:var(--forest);background:rgba(8,80,65,.1);padding:2px 8px;border-radius:999px}
+  .bill-toggle button.on .save{color:var(--deep);background:var(--haldi)}
+  .prices{display:grid;grid-template-columns:repeat(3,1fr);gap:26px;margin-top:36px;align-items:start}
+  @media(max-width:860px){.prices{grid-template-columns:1fr;max-width:430px;margin-left:auto;margin-right:auto}}
+  .price{background:#fff;border-radius:22px;padding:40px 32px;border:1px solid var(--line);position:relative;transition:transform .25s ease,box-shadow .25s ease}
+  .price:hover{transform:translateY(-4px);box-shadow:0 20px 44px rgba(75,21,40,.09)}
+  .price.pop{border-color:rgba(153,53,86,.30);box-shadow:0 20px 50px rgba(75,21,40,.12)}
+  @media(min-width:861px){.price.pop{transform:translateY(-12px)}.price.pop:hover{transform:translateY(-16px)}}
+  .price .tag{position:absolute;top:-12px;left:50%;transform:translateX(-50%);background:linear-gradient(135deg,#ffd97a,var(--haldi));color:var(--deep);font-size:11px;font-weight:800;letter-spacing:.03em;text-transform:uppercase;padding:5px 14px;border-radius:999px;white-space:nowrap}
+  .price h3{font-family:Georgia,serif;font-size:22px;color:var(--deep);margin-bottom:4px}
+  .price .plan-sub{font-size:12.5px;color:var(--mut);margin-bottom:24px;min-height:34px;line-height:1.4}
+  .price .amt{font-family:Georgia,serif;font-size:54px;line-height:1;color:var(--deep);letter-spacing:-1px}
+  .price .per{font-size:13px;color:var(--mut);margin-top:9px;letter-spacing:.2px}
+  .price ul{list-style:none;margin:28px 0 30px;display:flex;flex-direction:column;gap:14px}
+  .price li{font-size:14px;line-height:1.5;display:flex;gap:10px;align-items:flex-start;color:var(--ink)}
+  .price li svg{width:16px;height:16px;flex:0 0 16px;color:var(--forest);margin-top:3px}
+  .price .btn{width:100%;justify-content:center;padding:15px 26px;font-size:15px;letter-spacing:.2px;box-shadow:none}
+  .price .btn.outline{background:transparent;border:1px solid rgba(75,21,40,.28);color:var(--deep)}
+  .price .btn.outline:hover{background:var(--deep);color:#fff;border-color:var(--deep)}
+  .trust-row{display:flex;flex-wrap:wrap;justify-content:center;gap:10px 24px;margin-top:44px}
+  .trust-row span{font-size:13px;color:var(--mut);display:inline-flex;align-items:center;gap:7px}
+  .trust-row span::before{content:"✓";color:var(--forest);font-weight:800}
+  .price-philosophy{max-width:56ch;margin:18px auto 0;text-align:center;font-size:13.5px;color:var(--mut);font-style:italic;line-height:1.6}
 
   /* Final CTA */
   .final{background:radial-gradient(120% 140% at 50% 0%,#7e2a47,var(--sindoor) 45%,var(--deep));color:#fff;text-align:center;
@@ -241,21 +257,21 @@
         <div class="m reveal d2"><b data-count="8">0</b><span>compatibility signals</span></div>
       </div>
     </div>
-    <div class="stage">
-      <div class="pcard main">
-        <div class="ph">
-          <span class="chip tl">DATING</span>
-          <span class="chip tr">✓ VERIFIED</span>
-          <div class="ini">P</div>
-          <div class="info">
-            <div class="nm">Priya, 26</div>
-            <div class="mt">📍 Bengaluru · 4 km · <i style="width:7px;height:7px;border-radius:50%;background:#4ADE80;display:inline-block"></i></div>
-            <div class="why">✦ Likely to like you back · Strong compatibility</div>
-          </div>
-        </div>
+    <div class="stage nd-stage">
+      <div id="nd-toggle" role="group" aria-label="Preview the dial for a woman or a man">
+        <button type="button" data-p="woman" class="on">Woman</button>
+        <button type="button" data-p="man">Man</button>
       </div>
-      <div class="gauge"><div class="num">94</div><div class="grade">A</div><div class="lbl">Lakshan score</div></div>
-      <div class="float2"><span class="dot">✓</span> Photo-verified, real person</div>
+      <div class="nd-frame crop">
+        <img id="nd-scene" width="1200" height="770" loading="eager" decoding="async"
+             src="/dial-scene-woman.jpg?v=2"
+             alt="A member's nature unfolds as glass facet cards around them, on a glowing gold dial"/>
+      </div>
+      <div class="nd-badges">
+        <span class="nd-badge-fact">✓ Identity is what we verify (photo + ID)</span>
+        <span class="nd-badge-read">✦ Nature is a reading we offer</span>
+      </div>
+      <div class="nd-note">Illustrative preview — not a real member.</div>
     </div>
   </div>
 </section>
@@ -279,7 +295,7 @@
     <p class="lead reveal">Nine things dating apps quietly skip — done properly, and honestly.</p>
     <div class="grid" style="text-align:left">
       <div class="feat reveal tilt"><span class="num">01</span><div class="ic rose">🛡️</div><h3>Everyone is verified</h3><p>A <b>live selfie face-check</b> — our own tech, right in your browser — confirms every member is a real, unique person, and becomes their first photo. Add a government ID or a registry-checked profession (doctors, lawyers, CAs, architects) for extra trust badges. Aadhaar numbers are never stored.</p></div>
-      <div class="feat reveal tilt d1"><span class="num">02</span><div class="ic gold">💳</div><h3>Nothing is free</h3><p>Membership is monthly — <b>CHF 1 men · CHF 5 women · CHF 3 non-binary</b>. It's a bot barrier that keeps the community real — bots and time-wasters don't pay.</p></div>
+      <div class="feat reveal tilt d1"><span class="num">02</span><div class="ic gold">💳</div><h3>Nothing is free</h3><p>Membership is monthly — <b>CHF 5 for everyone</b>, one transparent price. It's a bot barrier that keeps the community real — bots and time-wasters don't pay.</p></div>
       <div class="feat reveal tilt d2"><span class="num">03</span><div class="ic green">📖</div><h3>The Lakshan Book</h3><p>An AI honesty engine scores every member <b>0–100</b>. It reads what people <i>claim</i> and checks it against what they actually <i>do</i>. First slip: a private nudge. Repeat patterns: visible flags. Honesty heals — <b>+1 Lakshan per 30 clean days</b>.</p></div>
       <div class="feat reveal tilt"><span class="num">04</span><div class="ic violet">👁️</div><h3>Evidence, with guard-rails</h3><p>See a flag on a profile? Pay <b>CHF 0.50–1</b> to read the anonymised statements behind it. The flagged person learns <i>someone</i> looked — never who. Capped at 3/day. <b>Fraud &amp; safety alerts are always free.</b></p></div>
       <div class="feat reveal tilt d1"><span class="num">05</span><div class="ic gold">🎯</div><h3>Say what you want</h3><p>Four explicit intents — <b>marriage, dating, casual, friendship</b> (pick up to two). You only ever see people whose intent overlaps yours. No more mismatched expectations.</p></div>
@@ -327,49 +343,36 @@
   </div>
 </section>
 
-<!-- THE NATURE DIAL — showcase. Uses the finished design scenes directly
-     (public/dial-scene-woman.jpg / dial-scene-man.jpg); the toggle swaps them.
-     No CSS re-creation — the picture IS the design. External images, lazy-loaded. -->
+<!-- Nature Dial styles — the finished design scene IS the hero visual (see .stage.nd-stage).
+     The toggle swaps woman/man; the frame crops the baked-in preview chrome off the
+     woman scene ("Tips to use the dial" + icons). The man scene has no chrome. -->
 <style>
-  #nature-dial{background:radial-gradient(80% 60% at 50% 26%,#3b1526 0%,#1c0f1a 52%,#120a10 100%);color:#f3e9ec;padding:54px 0 58px;overflow:hidden;text-align:center}
-  #nature-dial .eyebrow{color:var(--haldi);font-size:12px;font-weight:800;letter-spacing:.34em;text-transform:uppercase}
-  #nature-dial h2{color:#fff;font-size:clamp(28px,4.4vw,48px);margin:8px 0 6px;line-height:1.06}
-  #nature-dial .sub{color:#cab2bc;max-width:560px;margin:0 auto;font-size:15px}
-  #nd-toggle{display:inline-flex;gap:2px;background:rgba(18,10,8,.72);border:1px solid rgba(243,193,75,.32);border-radius:99px;padding:5px;margin:16px 0 2px}
+  #nd-toggle{display:inline-flex;gap:2px;background:rgba(18,10,8,.72);border:1px solid rgba(243,193,75,.32);border-radius:99px;padding:5px}
   #nd-toggle button{font:inherit;font-size:13.5px;font-weight:700;color:#d9c2cb;background:transparent;border:0;padding:8px 20px;border-radius:99px;cursor:pointer;transition:.2s}
   #nd-toggle button.on{background:linear-gradient(135deg,#ffd97a,var(--haldi));color:var(--deep)}
-  #nd-scene{display:block;width:min(780px,96%);height:auto;margin:8px auto 0;border-radius:16px;box-shadow:0 30px 80px rgba(0,0,0,.5)}
-  #nd-foot{color:#9c8590;font-size:12.5px;margin-top:20px}
-  #nd-foot .pv{margin-top:9px;display:flex;gap:10px;justify-content:center;flex-wrap:wrap}
+  #nd-toggle button:hover:not(.on){color:#fff}
+  .nd-stage{position:relative;height:auto;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px}
+  .nd-frame{position:relative;width:100%;max-width:470px;border-radius:18px;overflow:hidden;line-height:0;box-shadow:0 34px 80px rgba(0,0,0,.5),0 0 0 1px rgba(243,193,75,.14)}
+  #nd-scene{display:block;width:100%;height:auto;margin-bottom:var(--nd-crop,0)}
+  .nd-frame.crop{--nd-crop:-4.2%}          /* clip ~50px of baked-in bottom chrome off the woman scene */
+  .nd-badges{display:flex;gap:8px;justify-content:center;flex-wrap:wrap}
   .nd-badge-fact{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:800;color:#69d18e;background:rgba(31,122,77,.18);border:1px solid rgba(63,191,114,.5);border-radius:99px;padding:5px 13px}
   .nd-badge-read{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:800;color:#e7c04f;background:rgba(243,193,75,.12);border:1px solid rgba(243,193,75,.4);border-radius:99px;padding:4px 11px}
+  .nd-note{color:rgba(255,255,255,.5);font-size:11.5px;letter-spacing:.2px}
 </style>
-<section id="nature-dial">
-  <div class="wrap">
-    <div class="eyebrow">The Nature Dial</div>
-    <h2 class="serif">Turn the dial. See who they are.</h2>
-    <p class="sub">Each facet unfolds a part of who they are — in plain words, never jargon.</p>
-    <div id="nd-toggle">
-      <button type="button" data-p="woman" class="on">Woman</button>
-      <button type="button" data-p="man">Man</button>
-    </div>
-    <img id="nd-scene" alt="The Nature Dial — a member's nature unfolds in glass facet cards around them, on a glowing gold dial"
-         width="780" loading="lazy" decoding="async" src="/dial-scene-woman.jpg?v=2"/>
-    <div id="nd-foot">
-      Inside Sambandh this runs on a real member's photo and reading — this is a preview, not a real person.
-      <div class="pv"><span class="nd-badge-fact">✓ Identity is what we verify (photo + ID)</span>
-        <span class="nd-badge-read">✦ Nature is a reading we offer</span></div>
-    </div>
-  </div>
-</section>
 <script>
 (function(){
   var SCENE={woman:'/dial-scene-woman.jpg?v=2', man:'/dial-scene-man.jpg?v=2'};
+  var SIZE={woman:[1200,770], man:[1000,1025]};
   var img=document.getElementById('nd-scene');
+  var frame=document.querySelector('.nd-frame');
   Array.prototype.forEach.call(document.querySelectorAll('#nd-toggle button'),function(b){
     b.addEventListener('click',function(){
       Array.prototype.forEach.call(document.querySelectorAll('#nd-toggle button'),function(x){x.classList.remove('on')});
-      b.classList.add('on'); if(img){ img.src=SCENE[b.getAttribute('data-p')]||SCENE.woman; }
+      b.classList.add('on');
+      var p=b.getAttribute('data-p')||'woman';
+      if(img){ img.src=SCENE[p]||SCENE.woman; if(SIZE[p]){ img.width=SIZE[p][0]; img.height=SIZE[p][1]; } }
+      if(frame){ frame.classList.toggle('crop', p==='woman'); }  /* only the woman scene has baked-in chrome */
     });
   });
 })();
@@ -378,46 +381,62 @@
 <!-- PRICING -->
 <section class="block" id="pricing">
   <div class="wrap center">
-    <div class="kicker reveal">Pricing</div>
+    <div class="kicker reveal">Membership</div>
     <h2 class="reveal">Monthly. Honest. No games.</h2>
-    <p class="lead reveal">A small monthly fee keeps the bots and time-wasters out. Your base price is set by your verified profile.</p>
+    <p class="lead reveal price-lead">One transparent price for everyone. You're paying for a safer, verified relationship community — not boosts, ads, or addictive mechanics.</p>
+
+    <div class="bill-toggle reveal" role="group" aria-label="Billing period">
+      <button type="button" data-bill="monthly" class="on" onclick="setBill('monthly')">Monthly</button>
+      <button type="button" data-bill="annual" onclick="setBill('annual')">Annual <span class="save">save ~20%</span></button>
+    </div>
+
     <div class="prices" style="text-align:left">
       <div class="price reveal">
-        <h3>Base membership</h3>
-        <div class="amt">CHF 1–5<span class="per"> / month</span></div>
-        <div class="per">Men CHF 1 · Women CHF 5 · Non-binary CHF 3</div>
+        <h3>Sambandh Essential</h3>
+        <div class="plan-sub">Everything you need to meet honestly.</div>
+        <div class="amt" data-m="CHF 5" data-a="CHF 48">CHF 5</div>
+        <div class="per" data-m="per month" data-a="per year · CHF 4/mo">per month</div>
         <ul>
-          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 6L9 17l-5-5"/></svg> Full verified access</li>
-          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 6L9 17l-5-5"/></svg> Lakshan Book + safety alerts</li>
-          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 6L9 17l-5-5"/></svg> Astrology + compatibility</li>
-          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 6L9 17l-5-5"/></svg> Priority support</li>
+          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 6L9 17l-5-5"/></svg> Full verification &amp; a photo-verified community</li>
+          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 6L9 17l-5-5"/></svg> The Lakshan Book &amp; real-time safety alerts</li>
+          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 6L9 17l-5-5"/></svg> Astrology &amp; compatibility insights</li>
+          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 6L9 17l-5-5"/></svg> Connect and message without the noise</li>
         </ul>
-        <a href="/app" class="btn primary" style="width:100%;justify-content:center">Get started</a>
+        <a href="/app" class="btn outline">Get started</a>
       </div>
       <div class="price pop reveal d1">
-        <span class="tag">Most popular</span>
-        <h3>Sambandh Pro</h3>
-        <div class="amt">CHF 6<span class="per"> / month</span></div>
-        <div class="per">Everything in Base, plus</div>
+        <span class="tag">Most chosen</span>
+        <h3>Sambandh Plus</h3>
+        <div class="plan-sub">For members who want to reach further.</div>
+        <div class="amt" data-m="CHF 12" data-a="CHF 120">CHF 12</div>
+        <div class="per" data-m="per month" data-a="per year · CHF 10/mo">per month</div>
         <ul>
-          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 6L9 17l-5-5"/></svg> Unlimited messaging</li>
-          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 6L9 17l-5-5"/></svg> Unlimited anonymous chats</li>
-          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 6L9 17l-5-5"/></svg> Priority in discovery</li>
+          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 6L9 17l-5-5"/></svg> Communicate without daily limits</li>
+          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 6L9 17l-5-5"/></svg> Greater visibility among compatible, verified members</li>
+          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 6L9 17l-5-5"/></svg> Everything in Essential</li>
         </ul>
-        <a href="/app" class="btn gold" style="width:100%;justify-content:center">Go Pro</a>
+        <a href="/app" class="btn gold">Choose Plus</a>
       </div>
       <div class="price reveal d2">
-        <h3>Sambandh Max</h3>
-        <div class="amt">CHF 15<span class="per"> / month</span></div>
-        <div class="per">Everything in Pro, plus</div>
+        <h3>Sambandh Signature</h3>
+        <div class="plan-sub">A higher level of service — not just more features.</div>
+        <div class="amt" data-m="CHF 25" data-a="CHF 240">CHF 25</div>
+        <div class="per" data-m="per month" data-a="per year · CHF 20/mo">per month</div>
         <ul>
-          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 6L9 17l-5-5"/></svg> See who liked you</li>
-          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 6L9 17l-5-5"/></svg> Filter by Lakshan grade</li>
-          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 6L9 17l-5-5"/></svg> Top priority everywhere</li>
+          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 6L9 17l-5-5"/></svg> Enhanced compatibility insights</li>
+          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 6L9 17l-5-5"/></svg> Advanced discovery controls</li>
+          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 6L9 17l-5-5"/></svg> Priority concierge support</li>
+          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 6L9 17l-5-5"/></svg> Early access to new experiences</li>
         </ul>
-        <a href="/app" class="btn primary" style="width:100%;justify-content:center">Go Max</a>
+        <a href="/app" class="btn outline">Choose Signature</a>
       </div>
     </div>
+
+    <div class="trust-row reveal">
+      <span>Cancel anytime</span><span>Secure payments</span><span>Verified members only</span>
+      <span>No hidden charges</span><span>Privacy-first</span>
+    </div>
+    <p class="price-philosophy reveal">Membership supports a safer, verified relationship community — not advertising or engagement tricks.</p>
   </div>
 </section>
 
@@ -477,6 +496,16 @@
     });
     card.addEventListener('pointerleave', () => { card.style.transform = ''; });
   });
+
+  // ---- Pricing: monthly / annual toggle (presentational — real purchase happens in-app) ----
+  window.setBill = function (mode) {
+    document.querySelectorAll('.bill-toggle button').forEach(b =>
+      b.classList.toggle('on', b.getAttribute('data-bill') === mode));
+    document.querySelectorAll('#pricing .amt, #pricing .per').forEach(el => {
+      const v = el.getAttribute(mode === 'annual' ? 'data-a' : 'data-m');
+      if (v != null) el.textContent = v;
+    });
+  };
 
   if (location.hash && location.hash.startsWith('#/')) location.replace('/app' + location.hash);
   try {

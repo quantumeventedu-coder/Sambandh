@@ -4,12 +4,13 @@
 // "negative control" tests, which prove the harness itself detects escalation).
 //
 // Two invariants are load-bearing:
-//   1. PRICE IS SERVER-SIDE — gender comes from the DB, never the request. Female
-//      pays CHF 5, male CHF 1; a caller must not be able to claim a cheaper gender.
+//   1. PRICE IS SERVER-SIDE — the amount is computed on the server from the stored
+//      user, never taken from the request. Base is a single flat CHF 5 for everyone;
+//      a caller must not be able to substitute a cheaper amount via the request body.
 //   2. PURPOSE IS SERVER-SIDE — /verify reads what was bought from the order row
 //      written at create-order time, never from req.body. The Razorpay signature
 //      covers order_id|payment_id ONLY, so a body-trusted purpose lets someone pay
-//      CHF 1 for base and claim max (CHF 15).
+//      CHF 5 for base and claim max (CHF 25).
 
 const express = require('express');
 const request = require('supertest');
@@ -72,26 +73,26 @@ const sign = (orderId, paymentId) => crypto
   .createHmac('sha256', process.env.RAZORPAY_KEY_SECRET)
   .update(orderId + '|' + paymentId).digest('hex');
 
-describe('INVARIANT 1 — price is computed server-side from the stored gender', () => {
-  test('male base_subscription is CHF 1', async () => {
+describe('INVARIANT 1 — the amount is computed server-side, never from the request', () => {
+  test('base_subscription is a flat CHF 5 for a male member', async () => {
     await mkUser('male');
     const r = await request(app).post('/payment/create-order').send({ purpose: 'base_subscription' });
     expect(r.status).toBe(200);
-    expect(r.body.amountCHF).toBe(1);
+    expect(r.body.amountCHF).toBe(5);
   });
 
-  test('female base_subscription is CHF 5', async () => {
+  test('base_subscription is the same flat CHF 5 for a female member (no gender differential)', async () => {
     await mkUser('female');
     const r = await request(app).post('/payment/create-order').send({ purpose: 'base_subscription' });
     expect(r.body.amountCHF).toBe(5);
   });
 
-  // The attack: a female user claims to be male to pay CHF 1 instead of CHF 5.
-  test('a gender in the REQUEST BODY is ignored — DB gender wins', async () => {
+  // The attack: a caller puts a cheaper amount in the body and hopes it is trusted.
+  test('an amount in the REQUEST BODY is ignored — the server prices it', async () => {
     await mkUser('female');
     const r = await request(app).post('/payment/create-order')
       .send({ purpose: 'base_subscription', gender: 'male', amount: 1, amountCHF: 1 });
-    expect(r.body.amountCHF).toBe(5);                       // not 1
+    expect(r.body.amountCHF).toBe(5);                       // not the 1 they sent
     const row = await Payment.findOne({ razorpayOrderId: 'order_live_TEST123' });
     expect(row.amountCHF).toBe(5);
     expect(row.metadata.gender).toBe('female');
@@ -124,7 +125,7 @@ describe('INVARIANT 2 — /verify takes the purpose from the ORDER, never the re
     const user = await User.findById(TEST_USER_ID);
     expect(user.membership.tier).toBe('base');               // NOT 'max'
     const row = await Payment.findOne({ razorpayOrderId: orderId });
-    expect(row.amountCHF).toBe(1);                           // they paid CHF 1 and got CHF 1 of value
+    expect(row.amountCHF).toBe(5);                           // they paid CHF 5 (base) and got CHF 5 of value
     expect(row.purpose).toBe('base_subscription');
   });
 
@@ -152,7 +153,32 @@ describe('INVARIANT 2 — /verify takes the purpose from the ORDER, never the re
     expect(r.body.purpose).toBe('max_subscription');
     const user = await User.findById(TEST_USER_ID);
     expect(user.membership.tier).toBe('max');
-    expect((await Payment.findOne({ razorpayOrderId: orderId })).amountCHF).toBe(15);
+    expect((await Payment.findOne({ razorpayOrderId: orderId })).amountCHF).toBe(25);
+  });
+});
+
+describe('annual billing — priced correctly and grants a full year', () => {
+  test('base_annual is CHF 48', async () => {
+    await mkUser('female');
+    const r = await request(app).post('/payment/create-order').send({ purpose: 'base_annual' });
+    expect(r.status).toBe(200);
+    expect(r.body.amountCHF).toBe(48);
+  });
+
+  test('a verified pro_annual purchase grants pro for ~365 days', async () => {
+    await mkUser('male');
+    await request(app).post('/payment/create-order').send({ purpose: 'pro_annual' });
+    const orderId = 'order_live_TEST123', paymentId = 'pay_live_annual';
+    const r = await request(app).post('/payment/verify').send({
+      razorpay_order_id: orderId, razorpay_payment_id: paymentId,
+      razorpay_signature: sign(orderId, paymentId)
+    });
+    expect(r.body.purpose).toBe('pro_annual');
+    const user = await User.findById(TEST_USER_ID);
+    expect(user.membership.tier).toBe('pro');
+    const days = (new Date(user.membership.tierExpiresAt).getTime() - Date.now()) / 86400000;
+    expect(days).toBeGreaterThan(360);
+    expect(days).toBeLessThan(370);
   });
 });
 
@@ -258,7 +284,11 @@ describe('pricing endpoint', () => {
     expect(r.body.currency).toBe('INR');
     expect(r.body.symbol).toBe('₹');
     expect(r.body.base.female).toBe(500);      // CHF 5 × 100
-    expect(r.body.base.yours).toBe(500);       // matches their stored gender
-    expect(r.body.max).toBe(1500);             // CHF 15 × 100
+    expect(r.body.base.yours).toBe(500);       // flat base — same for everyone
+    expect(r.body.pro).toBe(1200);             // CHF 12 × 100
+    expect(r.body.max).toBe(2500);             // CHF 25 × 100
+    expect(r.body.annual.base).toBe(4800);     // CHF 48 × 100
+    expect(r.body.annual.pro).toBe(12000);     // CHF 120 × 100
+    expect(r.body.annual.max).toBe(24000);     // CHF 240 × 100
   });
 });
