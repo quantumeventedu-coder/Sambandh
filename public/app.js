@@ -2328,7 +2328,7 @@ async function setup2FA() {
     const qr = 'https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=' + encodeURIComponent(r.otpauthUri);
     $('#twofa-card').innerHTML = `
       <b>Scan with your authenticator app</b>
-      <div style="text-align:center;margin:12px 0"><img alt="" src="${qr}" alt="2FA QR" style="border-radius:10px" onerror="this.style.display='none'"/></div>
+      <div style="text-align:center;margin:12px 0"><img src="${qr}" alt="Two-factor authentication setup QR code" style="border-radius:10px" onerror="this.style.display='none'"/></div>
       <p class="hint">Or enter this key manually: <b style="letter-spacing:1px">${esc(r.secret)}</b></p>
       <div class="field mt"><label>Enter the 6-digit code to confirm</label><input id="tf-code" class="otp-boxes" maxlength="6" inputmode="numeric" placeholder="••••••"/></div>
       <button class="btn forest" onclick="confirm2FA()">Confirm &amp; enable</button>
