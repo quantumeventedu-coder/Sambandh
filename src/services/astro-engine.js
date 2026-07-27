@@ -103,15 +103,30 @@ function dignity(name, sign) {
   return 'neutral';
 }
 
+// Coerce a coordinate to a finite number, or null if absent/blank/non-numeric.
+// Guards against birthPlace coords stored as strings/blank/NaN (e.g. from an older
+// client or an import): a non-finite ascendant must NEVER masquerade as a real Lagna,
+// or the downstream whole-sign house math turns NaN and detectYogas throws (a 500).
+function toFiniteNum(v) {
+  if (v === null || v === undefined || v === '') return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+// Run an interpretive layer, falling back to a default if it ever throws on odd data
+// (the factual planetary chart must never be lost to a rule-engine edge case).
+function safe(fn, fallback) { try { return fn(); } catch { return fallback; } }
+
 // ---- Ascendant (Lagna) ----
 function ascendant(jd, lat, lng) {
-  if (lat == null || lng == null) return null;
+  const la = toFiniteNum(lat), lo = toFiniteNum(lng);
+  if (la === null || lo === null) return null;
   const T = (jd - 2451545.0) / 36525;
   let gmst = 280.46061837 + 360.98564736629 * (jd - 2451545.0) + 0.000387933 * T * T;
   gmst = norm360(gmst);
-  const lst = norm360(gmst + lng);            // local sidereal time (deg)
+  const lst = norm360(gmst + lo);             // local sidereal time (deg)
   const eps = (23.4392911 - 0.0130042 * T) * DEG;
-  const ramc = lst * DEG, l = lat * DEG;
+  const ramc = lst * DEG, l = la * DEG;
   let asc = Math.atan2(Math.cos(ramc), -(Math.sin(ramc) * Math.cos(eps) + Math.tan(l) * Math.sin(eps))) * RAD;
   asc = norm360(asc);
   return norm360(asc - ayanamsa(jd));         // sidereal ascendant
@@ -121,7 +136,10 @@ function ascendant(jd, lat, lng) {
 function computeChart(astro) {
   if (!astro || !astro.birthDate) return null;
   const [hh, mm] = String(astro.birthTime || '12:00').split(':').map(Number);
-  const date = new Date(astro.birthDate + 'T00:00:00Z');
+  // birthDate is stored as 'YYYY-MM-DD', but tolerate a full ISO string or a Date
+  // object (older records / accidental Date coercion) by taking the calendar day.
+  const bdRaw = astro.birthDate instanceof Date ? astro.birthDate.toISOString() : String(astro.birthDate);
+  const date = new Date(bdRaw.slice(0, 10) + 'T00:00:00Z');
   if (isNaN(date)) return null;
   const hasBirthTime = !!astro.birthTime;
   const hourUT = ((hh || 12) + (mm || 0) / 60) - 5.5;   // treat local time as IST
@@ -130,8 +148,11 @@ function computeChart(astro) {
   const ay = ayanamsa(jd);
 
   const lat = astro.birthPlace?.lat, lng = astro.birthPlace?.lng;
+  // ascendant() returns null unless BOTH coords are finite, so ascLon is a finite
+  // number or null — never NaN. Guard with Number.isFinite so a bad coordinate can
+  // never produce a NaN "Lagna" that poisons the whole-sign house math.
   const ascLon = hasBirthTime ? ascendant(jd, lat, lng) : null;
-  const lagnaSign = ascLon != null ? Math.floor(ascLon / 30) : null;
+  const lagnaSign = Number.isFinite(ascLon) ? Math.floor(ascLon / 30) : null;
 
   const bodies = {};
   const rawTropical = {
@@ -166,15 +187,18 @@ function computeChart(astro) {
   const moon = bodies.Moon;
   const chart = {
     ayanamsa: +ay.toFixed(3), hasBirthTime,
-    lagna: ascLon != null ? { ...placement(ascLon) } : null,
+    lagna: Number.isFinite(ascLon) ? { ...placement(ascLon) } : null,
     chandraLagna: { sign: moon.sign, rashi: moon.rashi, signName: moon.signName },
     sunSign: bodies.Sun.signName, moonSign: moon.signName, moonRashi: moon.rashi,
     nakshatra: moon.nakshatra, nakshatraPada: moon.pada,
     planets: bodies
   };
-  chart.yogas = detectYogas(chart);
-  chart.doshas = detectDoshas(chart);
-  chart.dasha = vimshottari(moon.longitude, date);
+  // The factual chart (planets/signs) is always returned. The interpretive layers
+  // (yogas/doshas/dasha) are belief-system rules over that chart — if one ever hits
+  // unexpected data, degrade that layer gracefully rather than 500 the whole reading.
+  chart.yogas = safe(() => detectYogas(chart), []);
+  chart.doshas = safe(() => detectDoshas(chart), []);
+  chart.dasha = safe(() => vimshottari(moon.longitude, date), null);
   return chart;
 }
 
