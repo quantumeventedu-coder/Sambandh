@@ -182,6 +182,7 @@ async function renderCommerce() {
         <label>Postal code<input id="bz-postal" value="${esc(BIZ.postalCode || '')}"/></label>
         <label>Country<input id="bz-country" value="${esc(BIZ.country || 'IN')}"/></label>
         <label>Invoice prefix<input id="bz-prefix" value="${esc(BIZ.invoicePrefix || 'SB')}"/></label>
+        <label>Default SAC code<input id="bz-sac" value="${esc(BIZ.sacCode || '')}" placeholder="e.g. 998439"/></label>
         <label>Email<input id="bz-email" value="${esc(BIZ.email || '')}"/></label>
         <label>Phone<input id="bz-phone" value="${esc(BIZ.phone || '')}"/></label>
       </div>
@@ -220,7 +221,7 @@ async function saveBusiness() {
     addressLines: [$('#bz-addr1').value, $('#bz-addr2').value].filter(x => x.trim()),
     city: $('#bz-city').value, state: $('#bz-state').value, stateCode: $('#bz-statecode').value,
     postalCode: $('#bz-postal').value, country: $('#bz-country').value, invoicePrefix: $('#bz-prefix').value,
-    email: $('#bz-email').value, phone: $('#bz-phone').value,
+    sacCode: $('#bz-sac').value, email: $('#bz-email').value, phone: $('#bz-phone').value,
   };
   try { await apiPut('/business', b); toast('Business details saved ✓'); }
   catch (e) { toast(e.message); }
@@ -734,7 +735,7 @@ async function renderCoupons() {
       <td>${esc(c.perUserLimit)}/user</td>
       <td>${c.expiresAt ? esc(new Date(c.expiresAt).toISOString().slice(0,10)) : '—'}</td>
       <td>${c.active ? '<span class="pill g">active</span>' : '<span class="pill r">off</span>'}</td>
-      <td><button onclick="toggleCoupon('${esc(c.id)}', ${c.active?'false':'true'})">${c.active?'Disable':'Enable'}</button></td>
+      <td style="white-space:nowrap"><button onclick="showRedemptions('${esc(c.id)}','${esc(c.code)}')">Uses</button> <button onclick="toggleCoupon('${esc(c.id)}', ${c.active?'false':'true'})">${c.active?'Disable':'Enable'}</button></td>
     </tr>`).join('');
   $('#view').innerHTML = `
     <div class="card">
@@ -794,6 +795,22 @@ async function createCoupon() {
 async function toggleCoupon(id, active) {
   try { await apiPatch('/coupons/'+id, { active }); toast(active?'Enabled ✓':'Disabled'); renderCoupons(); }
   catch (e) { toast(e.message); }
+}
+async function showRedemptions(id, code) {
+  let data = { redemptions: [] };
+  try { data = await api('/coupons/' + id + '/redemptions'); } catch (e) { toast(e.message); return; }
+  const rows = data.redemptions.map(r => `<tr style="border-top:1px solid var(--line)">
+    <td style="padding:6px 8px;font-family:monospace;font-size:11px">…${esc(String(r.userId).slice(-8))}</td>
+    <td>${esc((r.purpose||'').replace(/_/g,' '))}</td>
+    <td>${r.discountLocal!=null ? esc(r.currency||'')+' '+esc(r.discountLocal) : 'CHF '+esc(r.discountCHF||0)}</td>
+    <td>${r.at ? esc(new Date(r.at).toISOString().slice(0,16).replace('T',' ')) : ''}</td></tr>`).join('');
+  $('#view').innerHTML = `<div class="card">
+    <div class="row" style="justify-content:space-between;align-items:center"><h3 style="font-family:Georgia,serif;margin:0">Redemptions · ${esc(code)}</h3><button onclick="show('coupons')">← Back</button></div>
+    <p style="color:#888;font-size:13px;margin:6px 0">${data.redemptions.length} redemption${data.redemptions.length===1?'':'s'} · newest first.</p>
+    <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:13px">
+      <tr style="text-align:left;color:var(--mut)"><th style="padding:6px 8px">User</th><th>For</th><th>Discount</th><th>When (UTC)</th></tr>
+      ${rows || '<tr><td colspan="4" style="padding:10px;color:var(--mut)">No redemptions yet.</td></tr>'}
+    </table></div></div>`;
 }
 
 fetch('/health').then(r=>r.json()).then(h => {

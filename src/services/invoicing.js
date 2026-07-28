@@ -24,6 +24,9 @@ const DEFAULT_BUSINESS = {
   legalName: '', tradeName: 'Sambandh', gstin: '', pan: '',
   addressLines: /** @type {string[]} */ ([]), city: '', state: '', stateCode: '',
   country: 'IN', postalCode: '', email: '', phone: '', invoicePrefix: 'SB',
+  // Default SAC (Services Accounting Code) shown on invoice lines. 998439 = "Other on-line
+  // content n.e.c." — a common OIDAR/digital-services code; the operator sets their own.
+  sacCode: '998439',
 };
 
 /** The super-admin business details used on invoices (merged over defaults). */
@@ -36,7 +39,7 @@ async function getBusiness() {
 async function updateBusiness(patch) {
   const cur = await getBusiness();
   const p = patch || {};
-  const str = ['legalName', 'tradeName', 'gstin', 'pan', 'city', 'state', 'stateCode', 'country', 'postalCode', 'email', 'phone', 'invoicePrefix'];
+  const str = ['legalName', 'tradeName', 'gstin', 'pan', 'city', 'state', 'stateCode', 'country', 'postalCode', 'email', 'phone', 'invoicePrefix', 'sacCode'];
   /** @type {Record<string, any>} */
   const next = { ...cur };
   for (const k of str) if (p[k] !== undefined) next[k] = String(p[k] ?? '').slice(0, 200);
@@ -161,8 +164,10 @@ function buildReceipt(payment, user, business) {
     },
     items: [{
       description: describe(payment.purpose) + (md.couponCode ? ` (coupon ${md.couponCode})` : ''),
-      gross: grossBase, discount, taxableValue: taxableBase,
+      sac: business.sacCode || '', gross: grossBase, discount, taxableValue: taxableBase,
     }],
+    placeOfSupply: custState || (user && user.profile && user.profile.country) || business.state || '',
+    reverseCharge: 'No',
     taxLines, taxTotal, taxable: isTopup ? false : taxTotal > 0,
     gatewayFee, gatewayFeeNote: gatewayFee > 0 ? 'Payment-gateway processing fee (not a taxable supply)' : '',
     total,

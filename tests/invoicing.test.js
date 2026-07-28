@@ -85,6 +85,14 @@ describe('buildReceipt — faithful to the charged breakdown', () => {
     expect(r.seller.gstin).toBe('27ABCDE1234F1Z5');
   });
 
+  test('shows SAC code, place of supply, and reverse-charge status', async () => {
+    const p = await capturedSub(); await invoicing.assignInvoice(p);
+    const r = invoicing.buildReceipt(await Payment.findById(p._id), { profile: { firstName: 'A', country: 'IN', state: 'Karnataka' } }, await invoicing.getBusiness());
+    expect(r.items[0].sac).toBe('998439');       // default SAC, editable per business
+    expect(r.placeOfSupply).toBe('Karnataka');
+    expect(r.reverseCharge).toBe('No');
+  });
+
   test('a wallet top-up is a non-taxable receipt', async () => {
     const p = await capturedSub({ purpose: 'wallet_topup', metadata: { topupAmount: 1000, gatewayFee: 27, total: 1027, currency: 'INR', symbol: '₹' } });
     await invoicing.assignInvoice(p);
