@@ -17,6 +17,7 @@ const Verification = require('./models/Verification');
 const User = require('./models/User');
 const Notification = require('./models/Notification');
 const { requireAuth, requireAdmin } = require('./routes-auth');
+const crypto = require('crypto');
 const { uploadToR2 } = require('./services/storage');
 const { decideIdDocument, decideSelfie, decideClaimDocument } = require('./services/verify-engine');
 const { track } = require('./services/analytics');
@@ -87,9 +88,11 @@ router.post('/id', requireAuth, async (req, res, next) => {
         // Dangerous or clearly inauthentic file — refuse. Do NOT leak which check failed.
         decision = { approved: false, checks: [{ check: 'authenticity', pass: false, detail: 'Automated authenticity check failed' }], reason: 'This document could not be verified. Please upload a clear photo of an original government ID.' };
       } else {
-        const key = `verification/${req.userId}/id/${d.idType}_${Date.now()}.jpg`;
+        // Random token → an unguessable object key, so the stored ID can't be fetched by
+        // enumerating predictable URLs; and it's auto-deleted after 30 days (doc-retention).
+        const key = `verification/${req.userId}/id/${d.idType}_${Date.now()}_${crypto.randomBytes(8).toString('hex')}.jpg`;
         const url = await uploadToR2(key, buffer, 'image/jpeg');
-        documents.push({ type: d.idType, url, uploadedAt: new Date() });
+        documents.push({ type: d.idType, url, key, uploadedAt: new Date() });
 
         decision = await decideIdDocument(user, buffer, d.idType, d.document.filename);
         // Fail secure: auto-approve ONLY when the Trust Engine is confident (band
@@ -157,7 +160,7 @@ router.post('/selfie', requireAuth, async (req, res, next) => {
     }
 
     const buffer = Buffer.from(base64, 'base64');
-    const key = `verification/${req.userId}/id/selfie_${Date.now()}.jpg`;
+    const key = `verification/${req.userId}/id/selfie_${Date.now()}_${crypto.randomBytes(8).toString('hex')}.jpg`;
     const url = await uploadToR2(key, buffer, 'image/jpeg');
 
     // Our own face verification: the browser sends a 128-d face descriptor
@@ -185,7 +188,7 @@ router.post('/selfie', requireAuth, async (req, res, next) => {
       userId: req.userId,
       type: 'selfie',
       claim: { checks: decision.checks },
-      documents: [{ type: 'selfie', url, uploadedAt: new Date() }],
+      documents: [{ type: 'selfie', url, key, uploadedAt: new Date() }],
       status: decision.approved ? 'approved' : 'rejected',
       submittedAt: new Date(),
       reviewedAt: new Date(),
@@ -280,9 +283,9 @@ router.post('/profession', requireAuth, async (req, res, next) => {
     const uploadedDocs = [];
     for (const doc of d.documents) {
       const buffer = Buffer.from(doc.base64, 'base64');
-      const key = `verification/${req.userId}/profession/${Date.now()}_${doc.filename}`;
+      const key = `verification/${req.userId}/profession/${Date.now()}_${crypto.randomBytes(8).toString('hex')}_${doc.filename}`;
       const url = await uploadToR2(key, buffer, getMimeType(doc.filename));
-      uploadedDocs.push({ type: doc.type, url, uploadedAt: new Date() });
+      uploadedDocs.push({ type: doc.type, url, key, uploadedAt: new Date() });
     }
     if (d.linkedinUrl) uploadedDocs.push({ type: 'linkedin_link', value: d.linkedinUrl, uploadedAt: new Date() });
     if (d.registrationNumber) uploadedDocs.push({ type: 'registration_number', value: d.registrationNumber, uploadedAt: new Date() });
@@ -360,9 +363,9 @@ router.post('/education', requireAuth, async (req, res, next) => {
     const uploadedDocs = [];
     for (const doc of d.documents) {
       const buffer = Buffer.from(doc.base64, 'base64');
-      const key = `verification/${req.userId}/education/${Date.now()}_${doc.filename}`;
+      const key = `verification/${req.userId}/education/${Date.now()}_${crypto.randomBytes(8).toString('hex')}_${doc.filename}`;
       const url = await uploadToR2(key, buffer, getMimeType(doc.filename));
-      uploadedDocs.push({ type: 'degree', url, uploadedAt: new Date() });
+      uploadedDocs.push({ type: 'degree', url, key, uploadedAt: new Date() });
     }
 
     const first = d.documents[0];
