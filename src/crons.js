@@ -4,8 +4,6 @@
 // nightly batch once per IST day at ~2:00 AM IST. For multi-instance
 // deployments move these to a dedicated worker or external cron.
 
-const fs = require('fs');
-const path = require('path');
 const User = require('./models/User');
 const KarmaBook = require('./models/KarmaBook');
 const Reputation = require('./models/Reputation');
@@ -17,7 +15,6 @@ const Verification = require('./models/Verification');
 const Message = require('./models/Message');
 const Chat = require('./models/Chat');
 const { nightlyFraudScan } = require('./karma-book');
-const { UPLOADS_ROOT } = require('./services/storage');
 
 let lastRunDay = null;
 
@@ -78,20 +75,14 @@ async function nightlyBatch() {
     }
   } catch (e) { console.error('[CRON] karma recovery:', e.message); }
 
-  // 4. Delete verification document originals older than 30 days (spec §2.2.3)
+  // 4. Delete verification document ORIGINALS past their 30-day retention window (spec
+  // §2.2.3). This hard-deletes the stored objects from CLOUD storage (Supabase) as well as
+  // local — the old local-only fs.unlink never touched the production files, so the
+  // "auto-deleted after 30 days" promise was silently broken.
   try {
-    const verRoot = path.join(UPLOADS_ROOT, 'verification');
-    if (fs.existsSync(verRoot)) {
-      const cutoff = Date.now() - 30 * 86400000;
-      const walk = dir => {
-        for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-          const p = path.join(dir, entry.name);
-          if (entry.isDirectory()) walk(p);
-          else if (fs.statSync(p).mtimeMs < cutoff) fs.unlinkSync(p);
-        }
-      };
-      walk(verRoot);
-    }
+    const { purgeExpiredDocuments } = require('./services/doc-retention');
+    const res = await purgeExpiredDocuments(new Date());
+    if (res.records) console.log(`[CRON] purged ${res.files} document original(s) across ${res.records} expired verification(s)`);
   } catch (e) { console.error('[CRON] doc deletion:', e.message); }
 
   // 5. Erase accounts deleted 30+ days ago (spec §2.8.4 — DPDP full erasure)
@@ -100,6 +91,10 @@ async function nightlyBatch() {
     const gone = await User.find({ 'status.deletedAt': { $lt: cutoff } }).select('_id');
     for (const u of gone) {
       const id = u._id;
+      // Hard-delete the user's stored document IMAGE files first (deleteMany below only
+      // removes the DB rows, which would otherwise orphan the originals in cloud storage).
+      try { await require('./services/doc-retention').purgeUserDocuments(id); }
+      catch (e) { console.error('[CRON] erase doc files:', e.message); }
       await Promise.all([
         KarmaBook.deleteOne({ userId: id }),
         Reputation.deleteOne({ userId: id }),

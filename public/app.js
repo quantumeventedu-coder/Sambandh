@@ -828,7 +828,7 @@ function obId() {
       <button class="btn ghost" onclick="S.user._skippedId=true;renderOnboarding()">Skip for now</button>
       <div id="ob-id-area"></div>
     </div>
-    <div class="notice forest ic-row" style="display:flex">${ic('lock')} <span>We store only your name and date of birth. Your ID document is auto-deleted after 30 days. Full ID/document numbers are never stored.</span></div>
+    <div class="notice forest ic-row" style="display:flex">${ic('lock')} <span>Your ID image is used only to verify you and is permanently deleted after 30 days. We keep your verified name and date of birth; full ID/document numbers are never stored.</span></div>
   </div>`;
 }
 
