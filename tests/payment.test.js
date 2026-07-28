@@ -469,6 +469,19 @@ describe('wallet — top-up credits on capture; pay-from-wallet debits base+tax 
     expect((await walletSvc.getWallet(TEST_USER_ID)).balance).toBe(0);     // clawed back — no double money
   });
 
+  test('pay-from-wallet with the SAME idempotency key debits once (retry-safe, no double buy)', async () => {
+    await mkUser('female', 'IN');
+    await walletSvc.credit(TEST_USER_ID, 2000, 'INR', { type: 'topup' });
+    const key = 'idem-abc-123';
+    const a = await request(app).post('/payment/pay-wallet').send({ purpose: 'base_subscription', idempotencyKey: key });
+    expect(a.status).toBe(200);
+    expect(a.body.duplicate).toBeFalsy();
+    const b = await request(app).post('/payment/pay-wallet').send({ purpose: 'base_subscription', idempotencyKey: key });
+    expect(b.status).toBe(200);
+    expect(b.body.duplicate).toBe(true);                                    // deduped, not re-bought
+    expect((await walletSvc.getWallet(TEST_USER_ID)).balance).toBe(1410);   // 2000 - 590, ONCE
+  });
+
   test('admin refund of a top-up is REFUSED once the funds are spent (no double money)', async () => {
     await mkUser('female', 'IN');
     await request(app).post('/payment/wallet/topup').send({ amount: 700 });

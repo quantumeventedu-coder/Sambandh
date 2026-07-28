@@ -27,6 +27,10 @@ async function getWallet(userId) {
   return { userId: String(userId), currency, balanceMinor, balance: currency ? fromMinor(balanceMinor, currency) : 0 };
 }
 
+/** getWallet + a `duplicate: true` marker, returned on the idempotent (already-applied)
+ * paths so a caller can tell a real spend from a de-duplicated retry. @param {any} userId */
+async function dupWallet(userId) { return { ...(await getWallet(userId)), duplicate: true }; }
+
 /** A currency-mismatch error the caller can detect (`err.code === 'WALLET_CURRENCY'`)
  * and reconcile, rather than crashing a captured top-up. @param {string} msg */
 function currencyError(msg) { const e = new Error(msg); /** @type {any} */ (e).code = 'WALLET_CURRENCY'; return e; }
@@ -54,6 +58,13 @@ async function alreadyApplied(userId, ref, type) {
   return !!(await WalletTransaction.findOne({ userId, ref, type }));
 }
 
+/** A Postgres/Mongo unique-violation (the DB-level idempotency backstop firing). @param {any} e */
+function isDupKey(e) { return !!(e && (e.code === '23505' || e.code === 11000 || /duplicate key|E11000/i.test(String((e && e.message) || '')))); }
+
+/** Race-safe idempotency key for a ref-bound ledger entry (unset — exempt — otherwise).
+ * @param {any} userId @param {string} type @param {string|undefined} ref */
+function idemKeyFor(userId, type, ref) { return ref ? `${String(userId)}:${type}:${String(ref)}` : undefined; }
+
 /**
  * Atomic CREDIT (top-up / refund). Uses the SAME genuinely-atomic conditional update as
  * debit (not read-then-write), so a concurrent debit can never be clobbered. The wallet
@@ -71,7 +82,7 @@ async function credit(userId, amountMajor, currency, meta = {}) {
   // IDEMPOTENCY: a ref-bound credit (a top-up capture, a refunded sale) applies at most
   // once. If its ledger entry already exists, it has already been credited — return the
   // current wallet without double-crediting (safe under retries and claim rollbacks).
-  if (await alreadyApplied(userId, meta.ref, type)) return getWallet(userId);
+  if (await alreadyApplied(userId, meta.ref, type)) return dupWallet(userId);
 
   // Common path: atomic same-currency increment (server-side against the committed row).
   let w = await atomicUpdate(Wallet, { userId, currency },
@@ -111,13 +122,17 @@ async function credit(userId, amountMajor, currency, meta = {}) {
   try {
     await WalletTransaction.create({
       userId, type, amountMinor: addMinor, currency,
-      balanceAfterMinor: w.balanceMinor, ref: meta.ref, purpose: meta.purpose, note: meta.note,
+      balanceAfterMinor: w.balanceMinor, ref: meta.ref, idemKey: idemKeyFor(userId, type, meta.ref), purpose: meta.purpose, note: meta.note,
     });
   } catch (ledgerErr) {
     const reversed = await atomicUpdate(Wallet,
       { userId, currency, balanceMinor: { $gt: addMinor - 1 } },
       { $inc: { balanceMinor: -addMinor }, $set: { updatedAt: new Date() } });
     if (!reversed) await flagReconcile(userId, currency, addMinor, 'credit_ledger_uncompensated');
+    // A duplicate idemKey is the race-safe backstop firing: a concurrent/prior credit with
+    // this ref already applied. That is SUCCESS — this attempt's increment is reversed
+    // (above) and we return the wallet the winner produced, not an error.
+    if (isDupKey(ledgerErr)) return dupWallet(userId);
     throw ledgerErr;
   }
   return getWallet(userId);
@@ -129,7 +144,7 @@ async function credit(userId, amountMajor, currency, meta = {}) {
  * gateway). Never partially applies.
  * @param {any} userId @param {number} amountMajor @param {string} currency
  * @param {{type?:string, ref?:string, purpose?:string, note?:string}} [meta]
- * @returns {Promise<null | Awaited<ReturnType<typeof getWallet>>>}
+ * @returns {Promise<null | (Awaited<ReturnType<typeof getWallet>> & { duplicate?: boolean })>}
  */
 async function debit(userId, amountMajor, currency, meta = {}) {
   const subMinor = toMinor(amountMajor, currency);
@@ -137,7 +152,7 @@ async function debit(userId, amountMajor, currency, meta = {}) {
   const type = meta.type || 'spend';
   // IDEMPOTENCY: a ref-bound debit (e.g. a top-up refund clawback) applies at most once —
   // a retry after the money already moved returns the current wallet, not a second debit.
-  if (await alreadyApplied(userId, meta.ref, type)) return getWallet(userId);
+  if (await alreadyApplied(userId, meta.ref, type)) return dupWallet(userId);
   // balanceMinor is an INTEGER, so `>= subMinor` ⟺ `> subMinor - 1` (atomicUpdate
   // supports $gt). The conditional decrement is the overspend/race guard.
   const w = await atomicUpdate(
@@ -151,10 +166,14 @@ async function debit(userId, amountMajor, currency, meta = {}) {
   try {
     await WalletTransaction.create({
       userId, type, amountMinor: -subMinor, currency,
-      balanceAfterMinor: w.balanceMinor, ref: meta.ref, purpose: meta.purpose, note: meta.note,
+      balanceAfterMinor: w.balanceMinor, ref: meta.ref, idemKey: idemKeyFor(userId, type, meta.ref), purpose: meta.purpose, note: meta.note,
     });
   } catch (ledgerErr) {
+    // Re-add what we just decremented (this debit did not durably record).
     await atomicUpdate(Wallet, { userId, currency }, { $inc: { balanceMinor: subMinor }, $set: { updatedAt: new Date() } });
+    // A duplicate idemKey means a concurrent/prior debit with this ref already applied —
+    // idempotent SUCCESS: the decrement is undone (above) and the wallet is returned as-is.
+    if (isDupKey(ledgerErr)) return dupWallet(userId);
     throw ledgerErr;
   }
   return getWallet(userId);
@@ -170,4 +189,9 @@ async function history(userId, limit = 50) {
   }));
 }
 
-module.exports = { getWallet, credit, debit, history };
+/** Was a ref-bound entry already recorded? Lets a caller (e.g. an admin top-up clawback)
+ * confirm the original credit actually applied before reversing it. @param {any} userId
+ * @param {string} ref @param {string} type */
+async function wasApplied(userId, ref, type) { return alreadyApplied(userId, ref, type); }
+
+module.exports = { getWallet, credit, debit, history, wasApplied };
