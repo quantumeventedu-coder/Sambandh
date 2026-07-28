@@ -2080,23 +2080,71 @@ async function astroLens(userId, type) {
 }
 
 // ---------------- Community (anonymous rooms) ----------------
+const ROOM_CATS = [
+  { k: 'all', label: 'All' }, { k: 'interest', label: 'Interests' }, { k: 'city', label: 'City' },
+  { k: 'professional', label: 'Professional' }, { k: 'support', label: 'Support' }, { k: 'general', label: 'General' },
+];
+function catLabel(k) { const c = ROOM_CATS.find(x => x.k === k); return c ? c.label : (k || 'General'); }
+// A stable, pleasant hue per room nickname, so each speaker is recognisable in a room.
+function handleHue(s) { let h = 0; for (let i = 0; i < (s || '').length; i++) h = (h * 31 + s.charCodeAt(i)) % 360; return h; }
+
 async function renderCommunity() {
-  screen.innerHTML = `<div class="section-pad"><h1>Community</h1>
-    <p class="sub">Open, anonymous rooms — friends, professionals, everyone. You post under a room nickname; your identity stays private.</p>
+  screen.innerHTML = `<div class="section-pad">
+    <h1 style="margin-bottom:2px">Community</h1>
+    <p class="sub" style="margin:0 0 12px">Anonymous rooms — friends, neighbours, professionals. You post under a room nickname; your identity stays private.</p>
     <div class="row" style="gap:8px;margin-bottom:12px"><button class="btn" style="width:auto" onclick="toggleRoomForm()">+ Create room</button><button class="btn secondary" style="width:auto" onclick="promptJoinCode()">Join by code</button></div>
     <div id="room-form"></div>
+    <input id="room-search" aria-label="Search rooms" placeholder="Search rooms…" oninput="filterRooms()" style="width:100%;margin-bottom:10px"/>
+    <div id="room-chips" style="display:flex;gap:6px;overflow-x:auto;padding-bottom:8px;margin-bottom:4px;-webkit-overflow-scrolling:touch">
+      ${ROOM_CATS.map(c => `<button data-cat="${c.k}" onclick="setRoomCat('${c.k}')" style="white-space:nowrap;border:1px solid ${c.k === 'all' ? 'var(--sindoor)' : 'var(--sand-mid)'};background:${c.k === 'all' ? 'var(--sindoor)' : '#fff'};color:${c.k === 'all' ? '#fff' : 'inherit'};border-radius:999px;padding:6px 13px;font-size:13px;cursor:pointer">${c.label}</button>`).join('')}
+    </div>
     <div id="room-list"><div class="empty">Loading rooms…</div></div></div>`;
+  S._roomCat = 'all'; S._roomQuery = '';
   try {
     const r = await api('/community/rooms');
-    const el = $('#room-list');
-    if (!r.rooms.length) { el.innerHTML = '<div class="empty">No rooms yet — create the first one.</div>'; return; }
-    el.innerHTML = r.rooms.map(rm => `<div class="card" style="cursor:pointer" onclick="nav('#/room/${rm.slug}')">
-      <div class="row" style="justify-content:space-between;align-items:flex-start">
-        <div><b style="font-size:16px">${rm.visibility === 'private' ? '🔒 ' : ''}${rm.icon || '💬'} ${esc(rm.name)}</b><div class="hint">${esc(rm.description || rm.topic || '')}</div>
-          <div class="hint" style="margin-top:4px">${rm.memberCount} member${rm.memberCount === 1 ? '' : 's'} · ${rm.messageCount} message${rm.messageCount === 1 ? '' : 's'}${rm.code ? ' · code: <b>' + esc(rm.code) + '</b>' : ''}</div></div>
-        <span class="tag ${rm.joined ? 'forest' : 'plain'}">${rm.joined ? 'joined' : esc(rm.visibility === 'private' ? 'private' : rm.category)}</span>
-      </div></div>`).join('');
+    S._rooms = r.rooms || [];
+    renderRoomList();
   } catch (e) { const el = $('#room-list'); if (el) el.innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+}
+function setRoomCat(k) {
+  S._roomCat = k;
+  document.querySelectorAll('#room-chips button').forEach(b => {
+    const on = b.getAttribute('data-cat') === k;
+    b.style.background = on ? 'var(--sindoor)' : '#fff';
+    b.style.color = on ? '#fff' : 'inherit';
+    b.style.borderColor = on ? 'var(--sindoor)' : 'var(--sand-mid)';
+  });
+  renderRoomList();
+}
+function filterRooms() { const s = $('#room-search'); S._roomQuery = ((s && s.value) || '').toLowerCase(); renderRoomList(); }
+function renderRoomList() {
+  const el = $('#room-list'); if (!el) return;
+  let rooms = (S._rooms || []).slice();
+  if (S._roomCat && S._roomCat !== 'all') rooms = rooms.filter(r => (r.category || 'general') === S._roomCat);
+  if (S._roomQuery) rooms = rooms.filter(r => (r.name + ' ' + (r.description || r.topic || '')).toLowerCase().includes(S._roomQuery));
+  rooms.sort((a, b) => (b.joined ? 1 : 0) - (a.joined ? 1 : 0));   // your rooms first, then by activity (server-sorted)
+  if (!rooms.length) { el.innerHTML = `<div class="empty">${(S._rooms && S._rooms.length) ? 'No rooms match your search.' : 'No rooms yet — create the first one.'}</div>`; return; }
+  el.innerHTML = rooms.map(roomCardHtml).join('');
+}
+function roomCardHtml(rm) {
+  const active = rm.lastMessageAt ? timeAgo(rm.lastMessageAt) + ' ago' : 'new';
+  const priv = rm.visibility === 'private';
+  return `<div class="card" style="cursor:pointer;display:flex;gap:12px;align-items:flex-start" onclick="nav('#/room/${rm.slug}')">
+    <div style="font-size:24px;line-height:1;width:46px;height:46px;display:flex;align-items:center;justify-content:center;background:var(--rose-soft,#fbeef0);border-radius:13px;flex-shrink:0">${esc(rm.icon || '💬')}</div>
+    <div style="flex:1;min-width:0">
+      <div class="row" style="justify-content:space-between;align-items:flex-start;gap:8px">
+        <b style="font-size:15px">${priv ? '🔒 ' : ''}${esc(rm.name)}</b>
+        ${rm.joined ? '<span class="tag forest" style="flex-shrink:0">joined</span>' : `<span class="tag plain" style="flex-shrink:0">${esc(catLabel(rm.category))}</span>`}
+      </div>
+      ${(rm.description || rm.topic) ? `<div class="hint" style="margin:2px 0 4px">${esc(rm.description || rm.topic)}</div>` : ''}
+      <div class="hint" style="display:flex;gap:10px;flex-wrap:wrap;color:var(--ink-soft)">
+        <span>${rm.memberCount} member${rm.memberCount === 1 ? '' : 's'}</span>
+        <span>${rm.messageCount} message${rm.messageCount === 1 ? '' : 's'}</span>
+        <span>· active ${active}</span>
+        ${rm.code ? `<span>· code <b>${esc(rm.code)}</b></span>` : ''}
+      </div>
+    </div>
+  </div>`;
 }
 function toggleRoomForm() {
   const el = $('#room-form'); if (!el) return;
@@ -2146,7 +2194,9 @@ async function loadRoom(slug, initial) {
     if (initial) { $('#room-title').textContent = r.room.name; $('#room-sub').textContent = `${r.room.memberCount} members · you are ${r.myHandle}`; box.innerHTML = r.messages.length ? '' : '<div class="empty">Be the first to say hi 👋</div>'; }
     for (const m of r.messages) {
       const q = box.querySelector('.empty'); if (q) q.remove();
-      box.insertAdjacentHTML('beforeend', `<div style="align-self:${m.mine ? 'flex-end' : 'flex-start'};max-width:85%"><div class="hint" style="margin:0 4px 2px">${esc(m.handle)}</div><div style="background:${m.mine ? 'var(--sindoor)' : 'var(--sand)'};color:${m.mine ? '#fff' : 'inherit'};padding:8px 12px;border-radius:14px">${esc(m.text)}</div></div>`);
+      const hue = handleHue(m.handle);
+      const time = m.createdAt ? new Date(m.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
+      box.insertAdjacentHTML('beforeend', `<div style="align-self:${m.mine ? 'flex-end' : 'flex-start'};max-width:85%">${m.mine ? '' : `<div class="hint" style="margin:0 6px 2px;color:hsl(${hue},48%,42%);font-weight:600">${esc(m.handle)}</div>`}<div style="background:${m.mine ? 'var(--sindoor)' : '#fff'};color:${m.mine ? '#fff' : 'inherit'};padding:8px 12px;border-radius:14px;${m.mine ? '' : 'border:1px solid var(--sand-mid);'}box-shadow:0 1px 2px rgba(0,0,0,.05)">${esc(m.text)}</div><div class="hint" style="font-size:10px;margin:2px 6px 0;text-align:${m.mine ? 'right' : 'left'};color:var(--ink-soft)">${time}</div></div>`);
       if (S._room) S._room.last = m.createdAt;
     }
     if (r.messages.length) window.scrollTo(0, document.body.scrollHeight);
