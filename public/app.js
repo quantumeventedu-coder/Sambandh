@@ -151,6 +151,7 @@ function logout() {
   localStorage.removeItem('sb_token');
   S.token = null; S.user = null;
   if (S.socket) { S.socket.disconnect(); S.socket = null; }
+  stopLocationWatch();
   nav('#/welcome');
 }
 
@@ -517,7 +518,7 @@ async function passwordRegister() {
     const r = await api('/auth/register', { method: 'POST', body: { email, password } });
     S.token = r.token; localStorage.setItem('sb_token', r.token);
     S.user = (await api('/auth/me')).user;
-    connectSocket(); captureLocation();
+    connectSocket(); startLocationWatch();
     nav(onboardingStep() === 'done' ? '#/discover' : '#/onboarding');
   } catch (e) { btnLoading('rg-submit', false, 'Create account'); showFormError(e.message); }
 }
@@ -604,23 +605,61 @@ function captureLocation({ prompt = false } = {}) {
   return new Promise(resolve => {
     if (!('geolocation' in navigator)) return resolve(false);
     navigator.geolocation.getCurrentPosition(
-      async pos => {
-        try {
-          const { latitude, longitude, accuracy } = pos.coords;
-          const r = await api('/me/location', { method: 'POST', body: { lat: latitude, lng: longitude, accuracy } });
-          S._locationGranted = true;
-          if (S.user?.profile && r.city) { S.user.profile.city = r.city; S.user.profile.state = r.state; }
-          resolve(true);
-        } catch { resolve(false); }
-      },
+      pos => pushLocation(pos.coords, true).then(resolve),
       () => {
         S._locationGranted = false;
         if (prompt) toast('Location is required for accurate matches — enable it in your browser settings.');
         resolve(false);
       },
-      { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 }
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 30000 }
     );
   });
+}
+
+// REAL-TIME precise location: while the app is open (website / PWA / installed app), watch
+// the device GPS at high accuracy and push meaningful moves to the server. Powers accurate
+// distance in discover; coordinates are stored for distance only and never shown to others.
+function startLocationWatch({ prompt = false } = {}) {
+  if (!('geolocation' in navigator)) return;
+  captureLocation({ prompt });                             // immediate first fix + permission
+  if (S._locWatch == null) {
+    try {
+      S._locWatch = navigator.geolocation.watchPosition(
+        pos => pushLocation(pos.coords, false),
+        () => { S._locationGranted = false; },
+        { enableHighAccuracy: true, timeout: 20000, maximumAge: 10000 }
+      );
+    } catch { /* geolocation unavailable */ }
+  }
+  // Mobile browsers pause GPS for a backgrounded PWA/tab — re-fix when the app returns.
+  if (!S._locVisBound) {
+    S._locVisBound = true;
+    document.addEventListener('visibilitychange', () => { if (!document.hidden && S.token) captureLocation(); });
+  }
+}
+function stopLocationWatch() {
+  if (S._locWatch != null && 'geolocation' in navigator) { try { navigator.geolocation.clearWatch(S._locWatch); } catch { /* ignore */ } }
+  S._locWatch = null; S._lastLoc = null;
+}
+// Push a fix, but (unless forced) only when it moved meaningfully (~75 m) or it's been a
+// while (3 min), so a live watch doesn't hammer the server on every GPS tick.
+async function pushLocation(coords, force) {
+  const { latitude, longitude, accuracy } = coords;
+  const now = Date.now(), last = S._lastLoc;
+  if (!force && last && haversineKmClient(last.lat, last.lng, latitude, longitude) < 0.075 && (now - last.at) < 180000) return true;
+  S._lastLoc = { lat: latitude, lng: longitude, at: now };
+  try {
+    const r = await api('/me/location', { method: 'POST', body: { lat: latitude, lng: longitude, accuracy } });
+    S._locationGranted = true;
+    if (S.user?.profile && r.city) { S.user.profile.city = r.city; S.user.profile.state = r.state; }
+    return true;
+  } catch { return false; }
+}
+function haversineKmClient(lat1, lng1, lat2, lng2) {
+  const R = 6371, rad = d => d * Math.PI / 180;
+  const dLat = rad(lat2 - lat1), dLng = rad(lng2 - lng1);
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(rad(lat1)) * Math.cos(rad(lat2)) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(a));
 }
 
 // ---------------- Onboarding ----------------
@@ -1290,7 +1329,7 @@ function readingCardsHtml(pairs, { note = 'Your reading — an insight, not a ve
 async function renderDiscover() {
   screen.innerHTML = `<div class="dd"><div id="feed"><div class="dd-empty">Loading profiles…</div></div></div>`;
   loadNotifCount();
-  if (!S._locationGranted) captureLocation({ prompt: true });
+  startLocationWatch({ prompt: !S._locationGranted });   // ensure the live watch is running (prompt if not yet granted)
   if (!S._pushAsked) { S._pushAsked = true; registerWebPush(); }
   try {
     const q = new URLSearchParams({
