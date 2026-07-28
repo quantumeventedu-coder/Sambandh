@@ -1,0 +1,15 @@
+{
+  "appId": "com.sambandh.app",
+  "appName": "Sambandh",
+  "webDir": "public",
+  "server": {
+    "url": "https://sambandh.online",
+    "cleartext": false
+  },
+  "plugins": {
+    "BackgroundGeolocation": {}
+  },
+  "ios": {
+    "contentInset": "always"
+  }
+}
