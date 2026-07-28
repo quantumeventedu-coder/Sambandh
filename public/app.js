@@ -2781,9 +2781,68 @@ async function showPayments() {
   try {
     const r = await api('/payment/history');
     openModal(`<h2 style="margin-top:0">Payment history</h2>
-      ${r.payments.length ? r.payments.map(p => `<div class="kv"><span>${esc(p.purpose.replace(/_/g, ' '))} · ${timeAgo(p.createdAt)} ago</span><b>CHF ${p.amountCHF ?? p.amountINR} · ${esc(p.status)}</b></div>`).join('') : '<p class="sub">No payments yet.</p>'}
+      ${r.payments.length ? r.payments.map(p => {
+        const amt = (p.metadata && p.metadata.total != null) ? `${esc(p.currency || 'CHF')} ${esc(p.metadata.total)}` : `CHF ${esc(p.amountCHF ?? p.amountINR ?? '')}`;
+        const canReceipt = p.status === 'captured' || p.status === 'refunded';
+        return `<div class="kv" style="align-items:center"><span>${esc(p.purpose.replace(/_/g, ' '))} · ${timeAgo(p.createdAt)} ago<br><small style="color:var(--ink-soft)">${amt} · ${esc(p.status)}</small></span>${canReceipt ? `<button class="btn secondary" style="width:auto;padding:5px 10px" onclick="showReceipt('${esc(p._id)}')">Receipt</button>` : ''}</div>`;
+      }).join('') : '<p class="sub">No payments yet.</p>'}
       <button class="btn mt" onclick="closeModal()">Close</button>`);
   } catch (e) { toast(e.message); }
+}
+
+async function showReceipt(paymentId) {
+  try {
+    const { receipt: rc } = await api('/payment/receipt/' + paymentId);
+    openModal(receiptHtml(rc) + `<div class="row" style="gap:8px;margin-top:12px"><button class="btn" style="width:auto" onclick="printReceipt()">Print / Save PDF</button><button class="btn secondary" style="width:auto" onclick="showPayments()">Back</button></div>`);
+  } catch (e) { toast(e.message); }
+}
+
+function receiptHtml(rc) {
+  const sym = rc.symbol || ((rc.currency || '') + ' ');
+  const m = (n) => sym + fmtMoney('', n);
+  const seller = rc.seller || {};
+  const addr = (seller.address || []).map(esc).join('<br>');
+  const dt = rc.date ? new Date(rc.date).toISOString().slice(0, 10) : '';
+  const it = (rc.items && rc.items[0]) || { taxableValue: 0 };
+  return `<style>
+    .receipt{font-family:Georgia,serif;color:var(--ink,#20161b);border:1px solid var(--sand-mid,#e7dce2);border-radius:12px;padding:16px;background:#fff}
+    .receipt .rc-head{display:flex;justify-content:space-between;gap:16px;border-bottom:2px solid var(--ink,#20161b);padding-bottom:10px;flex-wrap:wrap}
+    .receipt .rc-title{font-size:18px;font-weight:800}.receipt .rc-no{font-weight:700}.receipt .rc-date{color:var(--ink-soft,#6a5560);font-size:13px}
+    .receipt .rc-seller{text-align:right;font-size:12px}.receipt .rc-addr{color:var(--ink-soft,#6a5560)}
+    .receipt .rc-buyer{margin:12px 0;font-size:14px}
+    .receipt table{width:100%;border-collapse:collapse;font-size:13px}
+    .receipt td,.receipt th{padding:6px 2px;text-align:left;border-bottom:1px solid var(--sand-mid,#eee)}
+    .receipt td:last-child,.receipt th:last-child{text-align:right;font-variant-numeric:tabular-nums}
+    .receipt .rc-sub td{font-weight:700}.receipt .rc-dim td{color:var(--ink-soft,#6a5560)}
+    .receipt .rc-total td{font-weight:800;font-size:15px;border-top:2px solid var(--ink,#20161b);border-bottom:none}
+    .receipt .rc-note,.receipt .rc-foot{font-size:11px;color:var(--ink-soft,#6a5560);margin-top:8px}
+  </style>
+  <div id="receipt-print" class="receipt">
+    <div class="rc-head">
+      <div><div class="rc-title">${esc(rc.kind)}</div><div class="rc-no">${esc(rc.invoiceNo || '')}</div><div class="rc-date">${esc(dt)}</div></div>
+      <div class="rc-seller"><b>${esc(seller.legalName || 'Sambandh')}</b>${seller.gstin ? `<div>GSTIN: ${esc(seller.gstin)}</div>` : ''}${addr ? `<div class="rc-addr">${addr}</div>` : ''}${seller.email ? `<div>${esc(seller.email)}</div>` : ''}</div>
+    </div>
+    <div class="rc-buyer">Billed to: <b>${esc(rc.buyer.name)}</b>${rc.buyer.place ? ' · ' + esc(rc.buyer.place) : ''}</div>
+    <table><tr><th>Description</th><th>Amount</th></tr>
+      ${(rc.items || []).map(x => `<tr><td>${esc(x.description)}</td><td>${m(x.gross)}</td></tr>${x.discount ? `<tr class="rc-dim"><td>Discount</td><td>−${m(x.discount)}</td></tr>` : ''}`).join('')}
+      <tr class="rc-sub"><td>Taxable value</td><td>${m(it.taxableValue)}</td></tr>
+      ${(rc.taxLines || []).map(t => `<tr><td>${esc(t.label)}</td><td>${m(t.amount)}</td></tr>`).join('')}
+      ${rc.gatewayFee ? `<tr class="rc-dim"><td>${esc(rc.gatewayFeeNote || 'Payment fee')}</td><td>${m(rc.gatewayFee)}</td></tr>` : ''}
+      <tr class="rc-total"><td>Total</td><td>${m(rc.total)} ${esc(rc.currency)}</td></tr>
+    </table>
+    ${rc.note ? `<p class="rc-note">${esc(rc.note)}</p>` : ''}
+    <p class="rc-foot">Status: ${esc(rc.status)} · Computer-generated ${esc((rc.kind || '').toLowerCase())}.</p>
+  </div>`;
+}
+
+function printReceipt() {
+  const el = document.getElementById('receipt-print');
+  if (!el) return;
+  const w = window.open('', '_blank');
+  if (!w) { toast('Allow pop-ups to print the receipt'); return; }
+  w.document.write('<html><head><title>Sambandh receipt</title><style>body{font-family:Georgia,serif;color:#20161b;padding:24px;max-width:640px;margin:auto}.rc-head{display:flex;justify-content:space-between;gap:16px;border-bottom:2px solid #20161b;padding-bottom:10px}.rc-title{font-size:20px;font-weight:800}.rc-no{font-weight:700}.rc-seller{text-align:right;font-size:12px}.rc-addr{color:#6a5560}.rc-buyer{margin:12px 0}table{width:100%;border-collapse:collapse;font-size:14px}td,th{padding:6px 4px;text-align:left;border-bottom:1px solid #e7dce2}td:last-child,th:last-child{text-align:right}.rc-sub td{font-weight:700}.rc-total td{font-weight:800;font-size:16px;border-top:2px solid #20161b;border-bottom:none}.rc-dim td{color:#6a5560}.rc-note,.rc-foot{font-size:12px;color:#6a5560;margin-top:10px}</style></head><body>' + el.innerHTML + '</body></html>');
+  w.document.close(); w.focus();
+  setTimeout(() => w.print(), 300);
 }
 
 async function pauseAccount() {

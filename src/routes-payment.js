@@ -40,6 +40,7 @@ const commerce = require('./services/commerce-config');
 const tax = require('./services/tax');
 const wallet = require('./services/wallet');
 const coupons = require('./services/coupons');
+const invoicing = require('./services/invoicing');
 const { toMinor, fromMinor } = require('./services/money');
 
 /**
@@ -797,6 +798,22 @@ router.get('/history', requireAuth, async (req, res, next) => {
       .sort({ createdAt: -1 }).limit(50)
       .select('-razorpaySignature');
     res.json({ payments });
+  } catch (err) { next(err); }
+});
+
+// GET /payment/receipt/:paymentId — the tax invoice / receipt for one of the caller's OWN
+// captured payments. The invoice number is assigned (once, idempotently) on first view, and
+// the amounts come straight from the breakdown stored at checkout.
+router.get('/receipt/:paymentId', requireAuth, async (req, res, next) => {
+  try {
+    const payment = await Payment.findById(req.params.paymentId);
+    if (!payment || String(payment.userId) !== String(req.userId)) return res.status(404).json({ error: 'Receipt not found' });
+    if (payment.status !== 'captured' && payment.status !== 'refunded') {
+      return res.status(400).json({ error: 'A receipt is only available for a completed payment.' });
+    }
+    await invoicing.assignInvoice(payment);
+    const [user, business] = await Promise.all([User.findById(req.userId).lean(), invoicing.getBusiness()]);
+    res.json({ receipt: invoicing.buildReceipt(payment, user, business) });
   } catch (err) { next(err); }
 });
 

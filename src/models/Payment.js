@@ -13,6 +13,11 @@ const PaymentSchema = new mongoose.Schema({
   // can't double-refund; it settles to 'refunded' (or rolls back to 'captured').
   status: { type: String, enum: ['created', 'captured', 'failed', 'refunding', 'refunded'], default: 'created' },
   method: String,
+  // Tax-invoice number, assigned ONCE (idempotently) when a receipt is first generated for
+  // a captured payment. Empty string = not yet invoiced (a scalar default so the assignment
+  // can be an atomic conditional set on invoiceNo:'').
+  invoiceNo: { type: String, default: '' },
+  invoiceAt: Date,
   createdAt: { type: Date, default: Date.now },
   capturedAt: Date, refundedAt: Date,
   metadata: mongoose.Schema.Types.Mixed
