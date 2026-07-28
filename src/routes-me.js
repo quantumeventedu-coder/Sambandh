@@ -166,6 +166,23 @@ router.post('/location', requireAuth, async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+// POST /api/me/bg-location-consent { consent } — record the user's explicit opt-in/out for
+// BACKGROUND location (native app only). A lawful-basis consent record (DPDP): stored on the
+// user with a timestamp and audited, so background tracking is never silent or assumed.
+router.post('/bg-location-consent', requireAuth, async (req, res, next) => {
+  try {
+    const consent = !!(req.body && req.body.consent === true);
+    await User.findByIdAndUpdate(req.userId, { $set: { 'preferences.backgroundLocationConsent': consent, 'preferences.backgroundLocationConsentAt': new Date() } });
+    try {
+      await require('./models/AuditLog').create({
+        actor: String(req.userId), action: consent ? 'bg_location_consent_granted' : 'bg_location_consent_revoked',
+        targetType: 'user', targetId: String(req.userId), detail: { at: new Date() },
+      });
+    } catch { /* audit is best-effort */ }
+    res.json({ ok: true, consent });
+  } catch (err) { next(err); }
+});
+
 // GET /api/me/nakshatra — the requesting user's own nakshatra personality
 // profile (Sambandh Intelligence spec §1.3 / §4.3). Needs birth data.
 const intelligence = require('./services/intelligence');

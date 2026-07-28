@@ -643,10 +643,58 @@ function startLocationWatch({ prompt = false } = {}) {
     S._locVisBound = true;
     document.addEventListener('visibilitychange', () => { if (!document.hidden && S.token) captureLocation(); });
   }
+  startNativeBackgroundLocation();   // native app only (no-op on the web)
 }
 function stopLocationWatch() {
   if (S._locWatch != null && 'geolocation' in navigator) { try { navigator.geolocation.clearWatch(S._locWatch); } catch { /* ignore */ } }
   S._locWatch = null; S._lastLoc = null;
+  stopNativeBackgroundLocation();
+}
+
+// ---- Native (Capacitor) background location -------------------------------------------------
+// On the WEB this is a NO-OP — browsers have no background location. Inside the native app
+// (Capacitor), AFTER the user opts in, the BackgroundGeolocation plugin streams location even
+// when the app is closed — the only way to get "Always" location (native + explicit consent).
+function isNativeApp() { return !!(window.Capacitor && (window.Capacitor.isNativePlatform ? window.Capacitor.isNativePlatform() : window.Capacitor.isNative)); }
+function bgPlugin() { return (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.BackgroundGeolocation) || null; }
+async function startNativeBackgroundLocation() {
+  if (!isNativeApp() || !bgPlugin() || S._bgWatcher) return;
+  if (!localStorage.getItem('sb_bg_consent')) return askBackgroundLocationConsent();
+  try {
+    S._bgWatcher = await bgPlugin().addWatcher({
+      backgroundMessage: 'Sambandh keeps your distance to matches up to date.',
+      backgroundTitle: 'Sambandh location',
+      requestPermissions: true,   // triggers the OS "Always Allow" prompt
+      stale: false,
+      distanceFilter: 50,         // metres of movement before an update
+    }, (location, error) => {
+      if (error) return;          // denied / unavailable → the foreground web watch still runs
+      if (location) pushLocation({ latitude: location.latitude, longitude: location.longitude, accuracy: location.accuracy }, false);
+    });
+  } catch { /* plugin unavailable */ }
+}
+function stopNativeBackgroundLocation() {
+  const bg = bgPlugin();
+  if (bg && S._bgWatcher) { try { bg.removeWatcher({ id: S._bgWatcher }); } catch { /* ignore */ } }
+  S._bgWatcher = null;
+}
+function askBackgroundLocationConsent() {
+  openModal(`<h2 style="margin-top:0">Keep matches accurate — background location</h2>
+    <p class="hint">Allow Sambandh to update your location <b>even when the app is closed</b>, so your distance to people stays accurate and safety features work. Your exact location is never shown to anyone, and you can turn this off anytime in Settings.</p>
+    <button class="btn" onclick="acceptBackgroundLocation()">Allow always</button>
+    <button class="btn secondary mt" onclick="closeModal()">Not now</button>`);
+}
+async function acceptBackgroundLocation() {
+  localStorage.setItem('sb_bg_consent', String(Date.now()));
+  closeModal();
+  try { await api('/me/bg-location-consent', { method: 'POST', body: { consent: true } }); } catch { /* best-effort consent record */ }
+  startNativeBackgroundLocation();
+}
+function revokeBackgroundLocation() {
+  localStorage.removeItem('sb_bg_consent');
+  stopNativeBackgroundLocation();
+  api('/me/bg-location-consent', { method: 'POST', body: { consent: false } }).catch(() => {});
+  toast('Background location turned off');
 }
 // Push a fix, but (unless forced) only when it moved meaningfully (~75 m) or it's been a
 // while (3 min), so a live watch doesn't hammer the server on every GPS tick.

@@ -54,6 +54,18 @@ describe('GET /superadmin/locations', () => {
   });
 });
 
+describe('POST /me/bg-location-consent (native background-location opt-in)', () => {
+  test('grant then revoke updates the recorded consent', async () => {
+    await mkUser();
+    const g = await request(app).post('/me/bg-location-consent').send({ consent: true });
+    expect(g.body.consent).toBe(true);
+    expect((await User.findById(TEST_USER_ID)).preferences.backgroundLocationConsent).toBe(true);
+    const r = await request(app).post('/me/bg-location-consent').send({ consent: false });
+    expect(r.body.consent).toBe(false);
+    expect((await User.findById(TEST_USER_ID)).preferences.backgroundLocationConsent).toBe(false);
+  });
+});
+
 describe('GET /superadmin/users/:id/location-trail', () => {
   test('returns the trail and a dwell duration', async () => {
     await mkUser();
