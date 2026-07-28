@@ -161,9 +161,32 @@ function countryCard(code, cfg) {
 async function renderCommerce() {
   try { COMMERCE = await api('/commerce'); }
   catch (e) { $('#view').innerHTML = `<div class="card">${esc(e.message)}</div>`; return; }
+  let BIZ = {}; try { BIZ = (await api('/business')).business || {}; } catch { BIZ = {}; }
+  const al = BIZ.addressLines || [];
   const c = COMMERCE;
   const countries = Object.entries(c.countries || {}).map(([code, cfg]) => countryCard(code, cfg)).join('');
   $('#view').innerHTML = `
+    <div class="card">
+      <h3 style="font-family:Georgia,serif;margin-bottom:2px">Business details — appear on every invoice / receipt</h3>
+      <p style="color:#888;font-size:13px">Your legal entity, GSTIN and address. Shown on the tax invoice buyers download from Payment history.</p>
+      <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-top:8px">
+        <label>Legal name<input id="bz-legal" value="${esc(BIZ.legalName || '')}"/></label>
+        <label>Trade name<input id="bz-trade" value="${esc(BIZ.tradeName || 'Sambandh')}"/></label>
+        <label>GSTIN<input id="bz-gstin" value="${esc(BIZ.gstin || '')}"/></label>
+        <label>PAN<input id="bz-pan" value="${esc(BIZ.pan || '')}"/></label>
+        <label style="grid-column:1/3">Address line 1<input id="bz-addr1" value="${esc(al[0] || '')}"/></label>
+        <label style="grid-column:1/3">Address line 2<input id="bz-addr2" value="${esc(al[1] || '')}"/></label>
+        <label>City<input id="bz-city" value="${esc(BIZ.city || '')}"/></label>
+        <label>State<input id="bz-state" value="${esc(BIZ.state || '')}"/></label>
+        <label>State code (GST)<input id="bz-statecode" value="${esc(BIZ.stateCode || '')}"/></label>
+        <label>Postal code<input id="bz-postal" value="${esc(BIZ.postalCode || '')}"/></label>
+        <label>Country<input id="bz-country" value="${esc(BIZ.country || 'IN')}"/></label>
+        <label>Invoice prefix<input id="bz-prefix" value="${esc(BIZ.invoicePrefix || 'SB')}"/></label>
+        <label>Email<input id="bz-email" value="${esc(BIZ.email || '')}"/></label>
+        <label>Phone<input id="bz-phone" value="${esc(BIZ.phone || '')}"/></label>
+      </div>
+      <button onclick="saveBusiness()" style="margin-top:10px">Save business details</button>
+    </div>
     <div class="card">
       <h3 style="font-family:Georgia,serif;margin-bottom:2px">Commerce &amp; Tax — editable per jurisdiction</h3>
       <p style="color:#888;font-size:13px">Tax varies by government and changes over time — verify each rate against the current law for that jurisdiction. Edits apply to new checkouts immediately.</p>
@@ -190,6 +213,17 @@ function addCountry() {
   const cards = document.querySelectorAll('[data-country]');
   const last = cards[cards.length - 1];
   last.insertAdjacentHTML('afterend', countryCard(code, { currency: 'USD', taxName: 'Tax', categories: { default: 0 } }));
+}
+async function saveBusiness() {
+  const b = {
+    legalName: $('#bz-legal').value, tradeName: $('#bz-trade').value, gstin: $('#bz-gstin').value, pan: $('#bz-pan').value,
+    addressLines: [$('#bz-addr1').value, $('#bz-addr2').value].filter(x => x.trim()),
+    city: $('#bz-city').value, state: $('#bz-state').value, stateCode: $('#bz-statecode').value,
+    postalCode: $('#bz-postal').value, country: $('#bz-country').value, invoicePrefix: $('#bz-prefix').value,
+    email: $('#bz-email').value, phone: $('#bz-phone').value,
+  };
+  try { await apiPut('/business', b); toast('Business details saved ✓'); }
+  catch (e) { toast(e.message); }
 }
 async function saveCommerce() {
   const gatewayFeePct = parseFloat($('#gw-fee').value);

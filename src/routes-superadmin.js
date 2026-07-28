@@ -725,4 +725,13 @@ router.get('/coupons/:id/redemptions', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+// ---- Business / invoice details (appear on every tax invoice / receipt) ----------------
+const invoicing = require('./services/invoicing');
+router.get('/business', async (req, res, next) => {
+  try { res.json({ business: await invoicing.getBusiness() }); } catch (err) { next(err); }
+});
+router.put('/business', async (req, res, next) => {
+  try { res.json({ business: await invoicing.updateBusiness(req.body || {}) }); } catch (err) { next(err); }
+});
+
 module.exports = router;
