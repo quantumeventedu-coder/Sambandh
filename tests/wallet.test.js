@@ -69,4 +69,30 @@ describe('wallet credit/debit ledger', () => {
     expect(w.balance).toBe(1000);
     expect(w.balanceMinor).toBe(1000);
   });
+
+  test('a ref-bound credit is IDEMPOTENT — a retry never double-credits', async () => {
+    const u = uid();
+    await wallet.credit(u, 500, 'INR', { type: 'topup', ref: 'pay-1' });
+    await wallet.credit(u, 500, 'INR', { type: 'topup', ref: 'pay-1' });   // retry with same ref
+    expect((await wallet.getWallet(u)).balance).toBe(500);                  // applied exactly once
+    expect((await wallet.history(u)).filter((t) => t.type === 'topup').length).toBe(1);
+  });
+
+  test('a ref-bound refund/debit is IDEMPOTENT — a retry after the money moved does not repeat it', async () => {
+    const u = uid();
+    await wallet.credit(u, 500, 'INR');
+    await wallet.credit(u, 200, 'INR', { type: 'refund', ref: 'sale-9' });
+    await wallet.credit(u, 200, 'INR', { type: 'refund', ref: 'sale-9' });   // retry
+    expect((await wallet.getWallet(u)).balance).toBe(700);                    // 500 + 200 once
+    await wallet.debit(u, 300, 'INR', { type: 'adjustment', ref: 'claw-9' });
+    await wallet.debit(u, 300, 'INR', { type: 'adjustment', ref: 'claw-9' }); // retry
+    expect((await wallet.getWallet(u)).balance).toBe(400);                    // 700 - 300 once
+  });
+
+  test('a same-currency credit after the wallet already exists NEVER throws a currency error', async () => {
+    const u = uid();
+    await wallet.credit(u, 100, 'INR');
+    await expect(wallet.credit(u, 50, 'INR')).resolves.toBeTruthy();          // not WALLET_CURRENCY
+    expect((await wallet.getWallet(u)).balance).toBe(150);
+  });
 });

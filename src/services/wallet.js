@@ -31,6 +31,29 @@ async function getWallet(userId) {
  * and reconcile, rather than crashing a captured top-up. @param {string} msg */
 function currencyError(msg) { const e = new Error(msg); /** @type {any} */ (e).code = 'WALLET_CURRENCY'; return e; }
 
+/** Best-effort reconciliation flag when balance and ledger could not be kept in lock-step
+ * (a compensating reversal that could not cleanly apply). Never throws. There are no
+ * multi-statement transactions on the prod DB (transaction pooler), so this is the audit
+ * trail that keeps a rare divergence visible rather than silent.
+ * @param {any} userId @param {string} currency @param {number} amountMinor @param {string} reason */
+async function flagReconcile(userId, currency, amountMinor, reason) {
+  try {
+    await require('../models/AuditLog').create({
+      actor: 'system', action: 'wallet_reconcile', targetType: 'wallet', targetId: String(userId),
+      detail: { currency, amountMinor, reason },
+    });
+  } catch { /* flagging is best-effort */ }
+}
+
+/** Has this exact (userId, ref, type) ledger entry already been written? Makes a credit or
+ * debit tied to a source ref (a top-up payment, a refunded sale) apply AT MOST ONCE, so a
+ * retry — or a claim that was rolled back after the money already moved — cannot double it.
+ * @param {any} userId @param {string|undefined} ref @param {string} type */
+async function alreadyApplied(userId, ref, type) {
+  if (!ref) return false;
+  return !!(await WalletTransaction.findOne({ userId, ref, type }));
+}
+
 /**
  * Atomic CREDIT (top-up / refund). Uses the SAME genuinely-atomic conditional update as
  * debit (not read-then-write), so a concurrent debit can never be clobbered. The wallet
@@ -43,35 +66,58 @@ function currencyError(msg) { const e = new Error(msg); /** @type {any} */ (e).c
 async function credit(userId, amountMajor, currency, meta = {}) {
   const addMinor = toMinor(amountMajor, currency);
   if (!(addMinor > 0)) throw new Error('Credit amount must be positive');
+  const type = meta.type || 'topup';
+
+  // IDEMPOTENCY: a ref-bound credit (a top-up capture, a refunded sale) applies at most
+  // once. If its ledger entry already exists, it has already been credited — return the
+  // current wallet without double-crediting (safe under retries and claim rollbacks).
+  if (await alreadyApplied(userId, meta.ref, type)) return getWallet(userId);
 
   // Common path: atomic same-currency increment (server-side against the committed row).
   let w = await atomicUpdate(Wallet, { userId, currency },
     { $inc: { balanceMinor: addMinor }, $set: { updatedAt: new Date() } });
 
   if (!w) {
-    // No same-currency wallet: either none exists (first top-up) or it holds another
-    // currency (reject — a wallet is single-currency).
+    // No SAME-currency wallet row. Distinguish: a wallet in a DIFFERENT currency (reject —
+    // single-currency), vs. a same-currency wallet a concurrent first top-up just created
+    // (NOT a mismatch — retry the atomic increment), vs. no wallet at all (create it).
     const existing = await Wallet.findOne({ userId });
-    if (existing) throw currencyError(`Wallet holds ${existing.currency}; cannot add ${currency}.`);
-    try {
-      // First top-up: an atomic insert. The unique userId serialises concurrent creates.
-      w = await Wallet.create({ userId, currency, balanceMinor: addMinor, updatedAt: new Date() });
-    } catch {
-      // A concurrent create won the row — retry the same-currency atomic increment.
+    if (existing && existing.currency !== currency) {
+      throw currencyError(`Wallet holds ${existing.currency}; cannot add ${currency}.`);
+    }
+    if (existing) {
+      // Same-currency wallet created by a racing first top-up — increment atomically.
       w = await atomicUpdate(Wallet, { userId, currency },
         { $inc: { balanceMinor: addMinor }, $set: { updatedAt: new Date() } });
       if (!w) throw currencyError(`Wallet was created in a different currency; cannot add ${currency}.`);
+    } else {
+      try {
+        // First top-up: an atomic insert. The unique userId serialises concurrent creates.
+        w = await Wallet.create({ userId, currency, balanceMinor: addMinor, updatedAt: new Date() });
+      } catch {
+        // A concurrent create won the row — retry the same-currency atomic increment.
+        w = await atomicUpdate(Wallet, { userId, currency },
+          { $inc: { balanceMinor: addMinor }, $set: { updatedAt: new Date() } });
+        if (!w) throw currencyError(`Wallet was created in a different currency; cannot add ${currency}.`);
+      }
     }
   }
 
-  // Ledger — compensate on failure so balance and ledger can never diverge.
+  // Ledger — compensate on failure. The reversal is GUARDED ($gt: addMinor-1) so it can
+  // never drive the balance negative if a concurrent debit already spent the just-credited
+  // funds; if it cannot cleanly reverse, the divergence is flagged, never silent, never
+  // negative. (A single transaction would be ideal, but the prod transaction pooler
+  // forbids multi-statement transactions — see pg-odm.)
   try {
     await WalletTransaction.create({
-      userId, type: meta.type || 'topup', amountMinor: addMinor, currency,
+      userId, type, amountMinor: addMinor, currency,
       balanceAfterMinor: w.balanceMinor, ref: meta.ref, purpose: meta.purpose, note: meta.note,
     });
   } catch (ledgerErr) {
-    await atomicUpdate(Wallet, { userId, currency }, { $inc: { balanceMinor: -addMinor }, $set: { updatedAt: new Date() } });
+    const reversed = await atomicUpdate(Wallet,
+      { userId, currency, balanceMinor: { $gt: addMinor - 1 } },
+      { $inc: { balanceMinor: -addMinor }, $set: { updatedAt: new Date() } });
+    if (!reversed) await flagReconcile(userId, currency, addMinor, 'credit_ledger_uncompensated');
     throw ledgerErr;
   }
   return getWallet(userId);
@@ -82,12 +128,16 @@ async function credit(userId, amountMajor, currency, meta = {}) {
  * returns null on insufficient balance or a currency mismatch (caller falls back to the
  * gateway). Never partially applies.
  * @param {any} userId @param {number} amountMajor @param {string} currency
- * @param {{ref?:string, purpose?:string, note?:string}} [meta]
+ * @param {{type?:string, ref?:string, purpose?:string, note?:string}} [meta]
  * @returns {Promise<null | Awaited<ReturnType<typeof getWallet>>>}
  */
 async function debit(userId, amountMajor, currency, meta = {}) {
   const subMinor = toMinor(amountMajor, currency);
   if (!(subMinor > 0)) throw new Error('Debit amount must be positive');
+  const type = meta.type || 'spend';
+  // IDEMPOTENCY: a ref-bound debit (e.g. a top-up refund clawback) applies at most once —
+  // a retry after the money already moved returns the current wallet, not a second debit.
+  if (await alreadyApplied(userId, meta.ref, type)) return getWallet(userId);
   // balanceMinor is an INTEGER, so `>= subMinor` ⟺ `> subMinor - 1` (atomicUpdate
   // supports $gt). The conditional decrement is the overspend/race guard.
   const w = await atomicUpdate(
@@ -100,7 +150,7 @@ async function debit(userId, amountMajor, currency, meta = {}) {
   // or leaves the balance untouched.
   try {
     await WalletTransaction.create({
-      userId, type: 'spend', amountMinor: -subMinor, currency,
+      userId, type, amountMinor: -subMinor, currency,
       balanceAfterMinor: w.balanceMinor, ref: meta.ref, purpose: meta.purpose, note: meta.note,
     });
   } catch (ledgerErr) {

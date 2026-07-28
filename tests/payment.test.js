@@ -434,6 +434,52 @@ describe('wallet — top-up credits on capture; pay-from-wallet debits base+tax 
     expect((await User.findById(TEST_USER_ID)).membership?.tier).not.toBe('base');
     expect((await walletSvc.getWallet(TEST_USER_ID)).balance).toBe(100);   // untouched
   });
+
+  test('a duplicate pay-from-wallet is rejected — the wallet is debited only once', async () => {
+    await mkUser('female', 'IN');
+    await walletSvc.credit(TEST_USER_ID, 2000, 'INR', { type: 'topup' });
+    const a = await request(app).post('/payment/pay-wallet').send({ purpose: 'base_subscription' });
+    expect(a.status).toBe(200);
+    const b = await request(app).post('/payment/pay-wallet').send({ purpose: 'base_subscription' });
+    expect(b.status).toBe(409);                                            // duplicate rejected
+    expect((await walletSvc.getWallet(TEST_USER_ID)).balance).toBe(1410);  // 2000 - 590, once
+  });
+
+  test('admin refund of a WALLET-PAID membership returns the money to the WALLET (never lost)', async () => {
+    await mkUser('female', 'IN');
+    await walletSvc.credit(TEST_USER_ID, 700, 'INR', { type: 'topup' });
+    const pay = await request(app).post('/payment/pay-wallet').send({ purpose: 'base_subscription' });
+    expect(pay.body.balance).toBe(110);
+    const refund = await request(app).post(`/payment/admin/${pay.body.paymentId}/refund`).send({});
+    expect(refund.status).toBe(200);
+    expect(refund.body.destination).toBe('wallet');
+    expect((await walletSvc.getWallet(TEST_USER_ID)).balance).toBe(700);   // 110 + 590 back to wallet
+    expect((await User.findById(TEST_USER_ID)).membership.tier).toBe('free');
+  });
+
+  test('admin refund of a wallet TOP-UP claws the credited funds back out of the wallet', async () => {
+    await mkUser('female', 'IN');
+    await request(app).post('/payment/wallet/topup').send({ amount: 1000 });
+    const orderId = 'order_live_TEST123', paymentId = 'pay_live_wt';
+    await request(app).post('/payment/verify').send({ razorpay_order_id: orderId, razorpay_payment_id: paymentId, razorpay_signature: sign(orderId, paymentId) });
+    expect((await walletSvc.getWallet(TEST_USER_ID)).balance).toBe(1000);
+    const topupPay = await Payment.findOne({ userId: TEST_USER_ID, purpose: 'wallet_topup' });
+    const refund = await request(app).post(`/payment/admin/${topupPay._id}/refund`).send({});
+    expect(refund.status).toBe(200);
+    expect((await walletSvc.getWallet(TEST_USER_ID)).balance).toBe(0);     // clawed back — no double money
+  });
+
+  test('admin refund of a top-up is REFUSED once the funds are spent (no double money)', async () => {
+    await mkUser('female', 'IN');
+    await request(app).post('/payment/wallet/topup').send({ amount: 700 });
+    const orderId = 'order_live_TEST123', paymentId = 'pay_live_wt';
+    await request(app).post('/payment/verify').send({ razorpay_order_id: orderId, razorpay_payment_id: paymentId, razorpay_signature: sign(orderId, paymentId) });
+    await request(app).post('/payment/pay-wallet').send({ purpose: 'base_subscription' });   // spend 590 → 110 left
+    const topupPay = await Payment.findOne({ userId: TEST_USER_ID, purpose: 'wallet_topup' });
+    const refund = await request(app).post(`/payment/admin/${topupPay._id}/refund`).send({});
+    expect(refund.status).toBe(409);                                        // can't claw back spent funds
+    expect((await walletSvc.getWallet(TEST_USER_ID)).balance).toBe(110);    // untouched
+  });
 });
 
 describe('pricing endpoint', () => {
