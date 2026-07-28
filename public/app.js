@@ -255,6 +255,13 @@ async function route() {
     connectSocket();
   }
 
+  // MANDATORY live precise location — gate EVERY authenticated section (incl. onboarding).
+  // No location, no app: distance-based matching only works with a real, current fix.
+  if (S.token && S.user && !['welcome', 'login', 'features'].includes(page)) {
+    if (S._geoPerm === undefined) await refreshGeoPerm();
+    if (!locationReady()) return renderLocationGate();
+  }
+
   // Route unfinished accounts into onboarding
   if (S.user && page !== 'onboarding' && !['welcome', 'login', 'features'].includes(page)) {
     if (onboardingStep() !== 'done') return nav('#/onboarding');
@@ -650,8 +657,10 @@ async function pushLocation(coords, force) {
   S._lastLoc = { lat: latitude, lng: longitude, at: now };
   try {
     const r = await api('/me/location', { method: 'POST', body: { lat: latitude, lng: longitude, accuracy } });
-    S._locationGranted = true;
+    S._locationGranted = true; S._geoPerm = 'granted';
     if (S.user?.profile && r.city) { S.user.profile.city = r.city; S.user.profile.state = r.state; }
+    if (S._gate) { S._gate = false; route(); }   // a fix landed while gated → advance into the app
+    if (S.user?.profile) { S.user.profile.location = { lat: latitude, lng: longitude, accuracy }; }
     return true;
   } catch { return false; }
 }
@@ -660,6 +669,54 @@ function haversineKmClient(lat1, lng1, lat2, lng2) {
   const dLat = rad(lat2 - lat1), dLng = rad(lng2 - lng1);
   const a = Math.sin(dLat / 2) ** 2 + Math.cos(rad(lat1)) * Math.cos(rad(lat2)) * Math.sin(dLng / 2) ** 2;
   return 2 * R * Math.asin(Math.sqrt(a));
+}
+
+// ---- MANDATORY live precise location ----------------------------------------------------
+// Sambandh is location-based (like Bumble/BOO): a precise, live GPS fix is required for the
+// WHOLE authenticated app — onboarding and every section. locationReady() is the sync gate
+// check; refreshGeoPerm() reads the browser permission and re-gates if it's revoked.
+function locationReady() { return S._geoPerm === 'granted' && !!S._lastLoc; }
+async function refreshGeoPerm() {
+  try {
+    if (navigator.permissions && navigator.permissions.query) {
+      const st = await navigator.permissions.query({ name: 'geolocation' });
+      S._geoPerm = st.state;                                   // 'granted' | 'denied' | 'prompt'
+      if (!S._geoPermBound) {
+        S._geoPermBound = true;
+        st.onchange = () => { S._geoPerm = st.state; if (S._geoPerm !== 'granted') stopLocationWatch(); route(); };
+      }
+    } else if (S._geoPerm === undefined) {
+      S._geoPerm = S._locationGranted ? 'granted' : 'prompt'; // older browsers: infer from a prior fix
+    }
+  } catch { if (S._geoPerm === undefined) S._geoPerm = 'prompt'; }
+  return S._geoPerm;
+}
+function renderLocationGate() {
+  S._gate = true;
+  $('#tabbar').style.display = 'none';
+  screen.classList.add('no-tabs');
+  document.body.classList.remove('with-tabs');
+  const denied = S._geoPerm === 'denied';
+  const gettingFix = S._geoPerm === 'granted';                // granted but the first fix hasn't landed yet
+  screen.innerHTML = `<div class="section-pad" style="min-height:78vh;display:flex;flex-direction:column;justify-content:center;text-align:center;max-width:460px;margin:0 auto">
+    <div style="font-size:52px;line-height:1">📍</div>
+    <h1 style="margin:10px 0 4px">Share your live location</h1>
+    <p class="sub" style="margin:0 0 18px">Sambandh matches you by real distance, so a <b>precise, live location is required</b> to use it — just like the dating apps you know.</p>
+    ${denied
+      ? `<div class="card" style="text-align:left"><b>Location is turned off for this site</b><p class="hint" style="margin:6px 0 0">Enable it in your browser: tap the <b>🔒 / ⓘ</b> in the address bar → <b>Location</b> → <b>Allow</b> (turn on precise / exact location), then retry.</p></div>
+         <button class="btn mt" onclick="retryLocationGate()">I've enabled it — retry</button>`
+      : gettingFix
+        ? `<div class="card">📡 Getting your precise location…</div><button class="btn secondary mt" onclick="retryLocationGate()">Retry</button>`
+        : `<button class="btn" onclick="retryLocationGate()">Enable live location</button>`}
+    <p class="hint" style="margin-top:16px">Your exact coordinates are used only to compute distance and are <b>never shown</b> to anyone.</p>
+  </div>`;
+  startLocationWatch({ prompt: true });                       // request permission / fetch the first fix
+}
+async function retryLocationGate() {
+  S._geoPerm = undefined;
+  await refreshGeoPerm();
+  startLocationWatch({ prompt: true });
+  route();
 }
 
 // ---------------- Onboarding ----------------
