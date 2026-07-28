@@ -2878,8 +2878,9 @@ function receiptHtml(rc) {
       <div class="rc-seller"><b>${esc(seller.legalName || 'Sambandh')}</b>${seller.gstin ? `<div>GSTIN: ${esc(seller.gstin)}</div>` : ''}${addr ? `<div class="rc-addr">${addr}</div>` : ''}${seller.email ? `<div>${esc(seller.email)}</div>` : ''}</div>
     </div>
     <div class="rc-buyer">Billed to: <b>${esc(rc.buyer.name)}</b>${rc.buyer.place ? ' · ' + esc(rc.buyer.place) : ''}</div>
+    ${(rc.placeOfSupply || rc.reverseCharge) ? `<div class="hint" style="margin:-6px 0 8px;font-size:11px">Place of supply: ${esc(rc.placeOfSupply || '—')} · Reverse charge: ${esc(rc.reverseCharge || 'No')}</div>` : ''}
     <table><tr><th>Description</th><th>Amount</th></tr>
-      ${(rc.items || []).map(x => `<tr><td>${esc(x.description)}</td><td>${m(x.gross)}</td></tr>${x.discount ? `<tr class="rc-dim"><td>Discount</td><td>−${m(x.discount)}</td></tr>` : ''}`).join('')}
+      ${(rc.items || []).map(x => `<tr><td>${esc(x.description)}${x.sac ? `<br><span style="font-size:11px;color:var(--ink-soft)">SAC ${esc(x.sac)}</span>` : ''}</td><td>${m(x.gross)}</td></tr>${x.discount ? `<tr class="rc-dim"><td>Discount</td><td>−${m(x.discount)}</td></tr>` : ''}`).join('')}
       <tr class="rc-sub"><td>Taxable value</td><td>${m(it.taxableValue)}</td></tr>
       ${(rc.taxLines || []).map(t => `<tr><td>${esc(t.label)}</td><td>${m(t.amount)}</td></tr>`).join('')}
       ${rc.gatewayFee ? `<tr class="rc-dim"><td>${esc(rc.gatewayFeeNote || 'Payment fee')}</td><td>${m(rc.gatewayFee)}</td></tr>` : ''}
