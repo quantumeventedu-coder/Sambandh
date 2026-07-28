@@ -71,6 +71,7 @@
       <button id="tb-audit" onclick="show('audit')">Audit trail</button>
       <button id="tb-test" onclick="show('test')">System Test</button>
       <button id="tb-commerce" onclick="show('commerce')">Commerce &amp; Tax</button>
+      <button id="tb-coupons" onclick="show('coupons')">Coupons</button>
     </div>
     <div id="view"></div>
   </div>
@@ -103,6 +104,13 @@ async function apiPut(path, body) {
   if (!r.ok) throw new Error(j.error || ('HTTP ' + r.status));
   return j;
 }
+async function apiPatch(path, body) {
+  const r = await fetch('/api/superadmin' + path, { method:'PATCH',
+    headers: { 'X-Super-Key': KEY, 'Content-Type':'application/json' }, body: JSON.stringify(body) });
+  const j = await r.json().catch(()=>({}));
+  if (!r.ok) throw new Error(j.error || ('HTTP ' + r.status));
+  return j;
+}
 
 async function connect() {
   KEY = $('#key').value.trim();
@@ -121,13 +129,14 @@ async function connect() {
 }
 
 function show(tab) {
-  ['overview','users','llm','audit','test','commerce'].forEach(t => $('#tb-'+t).classList.toggle('on', t===tab));
+  ['overview','users','llm','audit','test','commerce','coupons'].forEach(t => $('#tb-'+t).classList.toggle('on', t===tab));
   if (tab==='overview') renderOverview();
   if (tab==='users') renderUsers();
   if (tab==='llm') renderLLM();
   if (tab==='audit') renderAudit();
   if (tab==='test') renderTest();
   if (tab==='commerce') renderCommerce();
+  if (tab==='coupons') renderCoupons();
 }
 
 // ---- Commerce & Tax editor: prices, per-country taxes, gateway fee, cancellation ----
@@ -678,6 +687,81 @@ async function renderAudit() {
 }
 
 // Dev convenience: in dev mode, pre-fill the dev key so the owner can test instantly.
+// ---- Coupons: discount codes for testers/employees; capped, scoped, windowed --------
+async function renderCoupons() {
+  let data = { coupons: [] };
+  try { data = await api('/coupons'); } catch (e) { $('#view').innerHTML = '<div class="card">'+esc(e.message)+'</div>'; return; }
+  const rows = data.coupons.map(c => `
+    <tr style="border-top:1px solid var(--line)">
+      <td style="padding:6px 8px"><b>${esc(c.code)}</b>${c.note ? '<div style="color:var(--mut);font-size:12px">'+esc(c.note)+'</div>' : ''}</td>
+      <td>${c.kind==='percent' ? esc(c.percentOff)+'% off' : 'CHF '+esc(c.flatOffCHF)+' off'}</td>
+      <td>${esc((c.appliesTo||['*']).join(', '))}</td>
+      <td>${esc(c.redeemedCount||0)}${c.maxRedemptions!=null ? ' / '+esc(c.maxRedemptions) : ' / ∞'}</td>
+      <td>${esc(c.perUserLimit)}/user</td>
+      <td>${c.expiresAt ? esc(new Date(c.expiresAt).toISOString().slice(0,10)) : '—'}</td>
+      <td>${c.active ? '<span class="pill g">active</span>' : '<span class="pill r">off</span>'}</td>
+      <td><button onclick="toggleCoupon('${esc(c.id)}', ${c.active?'false':'true'})">${c.active?'Disable':'Enable'}</button></td>
+    </tr>`).join('');
+  $('#view').innerHTML = `
+    <div class="card">
+      <h3 style="font-family:Georgia,serif;margin-bottom:2px">Create a coupon</h3>
+      <p style="color:var(--mut);margin:0 0 10px">Discount applies to the price BEFORE tax. A 100%-off code activates membership with no payment — ideal for testers.</p>
+      <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:10px">
+        <label>Code<input id="cp-code" placeholder="TESTER100" style="text-transform:uppercase"/></label>
+        <label>Type<select id="cp-kind" onchange="cpKind()"><option value="percent">Percent off</option><option value="flat">Flat CHF off</option></select></label>
+        <label id="cp-pct-l">Percent off (1–100)<input id="cp-pct" type="number" min="1" max="100" value="100"/></label>
+        <label id="cp-flat-l" style="display:none">Flat CHF off<input id="cp-flat" type="number" min="0" step="0.5" value="5"/></label>
+        <label>Applies to<select id="cp-applies">
+          <option value="*">Everything</option>
+          <option value="subscription">Memberships (all tiers)</option>
+          <option value="base_subscription">Essential only</option>
+          <option value="pro_subscription">Plus only</option>
+          <option value="max_subscription">Signature only</option>
+          <option value="consultation">Consultations</option>
+          <option value="verification">Verification</option>
+          <option value="gift">Gift passes</option>
+        </select></label>
+        <label>Total uses (blank = unlimited)<input id="cp-max" type="number" min="0" placeholder="50"/></label>
+        <label>Per-user limit<input id="cp-peruser" type="number" min="1" value="1"/></label>
+        <label>Min order CHF (optional)<input id="cp-min" type="number" min="0" step="0.5" placeholder="0"/></label>
+        <label>Expires (optional)<input id="cp-exp" type="date"/></label>
+        <label style="grid-column:1/3">Note — who it's for<input id="cp-note" placeholder="QA testers"/></label>
+      </div>
+      <button onclick="createCoupon()" style="margin-top:10px">Create coupon</button>
+    </div>
+    <div class="card">
+      <h3 style="font-family:Georgia,serif">Coupons (${data.coupons.length})</h3>
+      <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:13px">
+        <tr style="text-align:left;color:var(--mut)"><th style="padding:6px 8px">Code</th><th>Discount</th><th>Applies</th><th>Used</th><th>Per-user</th><th>Expires</th><th>Status</th><th></th></tr>
+        ${rows || '<tr><td colspan="8" style="padding:10px;color:var(--mut)">No coupons yet.</td></tr>'}
+      </table></div>
+    </div>`;
+}
+function cpKind() {
+  const k = $('#cp-kind').value;
+  $('#cp-pct-l').style.display = k==='percent' ? '' : 'none';
+  $('#cp-flat-l').style.display = k==='flat' ? '' : 'none';
+}
+async function createCoupon() {
+  const kind = $('#cp-kind').value;
+  const body = {
+    code: $('#cp-code').value, kind,
+    percentOff: Number($('#cp-pct').value), flatOffCHF: Number($('#cp-flat').value),
+    appliesTo: [$('#cp-applies').value],
+    maxRedemptions: $('#cp-max').value === '' ? null : Number($('#cp-max').value),
+    perUserLimit: Number($('#cp-peruser').value) || 1,
+    minAmountCHF: Number($('#cp-min').value) || 0,
+    expiresAt: $('#cp-exp').value || null,
+    note: $('#cp-note').value,
+  };
+  try { await apiPost('/coupons', body); toast('Coupon created ✓'); renderCoupons(); }
+  catch (e) { toast(e.message); }
+}
+async function toggleCoupon(id, active) {
+  try { await apiPatch('/coupons/'+id, { active }); toast(active?'Enabled ✓':'Disabled'); renderCoupons(); }
+  catch (e) { toast(e.message); }
+}
+
 fetch('/health').then(r=>r.json()).then(h => {
   // Never hardcode a key in a file served to the public — that is how the old
   // dev keys ended up in git forever. In dev, paste your SUPER_ADMIN_KEY once and

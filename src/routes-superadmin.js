@@ -684,4 +684,45 @@ router.get('/selftest', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+// ---- Coupons (super-admin managed) ----------------------------------------
+// Create discount codes (percent or flat off, applied pre-tax), cap them (total +
+// per-user), scope them to purposes, and window them. Testers redeem at checkout; a
+// 100%-off code activates membership with no gateway charge. Redemption is atomic in
+// services/coupons (the wallet review's lessons applied).
+const couponSvc = require('./services/coupons');
+const CouponRedemption = require('./models/CouponRedemption');
+
+router.get('/coupons', async (req, res, next) => {
+  try { res.json({ coupons: (await couponSvc.list()).map(couponSvc.pub) }); }
+  catch (err) { next(err); }
+});
+
+router.post('/coupons', async (req, res, next) => {
+  try {
+    const c = await couponSvc.create(req.body || {}, req.userId);
+    res.status(201).json({ coupon: couponSvc.pub(c) });
+  } catch (e) {
+    if (e && e.coupon) return res.status(400).json({ error: e.message, code: e.code });
+    next(e);
+  }
+});
+
+router.patch('/coupons/:id', async (req, res, next) => {
+  try {
+    const c = await couponSvc.update(req.params.id, req.body || {});
+    if (!c) return res.status(404).json({ error: 'Coupon not found' });
+    res.json({ coupon: couponSvc.pub(c) });
+  } catch (e) {
+    if (e && e.coupon) return res.status(400).json({ error: e.message, code: e.code });
+    next(e);
+  }
+});
+
+router.get('/coupons/:id/redemptions', async (req, res, next) => {
+  try {
+    const rows = await CouponRedemption.find({ couponId: req.params.id }).sort({ at: -1 }).limit(500);
+    res.json({ redemptions: rows.map((r) => ({ userId: r.userId, orderRef: r.orderRef, discountCHF: r.discountCHF, discountLocal: r.discountLocal, currency: r.currency, purpose: r.purpose, at: r.at })) });
+  } catch (err) { next(err); }
+});
+
 module.exports = router;

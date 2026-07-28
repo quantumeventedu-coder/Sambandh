@@ -1061,10 +1061,51 @@ function obPay() {
         <li>30 days per payment — renew when it suits you</li>
       </ul>
     </div>
-    <button class="btn" onclick="obPayNow()">Pay with UPI / Card</button>
+    <div class="row" style="gap:8px;margin:12px 0 4px">
+      <input id="co-coupon" aria-label="Coupon code" placeholder="Coupon code" style="flex:1;text-transform:uppercase" value="${esc(S._couponCode || '')}"/>
+      <button class="btn secondary" style="width:auto" onclick="applyCoupon('base_subscription')">Apply</button>
+    </div>
+    <div id="co-coupon-msg" class="hint" style="margin-bottom:8px"></div>
+    <button class="btn" id="ob-paybtn" onclick="obPayNow()">Pay with UPI / Card</button>
     <button class="btn secondary mt" onclick="payFromWallet('base_subscription')">Pay from wallet — no fee</button>
     <div class="pay-trust">Cancel within 2 days for a pro-rated refund · Card via Razorpay, or your wallet · Taxes itemised above</div>
   </div>`;
+}
+
+// The itemized bill WITH a coupon applied — a gross line + the discount + tax + total.
+function couponBreakdownHtml(r) {
+  const sym = r.symbol, b = r.breakdown || {};
+  const m = (n) => fmtMoney(sym, n);
+  return `<div class="co-row"><span>Membership</span><span>${m(b.grossBase)}</span></div>
+    <div class="co-row" style="color:var(--forest)"><span>Coupon ${esc(r.couponCode)}</span><span>−${m(r.discountLocal)}</span></div>
+    ${b.taxTotal ? `<div class="co-row co-muted"><span>${esc(b.taxName || 'Tax')}</span><span>${m(b.taxTotal)}</span></div>` : ''}
+    ${b.gatewayFee ? `<div class="co-row co-muted"><span>Payment fee</span><span>${m(b.gatewayFee)}</span></div>` : ''}
+    <div class="co-row co-total"><span>Total</span><span>${m(r.amountMajor)} ${esc(r.currency)}</span></div>
+    ${r.free ? '<div class="co-note" style="color:var(--forest)">This code makes your membership free — no payment needed.</div>' : ''}`;
+}
+
+// Validate + preview a coupon, then reflect the discounted bill and (if 100% off) switch
+// the button to a free activation. An invalid code shows the reason and reverts the bill.
+async function applyCoupon(purpose) {
+  const inp = document.getElementById('co-coupon');
+  const msg = document.getElementById('co-coupon-msg');
+  const code = ((inp && inp.value) || '').trim();
+  const payBtn = document.getElementById('ob-paybtn');
+  if (!code) { S._couponCode = null; if (msg) msg.textContent = ''; if (payBtn) payBtn.textContent = 'Pay with UPI / Card'; return loadCheckoutQuote(purpose); }
+  try {
+    const r = await api('/payment/coupon/preview', { method: 'POST', body: { code, purpose } });
+    S._couponCode = r.couponCode;
+    S._couponFree = !!r.free;
+    const el = document.getElementById('co-breakdown');
+    if (el) el.innerHTML = couponBreakdownHtml(r);
+    if (msg) { msg.style.color = 'var(--forest)'; msg.textContent = r.free ? '✓ 100% off applied — free with this code' : `✓ Applied — you save ${r.symbol}${fmtMoney('', r.discountLocal)}`; }
+    if (payBtn) payBtn.textContent = r.free ? 'Activate free membership' : 'Pay with UPI / Card';
+  } catch (e) {
+    S._couponCode = null; S._couponFree = false;
+    if (msg) { msg.style.color = 'var(--haldi-deep, #b4690e)'; msg.textContent = e.message; }
+    if (payBtn) payBtn.textContent = 'Pay with UPI / Card';
+    loadCheckoutQuote(purpose);
+  }
 }
 
 // Load Razorpay's checkout script on demand (needed before `new Razorpay(...)`).
@@ -1100,9 +1141,13 @@ async function payDirectOrder(order, purpose, description, onCaptured) {
 
 async function obPayNow() {
   try {
-    const order = await api('/payment/create-order', { method: 'POST', body: { purpose: 'base_subscription' } });
+    const order = await api('/payment/create-order', { method: 'POST', body: { purpose: 'base_subscription', couponCode: S._couponCode || undefined } });
+    if (order.free) {   // a 100%-off coupon activated membership with no gateway charge
+      toast('🎉 Membership activated — free with your coupon');
+      return refreshUserAndRoute();
+    }
     if (order.devMode) {
-      await api('/payment/verify', { method: 'POST', body: { razorpay_order_id: order.orderId } });
+      await api('/payment/verify', { method: 'POST', body: { razorpay_order_id: order.orderId, purpose: 'base_subscription' } });
       toast('Payment simulated (dev mode) ✓');
       return refreshUserAndRoute();
     }

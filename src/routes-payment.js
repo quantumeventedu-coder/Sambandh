@@ -39,6 +39,7 @@ const fx = require('./services/fx');
 const commerce = require('./services/commerce-config');
 const tax = require('./services/tax');
 const wallet = require('./services/wallet');
+const coupons = require('./services/coupons');
 const { toMinor, fromMinor } = require('./services/money');
 
 /**
@@ -160,36 +161,44 @@ function chfAmount(purpose, gender) {
  * line (per the buyer's country/category) + the gateway fee → total. This is what the
  * buyer is actually charged. Country comes from the STORED user. Used for variable-priced
  * items (gift passes, verification) that can't derive their price from the purpose alone.
+ * A coupon discount (in CHF) is applied to the base BEFORE tax, so GST/VAT is charged on
+ * the discounted amount. `grossBase` keeps the pre-discount base for the itemized bill.
  * @param {number|null|undefined} chf @param {string} category
- * @param {PricingUser | null | undefined} user @param {string} [label]
- * @returns {Promise<null | { code:string, symbol:string, chf:number, base:number, taxName:string, taxRate:number, taxTotal:number, taxLines:Array<{label:string,rate:number,amount:number}>, gatewayFeePct:number, gatewayFee:number, total:number, minor:number, country:string, category:string }>}
+ * @param {PricingUser | null | undefined} user @param {string} [label] @param {number} [discountCHF]
+ * @returns {Promise<null | { code:string, symbol:string, chf:number, grossBase:number, base:number, discountCHF:number, discountLocal:number, taxName:string, taxRate:number, taxTotal:number, taxLines:Array<{label:string,rate:number,amount:number}>, gatewayFeePct:number, gatewayFee:number, total:number, minor:number, country:string, category:string }>}
  */
-async function quoteForAmount(chf, category, user, label = 'Membership') {
+async function quoteForAmount(chf, category, user, label = 'Membership', discountCHF = 0) {
   if (chf == null || !(Number(chf) > 0)) return null;
   const country = (user && user.profile && user.profile.country) || 'IN';
   const cc = await commerce.countryConfig(country);
   const cfg = await commerce.getCommerce();
   const code = cc.currency;
-  const base = await fx.convertFromCHF(Number(chf), code);
+  const grossBase = await fx.convertFromCHF(Number(chf), code);
+  // Discount is pre-tax: convert the CHF discount to the buyer's currency, cap it at the
+  // base, and tax the remainder.
+  const discountLocal = Number(discountCHF) > 0 ? Math.min(await fx.convertFromCHF(Number(discountCHF), code), grossBase) : 0;
+  const netBase = Math.max(0, Math.round((grossBase - discountLocal) * 100) / 100);
   const taxRate = await commerce.categoryRate(country, category);
   const q = tax.computeQuote({
-    components: [{ label, amount: base, rate: taxRate }],
+    components: [{ label, amount: netBase, rate: taxRate }],
     taxName: cc.taxName, gatewayFeePct: cfg.gatewayFeePct,
   });
   return {
     code, symbol: SYMBOLS[code] || (code + ' '),
-    chf: Number(chf), base: q.base, taxName: cc.taxName, taxRate, taxTotal: q.taxTotal, taxLines: q.lines,
+    chf: Number(chf), grossBase: Math.round(grossBase * 100) / 100, base: q.base,
+    discountCHF: Math.round((Number(discountCHF) || 0) * 100) / 100, discountLocal: Math.round(discountLocal * 100) / 100,
+    taxName: cc.taxName, taxRate, taxTotal: q.taxTotal, taxLines: q.lines,
     gatewayFeePct: q.gatewayFeePct, gatewayFee: q.gatewayFee,
     total: q.total, minor: toMinor(q.total, code), country, category,
   };
 }
 
-/** The itemized quote for a fixed-price purpose (membership tiers): price derived from
- * the buyer's verified gender + the purpose. @param {string} purpose
- * @param {PricingUser | null | undefined} user */
-async function quoteFor(purpose, user) {
+/** The itemized quote for a fixed-price purpose (membership tiers): price derived from the
+ * buyer's verified gender + the purpose, minus an optional pre-tax coupon discount (CHF).
+ * @param {string} purpose @param {PricingUser | null | undefined} user @param {number} [discountCHF] */
+async function quoteFor(purpose, user, discountCHF = 0) {
   const gender = (user && user.profile && user.profile.gender) || 'other';
-  return quoteForAmount(chfAmount(purpose, gender), categoryForPurpose(purpose), user);
+  return quoteForAmount(chfAmount(purpose, gender), categoryForPurpose(purpose), user, 'Membership', discountCHF);
 }
 
 // 1. Create order — join fee by default, or another purpose
@@ -199,24 +208,60 @@ router.post('/create-order', requireAuth, async (req, res, next) => {
     if (!user) return res.status(404).json({ error: 'User not found' });
 
     const purpose = LEGACY_PURPOSES[req.body.purpose] || req.body.purpose || 'base_subscription';
+    // Optional coupon — validated and priced SERVER-SIDE (authoritative). The discount
+    // reduces the base BEFORE tax. A bad coupon fails the order loudly, never silently at
+    // full price.
+    let coupon = null, couponDiscountCHF = 0;
+    if (req.body.couponCode) {
+      const chfBase = chfAmount(purpose, (user.profile && user.profile.gender) || 'other');
+      try {
+        const v = await coupons.validate(req.body.couponCode, purpose, chfBase || 0, req.userId);
+        coupon = v.coupon; couponDiscountCHF = v.discountCHF;
+      } catch (e) {
+        return res.status(400).json({ error: (e && /** @type {any} */ (e).message) || 'Invalid coupon', couponError: (e && /** @type {any} */ (e).code) || 'INVALID' });
+      }
+    }
     // Priced by verified gender + country (INR for India → UPI etc.), live-converted
-    // from CHF. Registration is by payment, so no verification gate here.
-    // The itemized quote is AUTHORITATIVE: base (live fx from CHF) + tax (per the
-    // buyer's country/category) + gateway fee → total. The user is charged `total`.
-    const quote = await quoteFor(purpose, user);
+    // from CHF. The itemized quote is AUTHORITATIVE: base (live fx from CHF) − coupon
+    // discount + tax (per the buyer's country/category) + gateway fee → total.
+    const quote = await quoteFor(purpose, user, couponDiscountCHF);
     if (!quote) return res.status(400).json({ error: 'Unknown purpose' });
     // Breakdown persisted with the order so /verify, receipts, and pro-rated refunds
     // read the real charged amounts back from the DB, never from the request body.
     const breakdown = {
+      grossBase: quote.grossBase, discountLocal: quote.discountLocal, discountCHF: quote.discountCHF,
       base: quote.base, taxName: quote.taxName, taxRate: quote.taxRate,
       taxTotal: quote.taxTotal, taxLines: quote.taxLines,
       gatewayFeePct: quote.gatewayFeePct, gatewayFee: quote.gatewayFee,
       total: quote.total, country: quote.country, category: quote.category,
+      ...(coupon ? { couponCode: coupon.code } : {}),
     };
     const clientQuote = {
       amount: quote.minor, amountMajor: quote.total, amountCHF: quote.chf,
       currency: quote.code, symbol: quote.symbol, purpose, breakdown,
+      couponCode: coupon ? coupon.code : null, discountLocal: quote.discountLocal,
     };
+
+    // Fully discounted (e.g. a 100%-off tester coupon) → NO gateway charge. Reserve the
+    // coupon, record a captured 'coupon' Payment, fulfill (grant the tier), and return —
+    // there is no /verify step for a zero-amount order.
+    if (quote.total <= 0) {
+      const orderRef = 'free_' + crypto.randomBytes(8).toString('hex');
+      if (coupon) {
+        try {
+          await coupons.redeem({ coupon, userId: req.userId, orderRef, purpose: purpose.replace('_high', ''), discountCHF: couponDiscountCHF, discountLocal: quote.discountLocal, currency: quote.code });
+        } catch (e) {
+          return res.status(409).json({ error: (e && /** @type {any} */ (e).message) || 'This coupon could not be applied.', couponError: (e && /** @type {any} */ (e).code) || 'EXHAUSTED' });
+        }
+      }
+      const payment = await Payment.create({
+        userId: req.userId, purpose: purpose.replace('_high', ''), amountCHF: quote.chf, currency: quote.code,
+        razorpayOrderId: orderRef, status: 'captured', method: 'coupon', capturedAt: new Date(), createdAt: new Date(),
+        metadata: { free: true, gender: user.profile.gender, amountLocal: 0, ...breakdown },
+      });
+      await fulfillCaptured(req.userId, payment);
+      return res.json({ ...clientQuote, free: true, ok: true, activated: true, purpose: payment.purpose, paymentId: payment._id });
+    }
 
     if (DEV_PAYMENTS) {
       const orderId = 'order_dev_' + crypto.randomBytes(8).toString('hex');
@@ -278,6 +323,38 @@ router.get('/quote', requireAuth, async (req, res, next) => {
     if (!quote) return res.status(400).json({ error: 'Unknown purpose' });
     res.json(quote);
   } catch (e) { next(e); }
+});
+
+// POST /payment/coupon/preview { code, purpose } — validate a coupon and return the
+// DISCOUNTED itemized quote for display, without creating an order. A bad code returns 400
+// with the reason (so checkout can show it) — nothing is consumed.
+router.post('/coupon/preview', requireAuth, async (req, res, next) => {
+  try {
+    const user = await User.findById(req.userId);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+    const purpose = LEGACY_PURPOSES[req.body.purpose] || req.body.purpose || 'base_subscription';
+    const chfBase = chfAmount(purpose, (user.profile && user.profile.gender) || 'other');
+    if (chfBase == null) return res.status(400).json({ error: 'Unknown purpose' });
+    let discountCHF = 0, code = null;
+    try {
+      const v = await coupons.validate(req.body.code, purpose, chfBase, req.userId);
+      discountCHF = v.discountCHF; code = v.coupon.code;
+    } catch (e) {
+      return res.status(400).json({ ok: false, error: (e && /** @type {any} */ (e).message) || 'Invalid coupon', couponError: (e && /** @type {any} */ (e).code) || 'INVALID' });
+    }
+    const quote = await quoteFor(purpose, user, discountCHF);
+    if (!quote) return res.status(400).json({ error: 'Unknown purpose' });
+    res.json({
+      ok: true, couponCode: code, purpose,
+      amount: quote.minor, amountMajor: quote.total, currency: quote.code, symbol: quote.symbol,
+      discountLocal: quote.discountLocal, discountCHF,
+      free: quote.total <= 0,
+      breakdown: {
+        grossBase: quote.grossBase, discountLocal: quote.discountLocal, base: quote.base,
+        taxName: quote.taxName, taxTotal: quote.taxTotal, gatewayFee: quote.gatewayFee, total: quote.total,
+      },
+    });
+  } catch (err) { next(err); }
 });
 
 // Cancel membership. Policy (super-admin editable via commerce.cancellation):
@@ -533,6 +610,30 @@ async function flagUnfulfilled(userId, payment, e) {
   } catch { /* flagging is best-effort */ }
 }
 
+// Record a coupon redemption for a CAPTURED order (idempotent on the order ref). Never
+// throws: the payment already succeeded at the discounted price, so a cap race or a
+// bookkeeping error must not fail /verify — it is logged for reconciliation instead.
+/** @param {any} userId @param {any} payment */
+async function redeemOrderCoupon(userId, payment) {
+  const code = payment.metadata && payment.metadata.couponCode;
+  if (!code) return;
+  try {
+    const coupon = await coupons.findByCode(code);
+    if (!coupon) return;
+    await coupons.redeem({
+      coupon, userId, orderRef: payment.razorpayOrderId || String(payment._id), paymentId: payment._id,
+      purpose: payment.purpose, discountCHF: payment.metadata.discountCHF, discountLocal: payment.metadata.discountLocal, currency: payment.currency,
+    });
+  } catch (e) {
+    try {
+      await require('./models/AuditLog').create({
+        actor: 'system', action: 'coupon_redeem_deferred', targetType: 'payment', targetId: String(payment._id),
+        detail: { code, userId: String(userId), reason: (e && /** @type {any} */ (e).message) || String(e) },
+      });
+    } catch { /* best-effort */ }
+  }
+}
+
 // GET /payment/pricing — live, localized prices for display (server order is authoritative)
 router.get('/pricing', requireAuth, async (req, res, next) => {
   try {
@@ -578,6 +679,7 @@ router.post('/verify', requireAuth, async (req, res, next) => {
       }
 
       await fulfillCaptured(userId, payment);   // never throws — flags on failure, no strand
+      await redeemOrderCoupon(userId, payment); // record a coupon redemption (idempotent)
       return res.json({ ok: true, devMode: true, paymentId: payment._id, purpose: payment.purpose });
     }
 
@@ -617,6 +719,7 @@ router.post('/verify', requireAuth, async (req, res, next) => {
     const purpose = payment.purpose;                     // authoritative, from the DB
 
     await fulfillCaptured(userId, payment);     // never throws — flags on failure, no strand
+    await redeemOrderCoupon(userId, payment);   // record a coupon redemption (idempotent)
 
     res.json({ ok: true, paymentId: payment._id, purpose });
   } catch (err) { next(err); }
