@@ -2303,11 +2303,16 @@ async function walletTopup() {
 }
 async function payFromWallet(purpose) {
   try {
-    const r = await api('/payment/pay-wallet', { method: 'POST', body: { purpose: purpose || 'base_subscription' } });
-    toast(`Paid ${r.currency} ${fmtMoney('', r.amount)} from wallet ✓`);
+    // A stable idempotency key per purchase intent: reused across a retry / double-click of
+    // the SAME purchase (the server de-dupes on it), so the wallet is debited exactly once.
+    if (!S._payWalletKey) S._payWalletKey = 'pw_' + Date.now() + '_' + Math.random().toString(36).slice(2, 10);
+    const r = await api('/payment/pay-wallet', { method: 'POST', body: { purpose: purpose || 'base_subscription', idempotencyKey: S._payWalletKey } });
+    S._payWalletKey = null;   // consumed — the next purchase gets a fresh key
+    toast(r.duplicate ? 'Already paid from your wallet ✓' : `Paid ${r.currency} ${fmtMoney('', r.amount)} from wallet ✓`);
     S.user = (await api('/auth/me')).user;
     if (location.hash === '#/onboarding') refreshUserAndRoute(); else renderSettings();
   } catch (e) {
+    // Keep the key so an immediate retry of the same intent reuses it (deduped server-side).
     toast(/Insufficient/i.test(e.message || '') ? 'Not enough wallet balance — add money, or pay by card.' : e.message);
   }
 }
