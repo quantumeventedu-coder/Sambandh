@@ -226,6 +226,20 @@ router.post('/create-order', requireAuth, async (req, res, next) => {
     // discount + tax (per the buyer's country/category) + gateway fee → total.
     const quote = await quoteFor(purpose, user, couponDiscountCHF);
     if (!quote) return res.status(400).json({ error: 'Unknown purpose' });
+    // RESERVE the coupon NOW — before the discounted price is committed — so the total cap
+    // and per-user limit are enforced up front. (Deferring to /verify would let several
+    // checkouts price at the discount before any is consumed, then swallow the over-cap at
+    // capture — real discounted sales past the cap.) Idempotent on couponRef; /verify
+    // re-confirms the same ref. A reserved-but-abandoned order holds a slot — a safe-direction
+    // leak; releasing on expiry is a follow-up.
+    const couponRef = coupon ? 'cpn_' + crypto.randomBytes(8).toString('hex') : null;
+    if (coupon) {
+      try {
+        await coupons.redeem({ coupon, userId: req.userId, orderRef: /** @type {string} */ (couponRef), purpose: purpose.replace('_high', ''), discountCHF: couponDiscountCHF, discountLocal: quote.discountLocal, currency: quote.code });
+      } catch (e) {
+        return res.status(409).json({ error: (e && /** @type {any} */ (e).message) || 'This coupon could not be applied.', couponError: (e && /** @type {any} */ (e).code) || 'EXHAUSTED' });
+      }
+    }
     // Breakdown persisted with the order so /verify, receipts, and pro-rated refunds
     // read the real charged amounts back from the DB, never from the request body.
     const breakdown = {
@@ -234,7 +248,7 @@ router.post('/create-order', requireAuth, async (req, res, next) => {
       taxTotal: quote.taxTotal, taxLines: quote.taxLines,
       gatewayFeePct: quote.gatewayFeePct, gatewayFee: quote.gatewayFee,
       total: quote.total, country: quote.country, category: quote.category,
-      ...(coupon ? { couponCode: coupon.code } : {}),
+      ...(coupon ? { couponCode: coupon.code, couponOrderRef: /** @type {string} */ (couponRef) } : {}),
     };
     const clientQuote = {
       amount: quote.minor, amountMajor: quote.total, amountCHF: quote.chf,
@@ -242,21 +256,12 @@ router.post('/create-order', requireAuth, async (req, res, next) => {
       couponCode: coupon ? coupon.code : null, discountLocal: quote.discountLocal,
     };
 
-    // Fully discounted (e.g. a 100%-off tester coupon) → NO gateway charge. Reserve the
-    // coupon, record a captured 'coupon' Payment, fulfill (grant the tier), and return —
-    // there is no /verify step for a zero-amount order.
+    // Fully discounted (e.g. a 100%-off tester coupon) → NO gateway charge. The coupon is
+    // already reserved above; record a captured 'coupon' Payment and fulfill (grant the tier).
     if (quote.total <= 0) {
-      const orderRef = 'free_' + crypto.randomBytes(8).toString('hex');
-      if (coupon) {
-        try {
-          await coupons.redeem({ coupon, userId: req.userId, orderRef, purpose: purpose.replace('_high', ''), discountCHF: couponDiscountCHF, discountLocal: quote.discountLocal, currency: quote.code });
-        } catch (e) {
-          return res.status(409).json({ error: (e && /** @type {any} */ (e).message) || 'This coupon could not be applied.', couponError: (e && /** @type {any} */ (e).code) || 'EXHAUSTED' });
-        }
-      }
       const payment = await Payment.create({
         userId: req.userId, purpose: purpose.replace('_high', ''), amountCHF: quote.chf, currency: quote.code,
-        razorpayOrderId: orderRef, status: 'captured', method: 'coupon', capturedAt: new Date(), createdAt: new Date(),
+        razorpayOrderId: couponRef || ('free_' + crypto.randomBytes(8).toString('hex')), status: 'captured', method: 'coupon', capturedAt: new Date(), createdAt: new Date(),
         metadata: { free: true, gender: user.profile.gender, amountLocal: 0, ...breakdown },
       });
       await fulfillCaptured(req.userId, payment);
@@ -620,8 +625,10 @@ async function redeemOrderCoupon(userId, payment) {
   try {
     const coupon = await coupons.findByCode(code);
     if (!coupon) return;
+    // Confirm on the SAME ref reserved at create-order → idempotent (returns the existing
+    // redemption, never a second consume). Falls back for older orders without a stored ref.
     await coupons.redeem({
-      coupon, userId, orderRef: payment.razorpayOrderId || String(payment._id), paymentId: payment._id,
+      coupon, userId, orderRef: (payment.metadata && payment.metadata.couponOrderRef) || payment.razorpayOrderId || String(payment._id), paymentId: payment._id,
       purpose: payment.purpose, discountCHF: payment.metadata.discountCHF, discountLocal: payment.metadata.discountLocal, currency: payment.currency,
     });
   } catch (e) {

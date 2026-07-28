@@ -5,10 +5,10 @@ const mongoose = require('../db/odm');
 // Two DB-level unique keys make redemption safe under concurrency:
 //   redemptionKey = `${couponId}:${orderRef}` — a given checkout redeems a coupon AT MOST
 //     once (idempotent: a retried /verify or free-activation can't double-consume).
-//   userLimitKey  = `${couponId}:${userId}`   — set ONLY when the coupon's perUserLimit is
-//     1 (the common case, e.g. one code per tester); a second redemption by the same user
-//     then fails the unique insert. For perUserLimit > 1 it is unset and a count check
-//     enforces the (softer) limit.
+//   userLimitKey  = `${couponId}:${userId}:${slot}` — the Nth redemption for this (coupon,
+//     user) claims slot N-1, so two concurrent attempts at the same slot collide on the
+//     unique index (one wins). This enforces perUserLimit RACE-SAFELY for every limit value
+//     — the cap can never be exceeded under concurrency.
 const CouponRedemptionSchema = new mongoose.Schema({
   couponId: { type: mongoose.Schema.Types.ObjectId, ref: 'Coupon', required: true, index: true },
   code: { type: String, index: true },

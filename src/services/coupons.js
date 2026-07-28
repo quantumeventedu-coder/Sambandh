@@ -91,14 +91,20 @@ async function validate(code, purpose, chfBase, userId) {
 async function redeem({ coupon, userId, orderRef, paymentId, purpose, discountCHF, discountLocal, currency }) {
   const couponId = coupon._id;
   const redemptionKey = `${couponId}:${orderRef}`;
-  const userLimitKey = Number(coupon.perUserLimit) === 1 ? `${couponId}:${userId}` : undefined;
 
   const prior = await CouponRedemption.findOne({ redemptionKey });
   if (prior) return prior;   // this order already redeemed — idempotent
 
-  // Soft per-user check for perUserLimit > 1 (the ===1 case is enforced by userLimitKey below).
-  if (!userLimitKey && coupon.perUserLimit != null && await userRedemptionCount(couponId, userId) >= coupon.perUserLimit) {
-    throw couponError('You’ve already used this coupon.', 'PER_USER');
+  // Per-user cap, enforced RACE-SAFELY for EVERY limit value by a SLOT unique key: the Nth
+  // redemption for this (coupon,user) claims slot N-1, so two concurrent attempts at the same
+  // slot collide on the unique index (one wins) — the limit can never be exceeded, and a
+  // concurrent/retried free-path request can't mint a second grant.
+  const perUser = coupon.perUserLimit != null ? Number(coupon.perUserLimit) : null;
+  let userLimitKey;
+  if (perUser != null) {
+    const used = await userRedemptionCount(couponId, userId);
+    if (used >= perUser) throw couponError('You’ve already used this coupon.', 'PER_USER');
+    userLimitKey = `${couponId}:${userId}:${used}`;
   }
 
   // TOTAL cap — a single conditional decrement (guard remaining > 0). Skip when unlimited.
@@ -140,14 +146,19 @@ async function create(data, adminId) {
   const flatOffCHF = kind === 'flat' ? Math.max(0, Number(data.flatOffCHF) || 0) : 0;
   if (kind === 'percent' && !(percentOff > 0)) throw couponError('Percent off must be greater than 0.', 'INVALID');
   if (kind === 'flat' && !(flatOffCHF > 0)) throw couponError('Flat amount must be greater than 0.', 'INVALID');
+  // A non-numeric cap must be REJECTED, not silently coerced to null (which would disable the
+  // cap and, on a 100%-off code, mint unlimited free memberships).
   const hasMax = data.maxRedemptions != null && data.maxRedemptions !== '';
-  const remaining = hasMax ? Math.max(0, Math.floor(Number(data.maxRedemptions))) : null;
+  const maxN = Number(data.maxRedemptions);
+  if (hasMax && !Number.isFinite(maxN)) throw couponError('Total uses must be a number.', 'INVALID');
+  const remaining = hasMax ? Math.max(0, Math.floor(maxN)) : null;
+  const puN = Number(data.perUserLimit);
+  const perUserLimit = data.perUserLimit != null ? (Number.isFinite(puN) ? Math.max(1, Math.floor(puN)) : 1) : 1;
   return Coupon.create({
     code, kind, percentOff, flatOffCHF,
     appliesTo: (Array.isArray(data.appliesTo) && data.appliesTo.length) ? data.appliesTo : ['*'],
     minAmountCHF: Math.max(0, Number(data.minAmountCHF) || 0),
-    remaining, maxRedemptions: remaining,
-    perUserLimit: data.perUserLimit != null ? Math.max(1, Math.floor(Number(data.perUserLimit))) : 1,
+    remaining, maxRedemptions: remaining, perUserLimit,
     redeemedCount: 0,
     startsAt: data.startsAt ? new Date(data.startsAt) : null,
     expiresAt: data.expiresAt ? new Date(data.expiresAt) : null,
@@ -159,18 +170,29 @@ async function create(data, adminId) {
 
 /** @param {any} id @param {any} patch */
 async function update(id, patch) {
+  const c = await Coupon.findById(id);
+  if (!c) return null;
+  // maxRedemptions change: move `remaining` by the DELTA atomically (number→number) so
+  // concurrent redeem() decrements are preserved, not clobbered by a stale absolute write.
+  if (patch.maxRedemptions !== undefined) {
+    const hasMax = patch.maxRedemptions !== null && patch.maxRedemptions !== '';
+    const raw = Number(patch.maxRedemptions);
+    if (hasMax && !Number.isFinite(raw)) throw couponError('Total uses must be a number.', 'INVALID');
+    const newMax = hasMax ? Math.max(0, Math.floor(raw)) : null;
+    if (newMax == null) {
+      await atomicUpdate(Coupon, { _id: id }, { $set: { maxRedemptions: null, remaining: null, updatedAt: new Date() } });
+    } else if (c.maxRedemptions == null || c.remaining == null) {
+      await atomicUpdate(Coupon, { _id: id }, { $set: { maxRedemptions: newMax, remaining: Math.max(0, newMax - (c.redeemedCount || 0)), updatedAt: new Date() } });
+    } else {
+      await atomicUpdate(Coupon, { _id: id }, { $inc: { remaining: newMax - c.maxRedemptions }, $set: { maxRedemptions: newMax, updatedAt: new Date() } });
+    }
+  }
   /** @type {Record<string, any>} */
   const set = { updatedAt: new Date() };
   if (patch.active != null) set.active = !!patch.active;
   if (patch.note != null) set.note = String(patch.note).slice(0, 300);
   if (patch.expiresAt !== undefined) set.expiresAt = patch.expiresAt ? new Date(patch.expiresAt) : null;
-  if (patch.perUserLimit != null) set.perUserLimit = Math.max(1, Math.floor(Number(patch.perUserLimit)));
-  if (patch.maxRedemptions !== undefined) {
-    const c = await Coupon.findById(id);
-    const newMax = (patch.maxRedemptions === null || patch.maxRedemptions === '') ? null : Math.max(0, Math.floor(Number(patch.maxRedemptions)));
-    set.maxRedemptions = newMax;
-    set.remaining = newMax == null ? null : Math.max(0, newMax - ((c && c.redeemedCount) || 0));
-  }
+  if (patch.perUserLimit != null) { const n = Number(patch.perUserLimit); if (Number.isFinite(n)) set.perUserLimit = Math.max(1, Math.floor(n)); }
   return Coupon.findByIdAndUpdate(id, { $set: set }, { new: true });
 }
 

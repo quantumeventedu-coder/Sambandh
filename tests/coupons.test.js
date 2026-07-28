@@ -142,16 +142,59 @@ describe('checkout integration', () => {
     expect(r.body.couponError).toBe('INVALID');
   });
 
-  test('a partial coupon flows through the gateway and is redeemed on /verify', async () => {
+  test('a partial coupon flows through the gateway and is redeemed exactly once (create-order reserve, /verify confirm)', async () => {
     await mkUser();
     const c = await mkCoupon({ code: 'HALF2', percentOff: 50, maxRedemptions: 5 });
     const order = await request(app).post('/payment/create-order').send({ purpose: 'base_subscription', couponCode: 'HALF2' });
     expect(order.body.free).toBeFalsy();
     expect(order.body.couponCode).toBe('HALF2');
+    expect((await Coupon.findById(c._id)).redeemedCount).toBe(1);   // RESERVED at create-order
     const oid = order.body.orderId, pid = 'pay_live_1';
     const sign = crypto.createHmac('sha256', process.env.RAZORPAY_KEY_SECRET).update(oid + '|' + pid).digest('hex');
     const v = await request(app).post('/payment/verify').send({ razorpay_order_id: oid, razorpay_payment_id: pid, razorpay_signature: sign });
     expect(v.body.ok).toBe(true);
-    expect((await Coupon.findById(c._id)).redeemedCount).toBe(1);   // redeemed at capture
+    expect((await Coupon.findById(c._id)).redeemedCount).toBe(1);   // /verify is an idempotent confirm — NOT a second consume
+  });
+});
+
+describe('review fixes — cap reserved up front, per-user race-safe, numeric guards', () => {
+  test('the PAID path RESERVES the cap at create-order — a second checkout past the cap is refused (not deferred to /verify)', async () => {
+    await mkUser();
+    await mkCoupon({ code: 'CAP1', percentOff: 50, maxRedemptions: 1 });
+    const a = await request(app).post('/payment/create-order').send({ purpose: 'base_subscription', couponCode: 'CAP1' });
+    expect(a.status).toBe(200);                                     // reserved
+    const b = await request(app).post('/payment/create-order').send({ purpose: 'base_subscription', couponCode: 'CAP1' });
+    expect([400, 409]).toContain(b.status);                         // cap enforced BEFORE the discounted charge
+    expect(b.body.couponError).toBe('EXHAUSTED');
+  });
+
+  test('perUserLimit > 1 is enforced by slot keys; a free coupon cannot be re-redeemed by the same user', async () => {
+    const c = await mkCoupon({ maxRedemptions: 20, perUserLimit: 2 });
+    await coupons.redeem({ coupon: c, userId: TEST_USER_ID, orderRef: 'x1' });
+    await coupons.redeem({ coupon: await Coupon.findById(c._id), userId: TEST_USER_ID, orderRef: 'x2' });
+    await expect(coupons.redeem({ coupon: await Coupon.findById(c._id), userId: TEST_USER_ID, orderRef: 'x3' }))
+      .rejects.toThrow(/already used/);                             // 3rd blocked at limit 2
+
+    await mkUser();
+    await mkCoupon({ code: 'FREE1', percentOff: 100, perUserLimit: 1, maxRedemptions: 10 });
+    const f1 = await request(app).post('/payment/create-order').send({ purpose: 'base_subscription', couponCode: 'FREE1' });
+    expect(f1.body.free).toBe(true);
+    const f2 = await request(app).post('/payment/create-order').send({ purpose: 'base_subscription', couponCode: 'FREE1' });
+    expect([400, 409]).toContain(f2.status);                       // second free activation refused
+    expect(f2.body.couponError).toBe('PER_USER');
+  });
+
+  test('update() moves remaining by the DELTA — concurrent-safe, never clobbered', async () => {
+    const c = await mkCoupon({ maxRedemptions: 100 });
+    await coupons.redeem({ coupon: c, userId: otherUser(), orderRef: 'r1' });
+    await coupons.redeem({ coupon: await Coupon.findById(c._id), userId: otherUser(), orderRef: 'r2' });
+    expect((await Coupon.findById(c._id)).remaining).toBe(98);
+    await coupons.update(c._id, { maxRedemptions: 200 });          // +100 delta
+    expect((await Coupon.findById(c._id)).remaining).toBe(198);    // 98 + 100 (NOT 200 − stale)
+    expect((await Coupon.findById(c._id)).maxRedemptions).toBe(200);
+  });
+
+  test('a non-numeric cap is REJECTED, not silently made unlimited', async () => {
+    await expect(mkCoupon({ maxRedemptions: '20 seats' })).rejects.toThrow(/must be a number/);
   });
 });
