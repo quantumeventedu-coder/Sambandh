@@ -85,6 +85,12 @@ async function nightlyBatch() {
     if (res.records) console.log(`[CRON] purged ${res.files} document original(s) across ${res.records} expired verification(s)`);
   } catch (e) { console.error('[CRON] doc deletion:', e.message); }
 
+  // 4b. Location-trail retention: the admin oversight trail is short-lived by design — drop
+  // location pings older than 30 days.
+  try {
+    await require('./models/LocationPing').deleteMany({ at: { $lt: new Date(Date.now() - 30 * 86400000) } });
+  } catch (e) { console.error('[CRON] location-trail retention:', e.message); }
+
   // 5. Erase accounts deleted 30+ days ago (spec §2.8.4 — DPDP full erasure)
   try {
     const cutoff = new Date(Date.now() - 30 * 86400000);

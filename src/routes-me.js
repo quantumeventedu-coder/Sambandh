@@ -153,6 +153,15 @@ router.post('/location', requireAuth, async (req, res, next) => {
       if (c) { updates['profile.city'] = c.name; updates['profile.state'] = c.state; }
     }
     const user = await User.findByIdAndUpdate(req.userId, updates, { new: true });
+    // Append to the location trail (admin oversight + dwell/duration), throttled to ~90s so
+    // it stays a sparse time-series. Captured ONLY while the app is open. Best-effort.
+    try {
+      const LocationPing = require('./models/LocationPing');
+      const last = await LocationPing.findOne({ userId: req.userId }).sort({ at: -1 }).select('at').lean();
+      if (!last || (Date.now() - new Date(last.at).getTime()) > 90000) {
+        await LocationPing.create({ userId: req.userId, lat, lng, accuracy: accuracy ?? null, at: new Date() });
+      }
+    } catch { /* trail is best-effort */ }
     res.json({ ok: true, city: user.profile?.city || null, state: user.profile?.state || null });
   } catch (err) { next(err); }
 });

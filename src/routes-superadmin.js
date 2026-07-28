@@ -734,4 +734,54 @@ router.put('/business', async (req, res, next) => {
   try { res.json({ business: await invoicing.updateBusiness(req.body || {}) }); } catch (err) { next(err); }
 });
 
+// ---- Location oversight map (ADMIN-ONLY; users' exact coords are never shown to other users) --
+// Locations are captured only while a user has the app open — a browser/PWA cannot read GPS
+// when the app is closed (that would need a native app + explicit consent).
+const LocationPing = require('./models/LocationPing');
+function haversineM(lat1, lng1, lat2, lng2) {
+  const R = 6371000, rad = d => d * Math.PI / 180;
+  const dLat = rad(lat2 - lat1), dLng = rad(lng2 - lng1);
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(rad(lat1)) * Math.cos(rad(lat2)) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(a));
+}
+router.get('/locations', async (req, res, next) => {
+  try {
+    const users = await User.find({})
+      .select('profile.firstName profile.city profile.location verification.idVerified status lastActiveAt role preview')
+      .limit(5000).lean();
+    const now = Date.now();
+    const points = [];
+    for (const u of users) {
+      const loc = u.profile && u.profile.location;
+      if (!loc || loc.lat == null || loc.lng == null) continue;
+      points.push({
+        id: u._id, name: (u.profile && u.profile.firstName) || '', city: (u.profile && u.profile.city) || '',
+        lat: loc.lat, lng: loc.lng, accuracy: loc.accuracy ?? null, at: loc.updatedAt || null,
+        verified: !!(u.verification && u.verification.idVerified),
+        active: !!(u.lastActiveAt && (now - new Date(u.lastActiveAt).getTime()) < 15 * 60000),
+        suspended: !!(u.status && u.status.suspended),
+        preview: !!u.preview, role: u.role || 'user',
+      });
+    }
+    res.json({ points, count: points.length });
+  } catch (err) { next(err); }
+});
+router.get('/users/:id/location-trail', async (req, res, next) => {
+  try {
+    const days = Math.min(30, Math.max(1, Number(req.query.days) || 7));
+    const since = new Date(Date.now() - days * 86400000);
+    const pings = await LocationPing.find({ userId: req.params.id, at: { $gt: since } }).sort({ at: 1 }).limit(3000).lean();
+    // Dwell: how long they've stayed within ~150 m of the latest fix (a "duration here").
+    let dwellMs = 0;
+    if (pings.length) {
+      const p = pings[pings.length - 1];
+      for (let i = pings.length - 1; i >= 0; i--) {
+        if (haversineM(pings[i].lat, pings[i].lng, p.lat, p.lng) <= 150) dwellMs = new Date(p.at).getTime() - new Date(pings[i].at).getTime();
+        else break;
+      }
+    }
+    res.json({ trail: pings.map(p => ({ lat: p.lat, lng: p.lng, accuracy: p.accuracy, at: p.at })), dwellMs, points: pings.length });
+  } catch (err) { next(err); }
+});
+
 module.exports = router;

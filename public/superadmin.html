@@ -72,6 +72,7 @@
       <button id="tb-test" onclick="show('test')">System Test</button>
       <button id="tb-commerce" onclick="show('commerce')">Commerce &amp; Tax</button>
       <button id="tb-coupons" onclick="show('coupons')">Coupons</button>
+      <button id="tb-locations" onclick="show('locations')">Locations</button>
     </div>
     <div id="view"></div>
   </div>
@@ -129,7 +130,7 @@ async function connect() {
 }
 
 function show(tab) {
-  ['overview','users','llm','audit','test','commerce','coupons'].forEach(t => $('#tb-'+t).classList.toggle('on', t===tab));
+  ['overview','users','llm','audit','test','commerce','coupons','locations'].forEach(t => $('#tb-'+t).classList.toggle('on', t===tab));
   if (tab==='overview') renderOverview();
   if (tab==='users') renderUsers();
   if (tab==='llm') renderLLM();
@@ -137,6 +138,7 @@ function show(tab) {
   if (tab==='test') renderTest();
   if (tab==='commerce') renderCommerce();
   if (tab==='coupons') renderCoupons();
+  if (tab==='locations') renderLocations();
 }
 
 // ---- Commerce & Tax editor: prices, per-country taxes, gateway fee, cancellation ----
@@ -811,6 +813,108 @@ async function showRedemptions(id, code) {
       <tr style="text-align:left;color:var(--mut)"><th style="padding:6px 8px">User</th><th>For</th><th>Discount</th><th>When (UTC)</th></tr>
       ${rows || '<tr><td colspan="4" style="padding:10px;color:var(--mut)">No redemptions yet.</td></tr>'}
     </table></div></div>`;
+}
+
+// ---- Location oversight map (NASA GIBS satellite basemap + precise pins) ----------------
+const LOC = { points: [], bbox: null, W: 900, H: 540, flt: {} };
+function relTime(t){ const s=Math.max(1,Math.floor((Date.now()-new Date(t).getTime())/1000)); if(s<60)return s+'s ago'; const m=Math.floor(s/60); if(m<60)return m+'m ago'; const h=Math.floor(m/60); if(h<24)return h+'h ago'; return Math.floor(h/24)+'d ago'; }
+function fmtDur(ms){ const m=Math.round((ms||0)/60000); if(m<60)return m+' min'; const h=Math.floor(m/60); return h+'h '+(m%60)+'m'; }
+async function renderLocations() {
+  $('#view').innerHTML = '<div class="card">Loading user locations…</div>';
+  let data;
+  try { data = await api('/locations'); } catch (e) { $('#view').innerHTML = '<div class="card">'+esc(e.message)+'</div>'; return; }
+  LOC.points = data.points || [];
+  LOC.flt = { verified:false, active:false, suspended:false, hidePreview:true };
+  $('#view').innerHTML = `
+    <div class="card">
+      <div class="row" style="justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+        <h3 style="font-family:Georgia,serif;margin:0">User locations <span style="color:var(--mut);font-weight:400">· <span id="loc-count">${LOC.points.length}</span> plotted</span></h3>
+        <div style="display:flex;gap:12px;flex-wrap:wrap;font-size:13px;align-items:center">
+          <label><input type="checkbox" onchange="LOC.flt.verified=this.checked;drawMap()"> Verified</label>
+          <label><input type="checkbox" onchange="LOC.flt.active=this.checked;drawMap()"> Active now</label>
+          <label><input type="checkbox" onchange="LOC.flt.suspended=this.checked;drawMap()"> Suspended</label>
+          <label><input type="checkbox" checked onchange="LOC.flt.hidePreview=this.checked;drawMap()"> Hide preview</label>
+          <button onclick="locFit('users')">Fit</button><button onclick="locFit('IN')">India</button><button onclick="locFit('world')">World</button>
+        </div>
+      </div>
+      <p style="color:#888;font-size:12px;margin:6px 0 10px">NASA satellite basemap (GIBS, ~500 m). Exact coordinates are <b>admin-only</b>. Captured <b>only while a user has the app open</b> — a browser can't read GPS when the app is closed. Tap a pin → open in your device's map. Legend: <span style="color:#46c37b">●</span> verified · <span style="color:#3aa0ff">●</span> active now · <span style="color:#e5484d">●</span> suspended.</p>
+      <div id="loc-map" style="position:relative;width:100%;max-width:${LOC.W}px;aspect-ratio:${LOC.W} / ${LOC.H};border:1px solid var(--line);border-radius:10px;overflow:hidden;background:#04070f">
+        <img id="loc-base" alt="satellite basemap" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover"/>
+        <div id="loc-pins" style="position:absolute;inset:0"></div>
+      </div>
+      <div id="loc-pop"></div>
+    </div>`;
+  locFit('users');
+}
+function locFilteredPoints() {
+  return LOC.points.filter(p => {
+    if (LOC.flt.hidePreview && p.preview) return false;
+    if (LOC.flt.verified && !p.verified) return false;
+    if (LOC.flt.active && !p.active) return false;
+    if (LOC.flt.suspended && !p.suspended) return false;
+    return true;
+  });
+}
+function adjustAspect(bb, A) {
+  let latSpan = Math.max(0.02, bb.n-bb.s), lngSpan = Math.max(0.02, bb.e-bb.w);
+  const cLat=(bb.n+bb.s)/2, cLng=(bb.e+bb.w)/2;
+  if (lngSpan/latSpan < A) lngSpan = latSpan*A; else latSpan = lngSpan/A;
+  return { s:Math.max(-85,cLat-latSpan/2), n:Math.min(85,cLat+latSpan/2), w:Math.max(-180,cLng-lngSpan/2), e:Math.min(180,cLng+lngSpan/2) };
+}
+function locFit(mode) {
+  const pts = locFilteredPoints();
+  let bb;
+  if (mode==='world') bb={ s:-55, w:-170, n:75, e:180 };
+  else if (mode==='IN') bb={ s:6, w:67, n:37, e:98 };
+  else if (pts.length) {
+    let s=90,w=180,n=-90,e=-180;
+    for (const p of pts){ s=Math.min(s,p.lat);n=Math.max(n,p.lat);w=Math.min(w,p.lng);e=Math.max(e,p.lng); }
+    const pLat=Math.max(0.05,(n-s)*0.2), pLng=Math.max(0.05,(e-w)*0.2);
+    bb={ s:s-pLat, w:w-pLng, n:n+pLat, e:e+pLng };
+  } else bb={ s:6, w:67, n:37, e:98 };
+  LOC.bbox = adjustAspect(bb, LOC.W/LOC.H);
+  drawMap();
+}
+function drawMap() {
+  if (!LOC.bbox) return locFit('users');
+  const bb = LOC.bbox;
+  const img = document.getElementById('loc-base');
+  if (img) img.src = `https://gibs.earthdata.nasa.gov/wms/epsg4326/best/wms.cgi?SERVICE=WMS&VERSION=1.3.0&REQUEST=GetMap&LAYERS=BlueMarble_NextGeneration&CRS=EPSG:4326&BBOX=${bb.s.toFixed(4)},${bb.w.toFixed(4)},${bb.n.toFixed(4)},${bb.e.toFixed(4)}&WIDTH=${LOC.W}&HEIGHT=${LOC.H}&FORMAT=image/jpeg`;
+  const pts = locFilteredPoints().filter(p => p.lat>=bb.s&&p.lat<=bb.n&&p.lng>=bb.w&&p.lng<=bb.e);
+  const cnt = document.getElementById('loc-count'); if (cnt) cnt.textContent = pts.length;
+  const box = document.getElementById('loc-pins'); if (!box) return;
+  box.innerHTML = pts.map(p => {
+    const x=((p.lng-bb.w)/(bb.e-bb.w))*100, y=((bb.n-p.lat)/(bb.n-bb.s))*100;
+    const c = p.suspended?'#e5484d':p.active?'#3aa0ff':p.verified?'#46c37b':'#e8b84b';
+    return `<button title="${esc(p.name||'user')}${p.city?(' · '+esc(p.city)):''}" onclick="locPin('${p.id}')" style="position:absolute;left:${x.toFixed(2)}%;top:${y.toFixed(2)}%;transform:translate(-50%,-50%);width:12px;height:12px;border-radius:50%;background:${c};border:1.5px solid #fff;box-shadow:0 0 0 1px rgba(0,0,0,.5);cursor:pointer;padding:0;opacity:.9"></button>`;
+  }).join('');
+}
+function locPin(id) {
+  const p = LOC.points.find(x => String(x.id)===String(id)); if (!p) return;
+  const pop = document.getElementById('loc-pop'); if (!pop) return;
+  const maps = `https://www.google.com/maps/search/?api=1&query=${p.lat},${p.lng}`;
+  pop.innerHTML = `<div class="card" style="margin-top:10px">
+    <div class="row" style="justify-content:space-between;align-items:center"><b>${esc(p.name||'User')} ${p.verified?'<span class="pill g">verified</span>':''}${p.suspended?' <span class="pill r">suspended</span>':''}</b><button onclick="document.getElementById('loc-pop').innerHTML=''">✕</button></div>
+    <div class="hint" style="color:var(--mut)">${esc(p.city||'')}${p.active?' · active now':(p.at?(' · last seen '+relTime(p.at)):'')}</div>
+    <div class="hint" style="color:var(--mut);font-family:monospace;font-size:11px">${Number(p.lat).toFixed(5)}, ${Number(p.lng).toFixed(5)}${p.accuracy?(' · ±'+Math.round(p.accuracy)+' m'):''}</div>
+    <div id="loc-trailinfo" class="hint" style="margin-top:6px;color:var(--mut)"></div>
+    <div class="row" style="gap:8px;margin-top:8px;flex-wrap:wrap">
+      <button onclick="window.open('${maps}','_blank','noopener')">Open in device map</button>
+      <button onclick="locTrail('${p.id}')">Show 7-day trail</button>
+    </div></div>`;
+}
+async function locTrail(id) {
+  const info = document.getElementById('loc-trailinfo'); if (info) info.textContent = 'Loading trail…';
+  try {
+    const r = await api('/users/'+id+'/location-trail?days=7');
+    const bb = LOC.bbox, pinbox = document.getElementById('loc-pins');
+    let svg = document.getElementById('loc-trail-svg');
+    if (!svg && pinbox) { pinbox.insertAdjacentHTML('afterbegin', '<svg id="loc-trail-svg" viewBox="0 0 100 100" preserveAspectRatio="none" style="position:absolute;inset:0;width:100%;height:100%;pointer-events:none"></svg>'); svg = document.getElementById('loc-trail-svg'); }
+    const pts = (r.trail||[]).filter(t => t.lat>=bb.s&&t.lat<=bb.n&&t.lng>=bb.w&&t.lng<=bb.e);
+    const poly = pts.map(t => `${(((t.lng-bb.w)/(bb.e-bb.w))*100).toFixed(2)},${(((bb.n-t.lat)/(bb.n-bb.s))*100).toFixed(2)}`).join(' ');
+    if (svg) svg.innerHTML = poly ? `<polyline points="${poly}" fill="none" stroke="#ffd23f" stroke-width="1.4" vector-effect="non-scaling-stroke" opacity=".95"/>` : '';
+    if (info) info.textContent = `Trail: ${r.points} fix(es) over 7 days · been here ~${fmtDur(r.dwellMs)}`;
+  } catch (e) { if (info) info.textContent = e.message; }
 }
 
 fetch('/health').then(r=>r.json()).then(h => {
