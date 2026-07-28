@@ -1062,7 +1062,8 @@ function obPay() {
       </ul>
     </div>
     <button class="btn" onclick="obPayNow()">Pay with UPI / Card</button>
-    <div class="pay-trust">Cancel within 2 days for a pro-rated refund · Secure payment via Razorpay · Taxes itemised above · No hidden charges</div>
+    <button class="btn secondary mt" onclick="payFromWallet('base_subscription')">Pay from wallet — no fee</button>
+    <div class="pay-trust">Cancel within 2 days for a pro-rated refund · Card via Razorpay, or your wallet · Taxes itemised above</div>
   </div>`;
 }
 
@@ -2163,6 +2164,9 @@ async function renderSettings() {
       <h2>Membership</h2>
       ${tierCards(u)}
 
+      <h2>Wallet</h2>
+      <div id="me-wallet" class="card"><div class="hint">Loading your wallet…</div></div>
+
       <h2>Security</h2>
       <div class="card" id="twofa-card"><div class="setting-row"><span class="ic-row">${ic('lock')} Two-factor authentication</span><span class="hint">Loading…</span></div></div>
 
@@ -2202,7 +2206,65 @@ async function renderSettings() {
     loadRhythm();
     loadNetwork();
     loadNature(u);
+    loadWallet();
   } catch (e) { screen.querySelector('.section-pad').innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+}
+
+// ---- Wallet: stored value, pay membership without a gateway (no per-txn fee) ----
+function walletSym(code) {
+  const M = { INR: '₹', CHF: 'CHF ', USD: '$', EUR: '€', GBP: '£', AED: 'AED ', SGD: 'S$', AUD: 'A$', CAD: 'C$', JPY: '¥' };
+  return M[code] || (code ? code + ' ' : '');
+}
+async function loadWallet() {
+  const el = document.getElementById('me-wallet'); if (!el) return;
+  try {
+    const w = await api('/payment/wallet');
+    S._wallet = w;
+    const sym = walletSym(w.currency);
+    const bal = w.currency ? `${sym}${fmtMoney('', w.balance)}` : '—';
+    const hist = (w.history || []).slice(0, 6).map(t => {
+      const sign = t.amount >= 0 ? '+' : '−';
+      const cls = t.amount >= 0 ? 'forest' : 'sindoor';
+      return `<div class="setting-row" style="font-size:12.5px"><span>${esc(t.note || t.type)}${t.createdAt ? ' · ' + new Date(t.createdAt).toLocaleDateString() : ''}</span><b style="color:var(--${cls})">${sign}${walletSym(t.currency)}${fmtMoney('', Math.abs(t.amount))}</b></div>`;
+    }).join('') || '<div class="hint" style="padding:6px 0">No wallet activity yet.</div>';
+    el.innerHTML = `<div style="display:flex;justify-content:space-between;align-items:center">
+        <div><div style="font-size:12px;color:var(--ink-soft)">Wallet balance</div>
+          <b style="font-family:Georgia,serif;font-size:26px;color:var(--sindoor-deep)">${bal}</b></div>
+        <button class="btn small" onclick="walletTopup()">Add money</button>
+      </div>
+      <div style="margin-top:8px;border-top:1px solid var(--hair);padding-top:8px">${hist}</div>
+      <p class="hint" style="margin-top:6px">Pay for membership from your wallet — no payment fee. Works everywhere, even where UPI isn't available.</p>`;
+  } catch (e) { el.innerHTML = `<div class="hint">${esc(e.message)}</div>`; }
+}
+async function walletTopup() {
+  const amt = prompt('How much would you like to add to your wallet? (a small payment fee applies)');
+  if (amt == null) return;
+  const amount = Math.round((Number(amt) || 0) * 100) / 100;
+  if (!(amount > 0)) return toast('Enter a valid amount.');
+  try {
+    const order = await api('/payment/wallet/topup', { method: 'POST', body: { amount } });
+    if (order.devMode) {
+      await api('/payment/verify', { method: 'POST', body: { razorpay_order_id: order.orderId } });
+      toast('Wallet topped up ✓'); return loadWallet();
+    }
+    await ensureRazorpay();
+    const rzp = new Razorpay({
+      key: order.key, amount: order.amount, currency: order.currency, name: 'Sambandh',
+      description: `Wallet top-up (${order.symbol}${fmtMoney('', order.topupAmount)})`, order_id: order.orderId, prefill: order.prefill,
+      handler: async resp => { await api('/payment/verify', { method: 'POST', body: { ...resp, purpose: 'wallet_topup' } }); toast('Wallet topped up ✓'); loadWallet(); }
+    });
+    rzp.open();
+  } catch (e) { toast(e.message); }
+}
+async function payFromWallet(purpose) {
+  try {
+    const r = await api('/payment/pay-wallet', { method: 'POST', body: { purpose: purpose || 'base_subscription' } });
+    toast(`Paid ${r.currency} ${fmtMoney('', r.amount)} from wallet ✓`);
+    S.user = (await api('/auth/me')).user;
+    if (location.hash === '#/onboarding') refreshUserAndRoute(); else renderSettings();
+  } catch (e) {
+    toast(/Insufficient/i.test(e.message || '') ? 'Not enough wallet balance — add money, or pay by card.' : e.message);
+  }
 }
 
 // "Your nature profile" — the self-declare features (Samudrika) + the plain-language

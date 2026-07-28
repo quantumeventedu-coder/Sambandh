@@ -38,6 +38,25 @@ if (!DEV_PAYMENTS) {
 const fx = require('./services/fx');
 const commerce = require('./services/commerce-config');
 const tax = require('./services/tax');
+const wallet = require('./services/wallet');
+const { toMinor, fromMinor } = require('./services/money');
+
+/**
+ * Genuinely-atomic Payment state transition: ONE conditional `UPDATE … WHERE … RETURNING`
+ * (pg-odm atomicUpdate), so two concurrent requests can never both win the same transition
+ * — the loser gets null. Plain findOneAndUpdate is READ-THEN-WRITE on pg-odm (loads then
+ * UPDATEs by id, NOT re-checking the status guard in SQL), which would let concurrent
+ * /verify, cancel, or refund calls double-capture / double-refund. Used for every
+ * money-critical status flip. Falls back to findOneAndUpdate only where atomicUpdate is
+ * absent (real MongoDB, where findOneAndUpdate is itself atomic).
+ * @param {Record<string,any>} filter @param {Record<string,any>} set
+ * @returns {Promise<any>}
+ */
+function claimPayment(filter, set) {
+  return typeof (/** @type {any} */ (Payment).atomicUpdate) === 'function'
+    ? (/** @type {any} */ (Payment)).atomicUpdate(filter, { $set: set })
+    : Payment.findOneAndUpdate(filter, { $set: set }, { new: true });
+}
 
 /**
  * The Razorpay secret, or a loud failure. Signature verification must NEVER run
@@ -89,13 +108,8 @@ const LEGACY_PURPOSES = {
 /** @type {Record<string, string>} */
 const SYMBOLS = { INR: '₹', CHF: 'CHF ', USD: '$', EUR: '€', GBP: '£', AED: 'AED ', SGD: 'S$', AUD: 'A$', CAD: 'C$', JPY: '¥' };
 
-// Zero-decimal (exponent-0) currencies: the major unit IS the smallest unit, so the
-// gateway amount MUST NOT be multiplied by 100 (¥932 is 932, not 93200). Everything
-// else is 2-decimal. Charging the gateway uses minor units, so this must be exact.
-const ZERO_DECIMAL = new Set(['JPY', 'KRW', 'VND', 'CLP', 'ISK', 'XAF', 'XOF', 'BIF', 'DJF', 'GNF', 'KMF', 'MGA', 'PYG', 'RWF', 'UGX', 'VUV', 'XPF']);
-/** Convert a major-unit amount to the gateway's minor units for a currency.
- * @param {number} amount @param {string} code @returns {number} */
-const toMinor = (amount, code) => (ZERO_DECIMAL.has(String(code)) ? Math.round(amount) : Math.round(amount * 100));
+// Gateway amounts are charged in minor units (services/money.toMinor is currency-
+// exponent-aware, so ¥932 stays 932, not 93200).
 
 /**
  * Map a payment purpose to a tax category (so the right rate applies per jurisdiction).
@@ -304,11 +318,7 @@ router.post('/cancel-subscription', requireAuth, async (req, res, next) => {
     // only the request that wins the conditional update proceeds; the rest get 409.
     let claimed = null;
     if (payment) {
-      claimed = await Payment.findOneAndUpdate(
-        { _id: payment._id, status: 'captured' },
-        { $set: { status: 'refunding' } },
-        { new: true },
-      );
+      claimed = await claimPayment({ _id: payment._id, status: 'captured' }, { status: 'refunding' });
       if (!claimed) return res.status(409).json({ error: 'A cancellation is already in progress or completed.' });
     }
 
@@ -325,21 +335,31 @@ router.post('/cancel-subscription', requireAuth, async (req, res, next) => {
 
     // Refund at the gateway (real partial refund in prod; simulated in dev), then
     // finalize the claimed row. On a gateway error, roll the claim back to 'captured'.
+    // Wallet-paid subscriptions have NO gateway charge to reverse — the refund must go
+    // back to the wallet, not to a razorpay payment that doesn't exist.
+    const fromWallet = !!(claimed && (claimed.method === 'wallet' || (claimed.metadata && claimed.metadata.paidFromWallet)));
     if (claimed) {
       try {
-        if (refundAmount > 0 && !DEV_PAYMENTS && razorpay && claimed.razorpayPaymentId) {
-          await razorpay.payments.refund(claimed.razorpayPaymentId, {
-            amount: toMinor(refundAmount, currency), speed: 'normal',
-            notes: { idempotency: `refund_${claimed._id}` },
-          });
+        if (refundAmount > 0) {
+          if (fromWallet) {
+            // Idempotent on ref: a retry after a partial failure (below) re-credits nothing.
+            await wallet.credit(userId, refundAmount, currency, { type: 'refund', purpose: 'cancellation', ref: String(claimed._id), note: 'Membership cancellation refund' });
+          } else if (!DEV_PAYMENTS && razorpay && claimed.razorpayPaymentId) {
+            await razorpay.payments.refund(claimed.razorpayPaymentId, {
+              amount: toMinor(refundAmount, currency), speed: 'normal',
+              notes: { idempotency: `refund_${claimed._id}` },
+            });
+          }
         }
-        claimed.status = 'refunded';
-        claimed.refundedAt = new Date();
-        await claimed.save();
       } catch (refundErr) {
-        await Payment.findOneAndUpdate({ _id: claimed._id, status: 'refunding' }, { $set: { status: 'captured' } });
+        // The refund was NOT dispatched → safe to reopen 'captured' for a retry.
+        await claimPayment({ _id: claimed._id, status: 'refunding' }, { status: 'captured' });
         throw refundErr;
       }
+      // Refund dispatched. Finalize refunding→refunded. If THIS flip fails we must NOT reopen
+      // 'captured' — a retry would re-dispatch the gateway refund (notes.idempotency is not a
+      // real gateway idempotency key). Leave it 'refunding' for an idempotent operator replay.
+      await claimPayment({ _id: claimed._id, status: 'refunding' }, { status: 'refunded', refundedAt: new Date() });
     }
 
     await User.findByIdAndUpdate(userId, {
@@ -352,7 +372,9 @@ router.post('/cancel-subscription', requireAuth, async (req, res, next) => {
       await Notification.create({
         userId, type: 'membership_cancelled', severity: 'info', title: 'Membership cancelled',
         body: refundAmount > 0
-          ? `Your membership is cancelled. A pro-rated refund of ${currency} ${refundAmount} (for the unused time) reaches your account in 5–7 working days.`
+          ? (fromWallet
+              ? `Your membership is cancelled. A pro-rated refund of ${currency} ${refundAmount} (for the unused time) has been added back to your wallet.`
+              : `Your membership is cancelled. A pro-rated refund of ${currency} ${refundAmount} (for the unused time) reaches your account in 5–7 working days.`)
           : 'Your membership is cancelled.',
       });
     } catch { /* notification is best-effort */ }
@@ -366,6 +388,150 @@ router.post('/cancel-subscription', requireAuth, async (req, res, next) => {
     res.json({ ok: true, refunded: refundAmount > 0, refundAmount, currency, fraction: Math.round(fraction * 1000) / 1000 });
   } catch (err) { next(err); }
 });
+
+// ---- WALLET: stored value, so members can pay without a gateway each time (and in
+// countries where UPI/cards are awkward). Paying FROM the wallet skips the per-txn
+// gateway fee; the fee was already paid at top-up. ------------------------------------
+
+// GET /payment/wallet — balance + recent ledger.
+router.get('/wallet', requireAuth, async (req, res, next) => {
+  try {
+    const [w, history] = await Promise.all([wallet.getWallet(req.userId), wallet.history(req.userId, 30)]);
+    res.json({ ...w, history });
+  } catch (e) { next(e); }
+});
+
+// POST /payment/wallet/topup { amount } — add funds. Charges (amount + gateway fee) via
+// the gateway; on capture (/verify) the wallet is credited `amount` (no tax — storing
+// value is not a taxable supply).
+router.post('/wallet/topup', requireAuth, async (req, res, next) => {
+  try {
+    const user = await User.findById(req.userId);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+    const amount = Math.round((Number(req.body.amount) || 0) * 100) / 100;
+    if (!(amount > 0)) return res.status(400).json({ error: 'Enter a top-up amount' });
+    const cc = await commerce.countryConfig((user.profile && user.profile.country) || 'IN');
+    const cfg = await commerce.getCommerce();
+    const code = cc.currency;
+    const w = await wallet.getWallet(user._id);
+    // Reject a mismatched currency even at zero balance — a wallet is single-currency,
+    // and a mismatched top-up would strand at capture (credit() rejects it) after charging.
+    if (w.currency && w.currency !== code) {
+      return res.status(400).json({ error: `Your wallet holds ${w.currency}; top up in ${w.currency}.` });
+    }
+    const q = tax.computeQuote({ components: [{ label: 'Top-up', amount, rate: 0 }], gatewayFeePct: cfg.gatewayFeePct });
+    const meta = { topupAmount: amount, gatewayFee: q.gatewayFee, total: q.total, currency: code, amountLocal: q.total };
+    const clientQuote = { amount: toMinor(q.total, code), amountMajor: q.total, currency: code, symbol: SYMBOLS[code] || (code + ' '), purpose: 'wallet_topup', topupAmount: amount, gatewayFee: q.gatewayFee };
+
+    if (DEV_PAYMENTS) {
+      const orderId = 'order_dev_' + crypto.randomBytes(8).toString('hex');
+      await Payment.create({ userId: req.userId, purpose: 'wallet_topup', amountCHF: 0, currency: code, razorpayOrderId: orderId, status: 'created', createdAt: new Date(), metadata: { dev: true, ...meta } });
+      return res.json({ devMode: true, orderId, ...clientQuote });
+    }
+    if (!razorpay) return res.status(503).json({ error: 'Payments are not configured.' });
+    const order = await razorpay.orders.create({ amount: toMinor(q.total, code), currency: code, receipt: `wt_${Date.now().toString(36)}_${String(user._id).slice(-6)}`, notes: { userId: String(user._id), purpose: 'wallet_topup' } });
+    await Payment.create({ userId: req.userId, purpose: 'wallet_topup', amountCHF: 0, currency: code, razorpayOrderId: order.id, status: 'created', createdAt: new Date(), metadata: meta });
+    res.json({ orderId: order.id, ...clientQuote, key: process.env.RAZORPAY_KEY_ID, prefill: { name: user.profile.firstName, contact: user.phone } });
+  } catch (e) { next(e); }
+});
+
+// POST /payment/pay-wallet { purpose } — pay a membership plan from the wallet. NO gateway
+// fee (internal): total = base + tax. Atomic debit; if fulfillment fails, auto-refund.
+router.post('/pay-wallet', requireAuth, async (req, res, next) => {
+  try {
+    const user = await User.findById(req.userId);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+    const purpose = LEGACY_PURPOSES[req.body.purpose] || req.body.purpose || 'base_subscription';
+    if (!/_(subscription|annual)$/.test(purpose)) return res.status(400).json({ error: 'Wallet payment supports membership plans here.' });
+    const quote = await quoteFor(purpose, user);
+    if (!quote) return res.status(400).json({ error: 'Unknown purpose' });
+    const cur = quote.code;
+    // Currency-exponent-aware: round base+tax to the currency's minor precision (whole units
+    // for zero-decimal like JPY) via money.js, so the amount charged, shown, stored and
+    // debited all agree — no fractional over/undercharge on a currency with no sub-unit.
+    const walletTotal = fromMinor(toMinor(quote.base + quote.taxTotal, cur), cur);   // base + tax, no gateway fee
+    const w = await wallet.getWallet(user._id);
+    if (w.currency && w.currency !== cur) return res.status(400).json({ error: `Your wallet holds ${w.currency}, but this is priced in ${cur}.` });
+    if (w.balance < walletTotal) return res.status(402).json({ error: 'Insufficient wallet balance', needed: walletTotal, balance: w.balance, currency: cur });
+
+    // Duplicate-submit guard. The atomic debit prevents OVERSPEND, but two affordable debits
+    // (double-click / client retry — /pay-wallet has no order to bind to) would buy the same
+    // membership twice. A client-supplied idempotencyKey makes the spend single-apply even
+    // under true concurrency (the ledger's unique idemKey rejects the second); the 20s window
+    // is the backstop when no key is sent.
+    const canonicalPurpose = purpose.replace('_high', '');
+    const idemKey = (typeof req.body.idempotencyKey === 'string' && req.body.idempotencyKey.trim())
+      ? `pw_${req.body.idempotencyKey.trim().slice(0, 80)}` : null;
+    const recent = await Payment.findOne({ userId: req.userId, purpose: canonicalPurpose, method: 'wallet', status: 'captured' }).sort({ createdAt: -1 });
+    if (!idemKey && recent && recent.createdAt && (Date.now() - new Date(recent.createdAt).getTime()) < 20000) {
+      return res.status(409).json({ error: 'This looks like a duplicate of a wallet payment you just made.' });
+    }
+
+    // Atomic debit; the balance guard prevents overspend/race. A `duplicate` result means this
+    // exact spend already went through (retry) — return the original outcome, no second grant.
+    const after = await wallet.debit(user._id, walletTotal, cur, { purpose, note: `Membership (${purpose})`, ref: idemKey || undefined });
+    if (!after) return res.status(402).json({ error: 'Insufficient wallet balance', currency: cur });
+    if (after.duplicate) {
+      return res.json({ ok: true, paidFromWallet: true, duplicate: true, amount: walletTotal, currency: cur, balance: after.balance, paymentId: recent && recent._id });
+    }
+    let payment = null;
+    try {
+      payment = await Payment.create({
+        userId: req.userId, purpose: purpose.replace('_high', ''), amountCHF: quote.chf, currency: cur,
+        status: 'captured', method: 'wallet', capturedAt: new Date(), createdAt: new Date(),
+        metadata: { base: quote.base, taxTotal: quote.taxTotal, total: walletTotal, country: quote.country, category: quote.category, paidFromWallet: true, idemKey },
+      });
+      await activateTier(String(req.userId), purpose, payment);
+      res.json({ ok: true, paidFromWallet: true, amount: walletTotal, currency: cur, balance: after.balance, paymentId: payment._id });
+    } catch (fulfillErr) {
+      // Roll the money back AND void the orphaned captured Payment, so cancel/admin-refund
+      // can never treat a reversed wallet sale as real.
+      await wallet.credit(user._id, walletTotal, cur, { type: 'refund', purpose, note: 'Auto-refund: fulfillment failed' });
+      if (payment && payment._id) await Payment.findByIdAndUpdate(payment._id, { $set: { status: 'failed' } });
+      throw fulfillErr;
+    }
+  } catch (e) { next(e); }
+});
+
+// Apply a CAPTURED payment's fulfillment (grant tier / mark join fee / credit top-up). The
+// gateway has ALREADY taken the money and the capture flip is committed, so this must NEVER
+// throw: a 500 here would strand the payment, because a retry of /verify sees status
+// 'captured' and returns alreadyProcessed WITHOUT re-fulfilling. On ANY failure it flags the
+// payment for reconciliation and notifies the user. Fulfillment is NOT auto-re-driven on
+// retry, because activateTier STACKS (re-running would double the granted time) — an operator
+// reconciles the flagged payment. The wallet credit is idempotent on the payment ref.
+/** @param {any} userId @param {any} payment */
+async function fulfillCaptured(userId, payment) {
+  try {
+    const p = payment.purpose;
+    if (p === 'join_fee') await markJoinFeePaid(userId, payment);
+    else if (/_(subscription|annual)$/.test(p)) await activateTier(userId, p, payment);
+    else if (p === 'wallet_topup') await wallet.credit(userId, payment.metadata.topupAmount, payment.metadata.currency, { type: 'topup', ref: String(payment._id), note: 'Wallet top-up' });
+  } catch (e) {
+    await flagUnfulfilled(userId, payment, e);
+  }
+}
+
+/** Flag a captured-but-unfulfilled payment for reconciliation; never throws. @param {any} userId @param {any} payment @param {any} e */
+async function flagUnfulfilled(userId, payment, e) {
+  const err = /** @type {any} */ (e);
+  const mismatch = !!(err && err.code === 'WALLET_CURRENCY');
+  const md = payment.metadata || {};
+  const amount = md.topupAmount ?? md.total ?? payment.amountCHF;
+  const cur = md.currency || payment.currency || '';
+  try {
+    await require('./models/AuditLog').create({
+      actor: 'system', action: 'payment_unfulfilled', targetType: 'payment', targetId: String(payment._id),
+      detail: { userId: String(userId), purpose: payment.purpose, amount, currency: cur, reason: (err && err.message) || String(err), mismatch },
+    });
+    await require('./models/Notification').create({
+      userId, type: 'payment_unfulfilled', severity: 'warning', title: 'We’re finalizing your payment',
+      body: mismatch
+        ? `We received your ${cur} ${amount} top-up but couldn't add it to your wallet (currency mismatch). Our team will resolve it — you won't lose the amount.`
+        : `We received your payment but couldn't finish applying it just now. Our team will complete it shortly — you won't lose anything.`,
+    });
+  } catch { /* flagging is best-effort */ }
+}
 
 // GET /payment/pricing — live, localized prices for display (server order is authoritative)
 router.get('/pricing', requireAuth, async (req, res, next) => {
@@ -399,11 +565,11 @@ router.post('/verify', requireAuth, async (req, res, next) => {
     const { razorpay_order_id, razorpay_payment_id, razorpay_signature } = req.body;
 
     if (DEV_PAYMENTS && razorpay_order_id?.startsWith('order_dev_')) {
-      // Atomic claim (created → captured) so a duplicate submit can't double-grant.
-      const payment = await Payment.findOneAndUpdate(
+      // Genuinely-atomic claim (created → captured) so a duplicate/concurrent submit can't
+      // double-grant or double-credit — only the winner flips; the rest get null.
+      const payment = await claimPayment(
         { razorpayOrderId: razorpay_order_id, userId: req.userId, status: 'created' },
-        { $set: { status: 'captured', capturedAt: new Date(), razorpayPaymentId: 'pay_dev_' + crypto.randomBytes(8).toString('hex'), method: 'dev_simulated' } },
-        { new: true },
+        { status: 'captured', capturedAt: new Date(), razorpayPaymentId: 'pay_dev_' + crypto.randomBytes(8).toString('hex'), method: 'dev_simulated' },
       );
       if (!payment) {
         const done = await Payment.findOne({ razorpayOrderId: razorpay_order_id, userId: req.userId });
@@ -411,8 +577,7 @@ router.post('/verify', requireAuth, async (req, res, next) => {
         return res.status(404).json({ error: 'Order not found' });
       }
 
-      if (payment.purpose === 'join_fee') await markJoinFeePaid(userId, payment); // legacy stored orders
-      if (/_(subscription|annual)$/.test(payment.purpose)) await activateTier(userId, payment.purpose, payment);
+      await fulfillCaptured(userId, payment);   // never throws — flags on failure, no strand
       return res.json({ ok: true, devMode: true, paymentId: payment._id, purpose: payment.purpose });
     }
 
@@ -436,12 +601,13 @@ router.post('/verify', requireAuth, async (req, res, next) => {
     // authority on what was bought (req.body.purpose is attacker-controlled — the
     // Razorpay signature covers order_id|payment_id only, so trusting it would let
     // someone pay for base_subscription (CHF 5) and claim max_subscription (CHF 25)).
-    // Because the flip is conditional on status:'created', two concurrent verifies can
-    // never both capture-and-grant — only the winner flips; the rest are already-processed.
-    const payment = await Payment.findOneAndUpdate(
+    // The claim is a GENUINELY-atomic conditional UPDATE (claimPayment → pg-odm
+    // atomicUpdate), so two concurrent verifies can never both capture-and-grant — only
+    // the winner flips; the rest fall through to already-processed. (Plain findOneAndUpdate
+    // is read-then-write on pg-odm and would let both win — see claimPayment.)
+    const payment = await claimPayment(
       { razorpayOrderId: razorpay_order_id, userId: req.userId, status: 'created' },
-      { $set: { status: 'captured', capturedAt: new Date(), razorpayPaymentId: razorpay_payment_id, razorpaySignature: razorpay_signature } },
-      { new: true },
+      { status: 'captured', capturedAt: new Date(), razorpayPaymentId: razorpay_payment_id, razorpaySignature: razorpay_signature },
     );
     if (!payment) {
       const done = await Payment.findOne({ razorpayOrderId: razorpay_order_id, userId: req.userId });
@@ -450,8 +616,7 @@ router.post('/verify', requireAuth, async (req, res, next) => {
     }
     const purpose = payment.purpose;                     // authoritative, from the DB
 
-    if (purpose === 'join_fee') await markJoinFeePaid(userId, payment); // legacy stored orders
-    if (/_(subscription|annual)$/.test(purpose)) await activateTier(userId, purpose, payment);
+    await fulfillCaptured(userId, payment);     // never throws — flags on failure, no strand
 
     res.json({ ok: true, paymentId: payment._id, purpose });
   } catch (err) { next(err); }
@@ -531,13 +696,9 @@ router.get('/history', requireAuth, async (req, res, next) => {
 // refund is promised anywhere in the product. Razorpay refund API in prod, simulated in dev.
 router.post('/admin/:paymentId/refund', requireAdmin, async (req, res, next) => {
   try {
-    // Atomically claim (captured → refunding) so two admins — or a retry — can't
-    // double-refund the same payment.
-    const payment = await Payment.findOneAndUpdate(
-      { _id: req.params.paymentId, status: 'captured' },
-      { $set: { status: 'refunding' } },
-      { new: true },
-    );
+    // Genuinely-atomic claim (captured → refunding) so two admins — or a retry — can't
+    // double-refund the same payment (claimPayment → pg-odm atomicUpdate).
+    const payment = await claimPayment({ _id: req.params.paymentId, status: 'captured' }, { status: 'refunding' });
     if (!payment) {
       const existing = await Payment.findById(req.params.paymentId);
       if (!existing) return res.status(404).json({ error: 'Payment not found' });
@@ -548,18 +709,48 @@ router.post('/admin/:paymentId/refund', requireAdmin, async (req, res, next) => 
     const currency = payment.currency || 'CHF';
     const refundedLocal = (payment.metadata && Number(payment.metadata.total)) ||
       (payment.metadata && Number(payment.metadata.amountLocal)) || Number(payment.amountCHF) || 0;
+    // Where the money goes back depends on how it was paid — the gateway path alone would
+    // silently lose (or duplicate) money for the wallet payment types the wallet introduced.
+    const fromWallet = payment.method === 'wallet' || !!(payment.metadata && payment.metadata.paidFromWallet);
+    const isTopup = payment.purpose === 'wallet_topup';
+    let destination = 'bank';
 
     try {
-      if (!DEV_PAYMENTS && razorpay && payment.razorpayPaymentId) {
+      if (isTopup) {
+        // A top-up CREDITED the wallet at capture. Refunding the gateway charge must first
+        // claw those funds back out of the wallet (idempotent on ref) — else the user keeps
+        // the balance AND gets the money back. But claw back ONLY if the credit actually
+        // applied: creditTopupSafely may have flagged it uncredited, in which case there is
+        // nothing to reverse and debiting would remove unrelated funds. If already spent, refuse.
+        const topupAmount = (payment.metadata && Number(payment.metadata.topupAmount)) || 0;
+        const credited = topupAmount > 0 && await wallet.wasApplied(payment.userId, String(payment._id), 'topup');
+        if (credited) {
+          const clawed = await wallet.debit(payment.userId, topupAmount, currency, { type: 'adjustment', ref: String(payment._id), note: 'Top-up refund clawback' });
+          if (!clawed) {
+            await claimPayment({ _id: payment._id, status: 'refunding' }, { status: 'captured' });
+            return res.status(409).json({ error: 'These topped-up funds have already been spent; refund the resulting purchase instead.' });
+          }
+        }
+        if (!DEV_PAYMENTS && razorpay && payment.razorpayPaymentId) {
+          await razorpay.payments.refund(payment.razorpayPaymentId, { speed: 'normal', notes: { idempotency: `refund_${payment._id}` } });
+        }
+      } else if (fromWallet) {
+        // A wallet-PAID purchase has NO gateway charge to reverse — return the money to the
+        // wallet (idempotent on ref), mirroring cancel-subscription. The gateway-only path
+        // would mark it refunded and strip membership while returning nothing.
+        await wallet.credit(payment.userId, refundedLocal, currency, { type: 'refund', purpose: payment.purpose, ref: String(payment._id), note: 'Admin refund' });
+        destination = 'wallet';
+      } else if (!DEV_PAYMENTS && razorpay && payment.razorpayPaymentId) {
         await razorpay.payments.refund(payment.razorpayPaymentId, { speed: 'normal', notes: { idempotency: `refund_${payment._id}` } });
       }
-      payment.status = 'refunded';
-      payment.refundedAt = new Date();
-      await payment.save();
     } catch (refundErr) {
-      await Payment.findOneAndUpdate({ _id: payment._id, status: 'refunding' }, { $set: { status: 'captured' } });
+      // Refund NOT dispatched → safe to reopen 'captured' for a retry.
+      await claimPayment({ _id: payment._id, status: 'refunding' }, { status: 'captured' });
       throw refundErr;
     }
+    // Refund dispatched. Finalize; a failed flip leaves 'refunding' for an idempotent operator
+    // replay rather than reopening 'captured' (which would re-dispatch the gateway refund).
+    await claimPayment({ _id: payment._id, status: 'refunding' }, { status: 'refunded', refundedAt: new Date() });
 
     if (payment.purpose === 'join_fee' || payment.purpose === 'base_subscription') {
       // Refunding the base membership removes access entirely (nothing is free)
@@ -575,20 +766,23 @@ router.post('/admin/:paymentId/refund', requireAdmin, async (req, res, next) => 
     }
 
     const Notification = require('./models/Notification');
+    const arrival = destination === 'wallet'
+      ? 'has been added back to your wallet.'
+      : 'has been refunded. It reaches your account in 5–7 working days.';
     await Notification.create({
       userId: payment.userId, type: 'refund_processed', severity: 'info',
       title: 'Refund processed',
-      body: `Your ${currency} ${refundedLocal} ${payment.purpose.replace(/_/g, ' ')} payment has been refunded. It reaches your account in 5–7 working days.`
+      body: `Your ${currency} ${refundedLocal} ${payment.purpose.replace(/_/g, ' ')} payment ${arrival}`
     });
 
     const AuditLog = require('./models/AuditLog');
     await AuditLog.create({
       actor: req.userId, action: 'payment_refunded', targetType: 'payment',
       targetId: payment._id.toString(),
-      detail: { userId: payment.userId.toString(), amountCHF: payment.amountCHF, refundedLocal, currency, purpose: payment.purpose }
+      detail: { userId: payment.userId.toString(), amountCHF: payment.amountCHF, refundedLocal, currency, purpose: payment.purpose, destination }
     });
 
-    res.json({ ok: true, refundedAmount: refundedLocal, currency });
+    res.json({ ok: true, refundedAmount: refundedLocal, currency, destination });
   } catch (err) { next(err); }
 });
 
