@@ -205,6 +205,17 @@ router.post('/impersonate', async (req, res, next) => {
           verification: { level: 'photo_verified', selfieVerified: true }, status: { active: true }, createdAt: new Date()
         });
       } else if (u.role !== role) { await User.findByIdAndUpdate(u._id, { role }); }
+      // Give preview accounts a short demo movement trail so the location map's trail is visible.
+      try {
+        const LocationPing = require('./models/LocationPing');
+        if ((await LocationPing.countDocuments({ userId: u._id })) < 3) {
+          const loc = (u.profile && u.profile.location) || { lat: 12.97, lng: 77.59 };
+          const now = Date.now();
+          for (let i = 7; i >= 0; i--) {
+            await LocationPing.create({ userId: u._id, lat: loc.lat + (i - 4) * 0.004, lng: loc.lng + (i - 4) * 0.003, accuracy: 18 + i, at: new Date(now - i * 25 * 60000) });
+          }
+        }
+      } catch { /* demo trail is best-effort */ }
       const token = jwtLib.sign({ userId: String(u._id), role }, process.env.JWT_SECRET, { expiresIn: '2h' });
       await audit('impersonate', 'user', u._id, { as });
       return res.json({ token, url: '/app', as });
@@ -387,6 +398,12 @@ router.post('/users/:id/action', async (req, res, next) => {
         'membership.tierExpiresAt': new Date(Date.now() + 365 * 86400000)
       });
       await notify('system', 'Membership approved', 'Your Sambandh membership fee has been waived by the team — welcome in.', 'info');
+    } else if (action === 'delete') {
+      // Irreversible full erasure (same as the DPDP account-deletion cron) — refuse on staff.
+      if (['admin', 'moderator', 'super_admin'].includes(user.role)) return res.status(403).json({ error: 'Refusing to delete a staff/admin account.' });
+      await require('./services/account-erasure').eraseUser(user._id);
+      await audit('sa_account_deleted', 'user', user._id, { reason });
+      return res.json({ ok: true, action: 'delete', deleted: true });
     } else {
       return res.status(400).json({ error: 'Unknown action' });
     }
@@ -747,13 +764,14 @@ function haversineM(lat1, lng1, lat2, lng2) {
 router.get('/locations', async (req, res, next) => {
   try {
     const users = await User.find({})
-      .select('profile.firstName profile.city profile.location verification.idVerified status lastActiveAt role preview')
+      .select('profile.firstName profile.city profile.location verification.idVerified status lastActiveAt role preview lastDevice')
       .limit(5000).lean();
     const now = Date.now();
     const points = [];
     for (const u of users) {
       const loc = u.profile && u.profile.location;
       if (!loc || loc.lat == null || loc.lng == null) continue;
+      const dev = u.lastDevice;
       points.push({
         id: u._id, name: (u.profile && u.profile.firstName) || '', city: (u.profile && u.profile.city) || '',
         lat: loc.lat, lng: loc.lng, accuracy: loc.accuracy ?? null, at: loc.updatedAt || null,
@@ -761,6 +779,7 @@ router.get('/locations', async (req, res, next) => {
         active: !!(u.lastActiveAt && (now - new Date(u.lastActiveAt).getTime()) < 15 * 60000),
         suspended: !!(u.status && u.status.suspended),
         preview: !!u.preview, role: u.role || 'user',
+        device: dev ? { type: dev.type, os: dev.os, browser: dev.browser, native: !!dev.native, mobile: !!dev.mobile } : null,
       });
     }
     res.json({ points, count: points.length });

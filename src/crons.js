@@ -6,14 +6,7 @@
 
 const User = require('./models/User');
 const KarmaBook = require('./models/KarmaBook');
-const Reputation = require('./models/Reputation');
-const Claim = require('./models/Claim');
-const Like = require('./models/Like');
-const Pass = require('./models/Pass');
-const Notification = require('./models/Notification');
 const Verification = require('./models/Verification');
-const Message = require('./models/Message');
-const Chat = require('./models/Chat');
 const { nightlyFraudScan } = require('./karma-book');
 
 let lastRunDay = null;
@@ -95,25 +88,10 @@ async function nightlyBatch() {
   try {
     const cutoff = new Date(Date.now() - 30 * 86400000);
     const gone = await User.find({ 'status.deletedAt': { $lt: cutoff } }).select('_id');
+    const { eraseUser } = require('./services/account-erasure');
     for (const u of gone) {
-      const id = u._id;
-      // Hard-delete the user's stored document IMAGE files first (deleteMany below only
-      // removes the DB rows, which would otherwise orphan the originals in cloud storage).
-      try { await require('./services/doc-retention').purgeUserDocuments(id); }
-      catch (e) { console.error('[CRON] erase doc files:', e.message); }
-      await Promise.all([
-        KarmaBook.deleteOne({ userId: id }),
-        Reputation.deleteOne({ userId: id }),
-        Claim.deleteMany({ userId: id }),
-        Like.deleteMany({ $or: [{ from: id }, { to: id }] }),
-        Pass.deleteMany({ $or: [{ from: id }, { to: id }] }),
-        Notification.deleteMany({ userId: id }),
-        Verification.deleteMany({ userId: id }),
-        Message.updateMany({ from: id }, { text: '[deleted]', deleted: true }),
-        Chat.updateMany({ participants: id }, { status: 'archived' })
-      ]);
-      await User.deleteOne({ _id: id }); // frees the phone number for reuse
-      console.log('[CRON] erased account', id.toString());
+      await eraseUser(u._id);   // same erasure the super-admin "Delete" uses (incl. doc files)
+      console.log('[CRON] erased account', u._id.toString());
     }
   } catch (e) { console.error('[CRON] account erasure:', e.message); }
 
