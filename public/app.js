@@ -618,7 +618,9 @@ function captureLocation({ prompt = false } = {}) {
         if (prompt) toast('Location is required for accurate matches — enable it in your browser settings.');
         resolve(false);
       },
-      { enableHighAccuracy: true, timeout: 10000, maximumAge: 30000 }
+      // maximumAge:0 forces a FRESH fix — never a cached coarse one — so we get the tightest
+      // accuracy the device can give (phone GPS ~5–20 m; a desktop has no GPS so ~50–150 m via Wi-Fi).
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
     );
   });
 }
@@ -634,7 +636,7 @@ function startLocationWatch({ prompt = false } = {}) {
       S._locWatch = navigator.geolocation.watchPosition(
         pos => pushLocation(pos.coords, false),
         () => { S._locationGranted = false; },
-        { enableHighAccuracy: true, timeout: 20000, maximumAge: 10000 }
+        { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 }
       );
     } catch { /* geolocation unavailable */ }
   }
