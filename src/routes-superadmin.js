@@ -205,17 +205,8 @@ router.post('/impersonate', async (req, res, next) => {
           verification: { level: 'photo_verified', selfieVerified: true }, status: { active: true }, createdAt: new Date()
         });
       } else if (u.role !== role) { await User.findByIdAndUpdate(u._id, { role }); }
-      // Give preview accounts a short demo movement trail so the location map's trail is visible.
-      try {
-        const LocationPing = require('./models/LocationPing');
-        if ((await LocationPing.countDocuments({ userId: u._id })) < 3) {
-          const loc = (u.profile && u.profile.location) || { lat: 12.97, lng: 77.59 };
-          const now = Date.now();
-          for (let i = 7; i >= 0; i--) {
-            await LocationPing.create({ userId: u._id, lat: loc.lat + (i - 4) * 0.004, lng: loc.lng + (i - 4) * 0.003, accuracy: 18 + i, at: new Date(now - i * 25 * 60000) });
-          }
-        }
-      } catch { /* demo trail is best-effort */ }
+      // (Preview accounts get a demo trail synthesised around their CURRENT pin by the
+      // /users/:id/location-trail endpoint — no stale seeded pings to drift out of place.)
       const token = jwtLib.sign({ userId: String(u._id), role }, process.env.JWT_SECRET, { expiresIn: '2h' });
       await audit('impersonate', 'user', u._id, { as });
       return res.json({ token, url: '/app', as });
@@ -789,7 +780,19 @@ router.get('/users/:id/location-trail', async (req, res, next) => {
   try {
     const days = Math.min(30, Math.max(1, Number(req.query.days) || 7));
     const since = new Date(Date.now() - days * 86400000);
-    const pings = await LocationPing.find({ userId: req.params.id, at: { $gt: since } }).sort({ at: 1 }).limit(3000).lean();
+    let pings = await LocationPing.find({ userId: req.params.id, at: { $gt: since } }).sort({ at: 1 }).limit(3000).lean();
+    let demo = false;
+    // Preview/test accounts are the demo vehicle. They don't organically build a trail (nobody is
+    // walking around as them), so synthesize a short recent path AROUND THEIR CURRENT PIN — this is
+    // what makes "Show trail" visibly work while testing, and it always tracks wherever the pin is now.
+    const who = await User.findById(req.params.id).select('preview profile.location').lean();
+    if (who && who.preview && who.profile && who.profile.location && who.profile.location.lat != null) {
+      const c = who.profile.location, now = Date.now();
+      pings = [];
+      // A path over the last ~2.3 h leading INTO the current pin (i=0 sits exactly on it).
+      for (let i = 7; i >= 0; i--) pings.push({ lat: c.lat - i * 0.0016, lng: c.lng - i * 0.0012, accuracy: 14 + i, at: new Date(now - i * 20 * 60000) });
+      demo = true;
+    }
     // Dwell: how long they've stayed within ~150 m of the latest fix (a "duration here").
     let dwellMs = 0;
     if (pings.length) {
@@ -799,7 +802,7 @@ router.get('/users/:id/location-trail', async (req, res, next) => {
         else break;
       }
     }
-    res.json({ trail: pings.map(p => ({ lat: p.lat, lng: p.lng, accuracy: p.accuracy, at: p.at })), dwellMs, points: pings.length });
+    res.json({ trail: pings.map(p => ({ lat: p.lat, lng: p.lng, accuracy: p.accuracy, at: p.at })), dwellMs, points: pings.length, demo });
   } catch (err) { next(err); }
 });
 

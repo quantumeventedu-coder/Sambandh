@@ -130,6 +130,7 @@ async function connect() {
 }
 
 function show(tab) {
+  if (tab !== 'locations' && LOC.timer) { clearInterval(LOC.timer); LOC.timer = null; }   // stop live polling when leaving the map
   ['overview','users','llm','audit','test','commerce','coupons','locations'].forEach(t => $('#tb-'+t).classList.toggle('on', t===tab));
   if (tab==='overview') renderOverview();
   if (tab==='users') renderUsers();
@@ -839,7 +840,7 @@ async function showRedemptions(id, code) {
 
 // ---- Location oversight map (NASA GIBS satellite basemap + precise pins) ----------------
 // ---- Interactive maps (Leaflet: real zoom / pan / satellite·NASA·streets layers / popups) ----
-const LOC = { points: [], flt: {}, map: null, markers: null, trail: null };
+const LOC = { points: [], flt: {}, map: null, markers: null, accCircles: null, trail: null, timer: null, popupOpen: false };
 let _leaflet = null;
 function ensureLeaflet() {
   if (window.L) return Promise.resolve();
@@ -885,7 +886,7 @@ async function renderLocations() {
   $('#view').innerHTML = `
     <div class="card">
       <div class="row" style="justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
-        <h3 style="font-family:Georgia,serif;margin:0">User locations <span style="color:var(--mut);font-weight:400">· <span id="loc-count">${LOC.points.length}</span> shown</span></h3>
+        <h3 style="font-family:Georgia,serif;margin:0">User locations <span style="color:var(--mut);font-weight:400">· <span id="loc-count">${LOC.points.length}</span> shown · <span style="color:#e5484d">●</span> <span style="color:#46c37b">LIVE</span> <span id="loc-updated" style="color:var(--mut);font-size:12px"></span></span></h3>
         <div style="display:flex;gap:12px;flex-wrap:wrap;font-size:13px;align-items:center">
           <label><input type="checkbox" onchange="LOC.flt.verified=this.checked;drawMap()"> Verified</label>
           <label><input type="checkbox" onchange="LOC.flt.active=this.checked;drawMap()"> Active now</label>
@@ -894,31 +895,49 @@ async function renderLocations() {
           <button onclick="locFit()">Fit</button><button onclick="LOC.map&&LOC.map.flyToBounds([[6,67],[37,98]])">India</button><button onclick="LOC.map&&LOC.map.setView([20,0],2)">World</button>
         </div>
       </div>
-      <p style="color:#888;font-size:12px;margin:6px 0 10px">Scroll to <b>zoom</b>, drag to <b>pan</b>, switch <b>Satellite / NASA / Streets</b> top-right, tap a pin for detail. Exact coordinates are <b>admin-only</b>, captured <b>only while a user has the app open</b>. Legend: <span style="color:#46c37b">●</span> verified · <span style="color:#3aa0ff">●</span> active now · <span style="color:#e5484d">●</span> suspended.</p>
+      <p style="color:#888;font-size:12px;margin:6px 0 10px">Updates <b>live every 15 s</b> — pins move as users move. Scroll to <b>zoom</b>, drag to <b>pan</b>, switch <b>Satellite / NASA / Streets</b> top-right, tap a pin for detail. The faint ring is the GPS <b>accuracy</b>. Exact coordinates are <b>admin-only</b>, captured <b>only while a user has the app open</b>. Legend: <span style="color:#46c37b">●</span> verified · <span style="color:#3aa0ff">●</span> active now · <span style="color:#e5484d">●</span> suspended.</p>
       <div id="loc-map" style="width:100%;height:600px;border:1px solid var(--line);border-radius:10px;overflow:hidden;background:#04070f;z-index:0"></div>
       <div id="loc-empty" style="color:var(--mut);font-size:13px;margin-top:8px"></div>
     </div>`;
   initLocMap();
+  if (LOC.timer) clearInterval(LOC.timer);
+  LOC.timer = setInterval(refreshLocations, 15000);   // live: re-poll every 15 s
 }
 function initLocMap() {
   if (LOC.map) { LOC.map.remove(); LOC.map = null; }
   const { esri, nasa, streets } = baseLayers();
   const map = L.map('loc-map', { worldCopyJump: true, layers: [esri] }).setView([22, 79], 4);
   LOC.map = map;
+  map.on('popupopen', () => { LOC.popupOpen = true; });
+  map.on('popupclose', () => { LOC.popupOpen = false; });
   L.control.layers({ 'Satellite (Esri)': esri, 'NASA satellite': nasa, 'Streets': streets }, {}, { collapsed: true }).addTo(map);
+  LOC.accCircles = L.layerGroup().addTo(map);
   LOC.markers = L.layerGroup().addTo(map);
   drawMap(true);
   setTimeout(() => map.invalidateSize(), 80);
 }
+// Live re-poll: refresh points + move pins without disturbing the admin's zoom/pan
+// (and without stealing a popup they're reading).
+async function refreshLocations() {
+  if (!LOC.map || LOC.popupOpen) return;
+  try {
+    const data = await api('/locations');
+    LOC.points = data.points || [];
+    drawMap(false);
+    const lu = document.getElementById('loc-updated'); if (lu) lu.textContent = '· updated just now';
+  } catch { /* keep the last good view */ }
+}
 function drawMap(fit) {
   if (!LOC.map || !window.L) return;
   LOC.markers.clearLayers();
+  LOC.accCircles.clearLayers();
   if (LOC.trail) { LOC.map.removeLayer(LOC.trail); LOC.trail = null; }
   const pts = locFilteredPoints();
   const cnt = document.getElementById('loc-count'); if (cnt) cnt.textContent = pts.length;
   const latlng = [];
   for (const p of pts) {
     const c = p.suspended?'#e5484d':p.active?'#3aa0ff':p.verified?'#46c37b':'#e8b84b';
+    if (p.accuracy) L.circle([p.lat, p.lng], { radius: p.accuracy, color: c, weight: 1, fillColor: c, fillOpacity: .1 }).addTo(LOC.accCircles);
     const m = L.circleMarker([p.lat, p.lng], { radius: 7, color: '#fff', weight: 1.5, fillColor: c, fillOpacity: .95 });
     m.bindPopup(locPopupHtml(p), { minWidth: 210 });
     m.addTo(LOC.markers);
@@ -949,15 +968,18 @@ async function loadTrailOnMap(id) {
     const r = await api('/users/'+id+'/location-trail?days=7');
     if (LOC.trail) { LOC.map.removeLayer(LOC.trail); LOC.trail = null; }
     const line = (r.trail||[]).map(t => [t.lat, t.lng]);
-    if (line.length) {
-      const grp = L.featureGroup();
-      L.polyline(line, { color: '#ffd23f', weight: 3, opacity: .95 }).addTo(grp);
-      L.circleMarker(line[line.length-1], { radius: 5, color: '#ffd23f', weight: 1, fillColor: '#ffd23f', fillOpacity: 1 }).addTo(grp);
-      grp.addTo(LOC.map); LOC.trail = grp;
-      LOC.map.fitBounds(grp.getBounds(), { padding: [50,50], maxZoom: 16 });
-    }
-    toast(`Trail: ${r.points} fix(es) over 7 days · been within 150 m for ~${fmtDur(r.dwellMs)}`);
+    if (!line.length) { toast('No movement recorded yet — a trail appears once this user moves with the app open.'); return; }
+    LOC.trail = trailLayer(line).addTo(LOC.map);
+    LOC.map.fitBounds(LOC.trail.getBounds(), { padding: [50,50], maxZoom: 16 });
+    toast(`Trail: ${r.points} fix(es)${r.demo?' (demo)':''} · been within 150 m for ~${fmtDur(r.dwellMs)}`);
   } catch (e) { toast(e.message); }
+}
+// A yellow path with a dot per fix and a bright end-marker. Works for a single point too.
+function trailLayer(line) {
+  const grp = L.featureGroup();
+  if (line.length >= 2) L.polyline(line, { color: '#ffd23f', weight: 3, opacity: .95 }).addTo(grp);
+  line.forEach((pt, i) => L.circleMarker(pt, { radius: i === line.length - 1 ? 6 : 3, color: '#ffd23f', weight: 1, fillColor: i === line.length - 1 ? '#ffd23f' : '#b8860b', fillOpacity: 1 }).addTo(grp));
+  return grp;
 }
 // ---- Per-user mini map (on the Users & Chats detail) ----
 let U_MAP = null;
@@ -996,17 +1018,14 @@ async function userTrail(id) {
   const info = document.getElementById('u-trailinfo'); if (info) info.textContent = 'Loading trail…';
   try {
     const r = await api('/users/'+id+'/location-trail?days=7');
-    if (U_MAP && window.L) {
-      const line = (r.trail||[]).map(t => [t.lat, t.lng]);
-      if (line.length) {
-        const grp = L.featureGroup();
-        L.polyline(line, { color: '#ffd23f', weight: 3, opacity: .95 }).addTo(grp);
-        L.circleMarker(line[line.length-1], { radius: 5, color: '#ffd23f', weight: 1, fillColor: '#ffd23f', fillOpacity: 1 }).addTo(grp);
-        grp.addTo(U_MAP);
-        U_MAP.fitBounds(grp.getBounds(), { padding: [40,40], maxZoom: 16 });
-      }
+    const line = (r.trail||[]).map(t => [t.lat, t.lng]);
+    if (U_MAP && window.L && line.length) {
+      trailLayer(line).addTo(U_MAP);
+      U_MAP.fitBounds(L.latLngBounds(line), { padding: [40,40], maxZoom: 16 });
     }
-    if (info) info.textContent = `Trail: ${r.points} fix(es) over 7 days · been within 150 m for ~${fmtDur(r.dwellMs)}`;
+    if (info) info.textContent = line.length
+      ? `Trail: ${r.points} fix(es)${r.demo?' (demo)':''} over 7 days · been within 150 m for ~${fmtDur(r.dwellMs)}`
+      : 'No movement recorded yet — a trail appears once this user moves with the app open.';
   } catch (e) { if (info) info.textContent = e.message; }
 }
 
