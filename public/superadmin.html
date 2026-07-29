@@ -396,11 +396,13 @@ async function openUser(id) {
         <pre>${esc(u.phone || u.email || '—')} · ${esc(u.profile?.gender||'—')}, ${u.profile?.age||'—'} · ${esc(u.profile?.city||'—')}
 Joined ${new Date(u.createdAt).toLocaleDateString()} · Lakshan ${d.karma?.score ?? 100} · ${d.chatCount} chats
 ID ${u.verification?.idVerified?'✓':'✗'} · Selfie ${u.verification?.selfieVerified?'✓':'✗'} · Fee ${u.membership?.joinFeePaid?'CHF '+(u.membership?.joinFeeAmountCHF??'?')+' paid':'unpaid'}</pre>
+        <div style="font-size:12px;color:var(--mut);margin:4px 0 0">${u.lastDevice ? devLabel(u.lastDevice) + (u.lastDevice.at ? ' · seen ' + new Date(u.lastDevice.at).toLocaleDateString() : '') : 'Device not recorded yet'}</div>
         <div class="bar" style="margin:8px 0 0">
           <button class="ghost" onclick="act('${u._id}','warn')">Warn</button>
           <button class="ghost" onclick="act('${u._id}','suspend_24h')">Suspend 24h</button>
           <button class="ghost" onclick="act('${u._id}','suspend_7d')">Suspend 7d</button>
           <button class="red" onclick="act('${u._id}','ban')">Ban</button>
+          <button class="red" onclick="delUser('${u._id}')">Delete</button>
           ${u.membership?.joinFeePaid?'':`<button class="gold" onclick="act('${u._id}','waive_fee')">Waive fee</button>`}
           ${u.status?.suspended?`<button class="gold" onclick="act('${u._id}','unsuspend')">Unsuspend</button>`:''}
           ${u.status?.banned?`<button class="gold" onclick="act('${u._id}','unban')">Unban</button>`:''}
@@ -430,6 +432,20 @@ async function act(id, action) {
   const reason = prompt(`Reason for "${action}" (recorded in the audit log):`);
   if (!reason) return;
   try { await apiPost('/users/' + id + '/action', { action, reason }); toast('Done: ' + action); openUser(id); }
+  catch (e) { toast(e.message); }
+}
+function devLabel(d) {
+  if (!d || !d.type) return '';
+  const t = String(d.type);
+  const icon = /iPhone|iPad/.test(t) ? '📱' : /Android/.test(t) ? '🤖' : /Windows|Mac|Linux|Chromebook/.test(t) ? '💻' : '🖥️';
+  return icon + ' ' + esc(t) + (d.native ? ' app' : (d.browser && d.browser !== 'Other' ? ' · ' + esc(d.browser) : ''));
+}
+function openUserFromMap(id) { show('users'); setTimeout(() => openUser(id), 60); }
+async function delUser(id) {
+  if (!confirm('PERMANENTLY DELETE this user and all their data (chats, verifications, documents, payments records)? This cannot be undone.')) return;
+  const reason = prompt('Reason for deletion (recorded in the audit log):');
+  if (!reason || reason.trim().length < 5) return toast('A reason (5+ chars) is required.');
+  try { await apiPost('/users/' + id + '/action', { action: 'delete', reason }); toast('User permanently deleted'); renderUsers(); }
   catch (e) { toast(e.message); }
 }
 
@@ -908,8 +924,10 @@ function locPin(id) {
     <div class="row" style="justify-content:space-between;align-items:center"><b>${esc(p.name||'User')} ${p.verified?'<span class="pill g">verified</span>':''}${p.suspended?' <span class="pill r">suspended</span>':''}</b><button onclick="document.getElementById('loc-pop').innerHTML=''">✕</button></div>
     <div class="hint" style="color:var(--mut)">${esc(p.city||'')}${p.active?' · active now':(p.at?(' · last seen '+relTime(p.at)):'')}</div>
     <div class="hint" style="color:var(--mut);font-family:monospace;font-size:11px">${Number(p.lat).toFixed(5)}, ${Number(p.lng).toFixed(5)}${p.accuracy?(' · ±'+Math.round(p.accuracy)+' m'):''}</div>
+    ${p.device && p.device.type ? `<div class="hint" style="color:var(--mut);margin-top:2px">${devLabel(p.device)} · ${p.device.mobile ? 'mobile' : 'desktop'}</div>` : ''}
     <div id="loc-trailinfo" class="hint" style="margin-top:6px;color:var(--mut)"></div>
     <div class="row" style="gap:8px;margin-top:8px;flex-wrap:wrap">
+      <button onclick="openUserFromMap('${p.id}')">Open full detail</button>
       <button onclick="window.open('${maps}','_blank','noopener')">Open in device map</button>
       <button onclick="locTrail('${p.id}')">Show 7-day trail</button>
     </div></div>`;

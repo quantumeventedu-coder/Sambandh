@@ -66,6 +66,30 @@ describe('POST /me/bg-location-consent (native background-location opt-in)', () 
   });
 });
 
+describe('device recognition + delete', () => {
+  const { parseUA } = require('../src/services/device');
+  test('parseUA classifies common devices', () => {
+    expect(parseUA('Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit Safari').type).toBe('iPhone');
+    expect(parseUA('Mozilla/5.0 (Linux; Android 14; Pixel) Chrome/126').type).toBe('Android');
+    expect(parseUA('Mozilla/5.0 (Windows NT 10.0; Win64) Chrome/126').type).toBe('Windows PC');
+  });
+
+  test('/me/location records the device from the User-Agent, and it appears on the map point', async () => {
+    await mkUser();
+    await request(app).post('/me/location').set('User-Agent', 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0) Safari').send({ lat: 19, lng: 72 });
+    expect((await User.findById(TEST_USER_ID)).lastDevice.type).toBe('iPhone');
+    const r = await request(app).get('/superadmin/locations');
+    expect(r.body.points[0].device.type).toBe('iPhone');
+  });
+
+  test('the super-admin delete action erases the user', async () => {
+    await mkUser();
+    const r = await request(app).post('/superadmin/users/' + TEST_USER_ID + '/action').send({ action: 'delete', reason: 'test cleanup' });
+    expect(r.body.deleted).toBe(true);
+    expect(await User.findById(TEST_USER_ID)).toBeNull();
+  });
+});
+
 describe('GET /superadmin/users/:id/location-trail', () => {
   test('returns the trail and a dwell duration', async () => {
     await mkUser();

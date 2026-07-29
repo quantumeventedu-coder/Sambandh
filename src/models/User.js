@@ -12,6 +12,9 @@ const UserSchema = new mongoose.Schema({
   pushSubscriptions: [mongoose.Schema.Types.Mixed], // web-push endpoints (browser notifications)
   createdAt: { type: Date, default: Date.now },
   lastActiveAt: { type: Date, default: Date.now },
+  // Coarse device recognition (iPhone/Android/desktop · browser) from the User-Agent, for
+  // admin oversight. { type, os, browser, mobile, native, ua, at }.
+  lastDevice: mongoose.Schema.Types.Mixed,
   profile: {
     firstName: String, displayName: String,
     gender: { type: String, enum: ['male', 'female', 'non_binary', 'other'] },

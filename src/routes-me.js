@@ -143,8 +143,12 @@ router.post('/location', requireAuth, async (req, res, next) => {
     const parsed = locationSchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: 'Invalid coordinates' });
     const { lat, lng, accuracy } = parsed.data;
+    // Recognise the device (iPhone / Android / desktop …) from the User-Agent for admin
+    // oversight — a coarse capability read, refreshed on each live-location update.
+    const dev = require('./services/device').parseUA(req.headers['user-agent']);
     const updates = {
-      'profile.location': { lat, lng, accuracy: accuracy ?? null, updatedAt: new Date() }
+      'profile.location': { lat, lng, accuracy: accuracy ?? null, updatedAt: new Date() },
+      lastDevice: { ...dev, ua: String(req.headers['user-agent'] || '').slice(0, 180), at: new Date() },
     };
     // Fill city/state from our own dataset only if the user hasn't set them.
     const me = await User.findById(req.userId).select('profile.city profile.state').lean();
