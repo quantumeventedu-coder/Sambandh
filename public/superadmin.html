@@ -414,6 +414,7 @@ ID ${u.verification?.idVerified?'✓':'✗'} · Selfie ${u.verification?.selfieV
         <pre>${d.payments.slice(0,6).map(p => `${p.status} · ${p.purpose} · CHF ${p.amountCHF}`).join('\n') || 'No payments.'}</pre>
       </div>
     </div>
+    ${userLocCardHtml(u)}
     <div class="card">
       <h3 style="margin-bottom:8px">Chats (${chats.length})</h3>
       <div class="notice">Opening a chat requires a written reason and is permanently recorded in the audit trail.</div>
@@ -426,6 +427,11 @@ ID ${u.verification?.idVerified?'✓':'✗'} · Selfie ${u.verification?.selfieV
         </tr>`).join('') || '<tr><td colspan="5">No chats.</td></tr>'}
       </table>
     </div>`;
+  const loc = u.profile && u.profile.location;
+  if (loc && typeof loc.lat === 'number' && typeof loc.lng === 'number') {
+    ensureLeaflet().then(() => renderUserMiniMap(u))
+      .catch(() => { const el = document.getElementById('u-map'); if (el) el.textContent = 'Map unavailable (offline).'; });
+  }
 }
 
 async function act(id, action) {
@@ -832,37 +838,34 @@ async function showRedemptions(id, code) {
 }
 
 // ---- Location oversight map (NASA GIBS satellite basemap + precise pins) ----------------
-const LOC = { points: [], bbox: null, W: 900, H: 540, flt: {} };
+// ---- Interactive maps (Leaflet: real zoom / pan / satellite·NASA·streets layers / popups) ----
+const LOC = { points: [], flt: {}, map: null, markers: null, trail: null };
+let _leaflet = null;
+function ensureLeaflet() {
+  if (window.L) return Promise.resolve();
+  if (_leaflet) return _leaflet;
+  _leaflet = new Promise((resolve, reject) => {
+    const css = document.createElement('link');
+    css.rel = 'stylesheet'; css.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
+    document.head.appendChild(css);
+    const s = document.createElement('script');
+    s.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
+    s.onload = () => resolve();
+    s.onerror = () => { _leaflet = null; reject(new Error('Could not load the map library (offline?).')); };
+    document.head.appendChild(s);
+  });
+  return _leaflet;
+}
+// Three real basemaps. Esri World Imagery = high-res satellite that zooms to buildings (default);
+// NASA GIBS Blue Marble = the NASA satellite look (coarse, ~500 m); OSM = streets with labels.
+function baseLayers() {
+  const esri = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { maxZoom: 20, maxNativeZoom: 19, attribution: 'Esri · Maxar · Earthstar' });
+  const nasa = L.tileLayer('https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/BlueMarble_NextGeneration/default/GoogleMapsCompatible_Level8/{z}/{y}/{x}.jpeg', { maxZoom: 20, maxNativeZoom: 8, attribution: 'NASA GIBS · Blue Marble' });
+  const streets = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap' });
+  return { esri, nasa, streets };
+}
 function relTime(t){ const s=Math.max(1,Math.floor((Date.now()-new Date(t).getTime())/1000)); if(s<60)return s+'s ago'; const m=Math.floor(s/60); if(m<60)return m+'m ago'; const h=Math.floor(m/60); if(h<24)return h+'h ago'; return Math.floor(h/24)+'d ago'; }
 function fmtDur(ms){ const m=Math.round((ms||0)/60000); if(m<60)return m+' min'; const h=Math.floor(m/60); return h+'h '+(m%60)+'m'; }
-async function renderLocations() {
-  $('#view').innerHTML = '<div class="card">Loading user locations…</div>';
-  let data;
-  try { data = await api('/locations'); } catch (e) { $('#view').innerHTML = '<div class="card">'+esc(e.message)+'</div>'; return; }
-  LOC.points = data.points || [];
-  LOC.flt = { verified:false, active:false, suspended:false, hidePreview:false };
-  $('#view').innerHTML = `
-    <div class="card">
-      <div class="row" style="justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
-        <h3 style="font-family:Georgia,serif;margin:0">User locations <span style="color:var(--mut);font-weight:400">· <span id="loc-count">${LOC.points.length}</span> shown · ${LOC.points.length} with a location</span></h3>
-        <div style="display:flex;gap:12px;flex-wrap:wrap;font-size:13px;align-items:center">
-          <label><input type="checkbox" onchange="LOC.flt.verified=this.checked;drawMap()"> Verified</label>
-          <label><input type="checkbox" onchange="LOC.flt.active=this.checked;drawMap()"> Active now</label>
-          <label><input type="checkbox" onchange="LOC.flt.suspended=this.checked;drawMap()"> Suspended</label>
-          <label><input type="checkbox" onchange="LOC.flt.hidePreview=this.checked;drawMap()"> Hide preview</label>
-          <button onclick="locFit('users')">Fit</button><button onclick="locFit('IN')">India</button><button onclick="locFit('world')">World</button>
-        </div>
-      </div>
-      <p style="color:#888;font-size:12px;margin:6px 0 10px">NASA satellite basemap (GIBS, ~500 m). Exact coordinates are <b>admin-only</b>. Captured <b>only while a user has the app open</b> — a browser can't read GPS when the app is closed. Tap a pin → open in your device's map. Legend: <span style="color:#46c37b">●</span> verified · <span style="color:#3aa0ff">●</span> active now · <span style="color:#e5484d">●</span> suspended.</p>
-      <div id="loc-map" style="position:relative;width:100%;max-width:${LOC.W}px;aspect-ratio:${LOC.W} / ${LOC.H};border:1px solid var(--line);border-radius:10px;overflow:hidden;background:#04070f">
-        <img id="loc-base" alt="satellite basemap" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover"/>
-        <div id="loc-pins" style="position:absolute;inset:0"></div>
-        <div id="loc-empty" style="position:absolute;inset:0;display:none;align-items:center;justify-content:center;text-align:center;padding:24px;color:#fff;background:rgba(4,7,15,.5);font-size:14px;line-height:1.5"></div>
-      </div>
-      <div id="loc-pop"></div>
-    </div>`;
-  locFit('users');
-}
 function locFilteredPoints() {
   return LOC.points.filter(p => {
     if (LOC.flt.hidePreview && p.preview) return false;
@@ -872,77 +875,138 @@ function locFilteredPoints() {
     return true;
   });
 }
-function adjustAspect(bb, A) {
-  let latSpan = Math.max(0.02, bb.n-bb.s), lngSpan = Math.max(0.02, bb.e-bb.w);
-  const cLat=(bb.n+bb.s)/2, cLng=(bb.e+bb.w)/2;
-  if (lngSpan/latSpan < A) lngSpan = latSpan*A; else latSpan = lngSpan/A;
-  return { s:Math.max(-85,cLat-latSpan/2), n:Math.min(85,cLat+latSpan/2), w:Math.max(-180,cLng-lngSpan/2), e:Math.min(180,cLng+lngSpan/2) };
+async function renderLocations() {
+  $('#view').innerHTML = '<div class="card">Loading map…</div>';
+  let data;
+  try { await ensureLeaflet(); data = await api('/locations'); }
+  catch (e) { $('#view').innerHTML = '<div class="card">'+esc(e.message)+'</div>'; return; }
+  LOC.points = data.points || [];
+  LOC.flt = { verified:false, active:false, suspended:false, hidePreview:false };
+  $('#view').innerHTML = `
+    <div class="card">
+      <div class="row" style="justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+        <h3 style="font-family:Georgia,serif;margin:0">User locations <span style="color:var(--mut);font-weight:400">· <span id="loc-count">${LOC.points.length}</span> shown</span></h3>
+        <div style="display:flex;gap:12px;flex-wrap:wrap;font-size:13px;align-items:center">
+          <label><input type="checkbox" onchange="LOC.flt.verified=this.checked;drawMap()"> Verified</label>
+          <label><input type="checkbox" onchange="LOC.flt.active=this.checked;drawMap()"> Active now</label>
+          <label><input type="checkbox" onchange="LOC.flt.suspended=this.checked;drawMap()"> Suspended</label>
+          <label><input type="checkbox" onchange="LOC.flt.hidePreview=this.checked;drawMap()"> Hide preview</label>
+          <button onclick="locFit()">Fit</button><button onclick="LOC.map&&LOC.map.flyToBounds([[6,67],[37,98]])">India</button><button onclick="LOC.map&&LOC.map.setView([20,0],2)">World</button>
+        </div>
+      </div>
+      <p style="color:#888;font-size:12px;margin:6px 0 10px">Scroll to <b>zoom</b>, drag to <b>pan</b>, switch <b>Satellite / NASA / Streets</b> top-right, tap a pin for detail. Exact coordinates are <b>admin-only</b>, captured <b>only while a user has the app open</b>. Legend: <span style="color:#46c37b">●</span> verified · <span style="color:#3aa0ff">●</span> active now · <span style="color:#e5484d">●</span> suspended.</p>
+      <div id="loc-map" style="width:100%;height:600px;border:1px solid var(--line);border-radius:10px;overflow:hidden;background:#04070f;z-index:0"></div>
+      <div id="loc-empty" style="color:var(--mut);font-size:13px;margin-top:8px"></div>
+    </div>`;
+  initLocMap();
 }
-function locFit(mode) {
+function initLocMap() {
+  if (LOC.map) { LOC.map.remove(); LOC.map = null; }
+  const { esri, nasa, streets } = baseLayers();
+  const map = L.map('loc-map', { worldCopyJump: true, layers: [esri] }).setView([22, 79], 4);
+  LOC.map = map;
+  L.control.layers({ 'Satellite (Esri)': esri, 'NASA satellite': nasa, 'Streets': streets }, {}, { collapsed: true }).addTo(map);
+  LOC.markers = L.layerGroup().addTo(map);
+  drawMap(true);
+  setTimeout(() => map.invalidateSize(), 80);
+}
+function drawMap(fit) {
+  if (!LOC.map || !window.L) return;
+  LOC.markers.clearLayers();
+  if (LOC.trail) { LOC.map.removeLayer(LOC.trail); LOC.trail = null; }
   const pts = locFilteredPoints();
-  let bb;
-  if (mode==='world') bb={ s:-55, w:-170, n:75, e:180 };
-  else if (mode==='IN') bb={ s:6, w:67, n:37, e:98 };
-  else if (pts.length) {
-    let s=90,w=180,n=-90,e=-180;
-    for (const p of pts){ s=Math.min(s,p.lat);n=Math.max(n,p.lat);w=Math.min(w,p.lng);e=Math.max(e,p.lng); }
-    const pLat=Math.max(0.05,(n-s)*0.2), pLng=Math.max(0.05,(e-w)*0.2);
-    bb={ s:s-pLat, w:w-pLng, n:n+pLat, e:e+pLng };
-  } else bb={ s:6, w:67, n:37, e:98 };
-  LOC.bbox = adjustAspect(bb, LOC.W/LOC.H);
-  drawMap();
-}
-function drawMap() {
-  if (!LOC.bbox) return locFit('users');
-  const bb = LOC.bbox;
-  const img = document.getElementById('loc-base');
-  if (img) img.src = `https://gibs.earthdata.nasa.gov/wms/epsg4326/best/wms.cgi?SERVICE=WMS&VERSION=1.3.0&REQUEST=GetMap&LAYERS=BlueMarble_NextGeneration&CRS=EPSG:4326&BBOX=${bb.s.toFixed(4)},${bb.w.toFixed(4)},${bb.n.toFixed(4)},${bb.e.toFixed(4)}&WIDTH=${LOC.W}&HEIGHT=${LOC.H}&FORMAT=image/jpeg`;
-  const matched = locFilteredPoints();
-  const pts = matched.filter(p => p.lat>=bb.s&&p.lat<=bb.n&&p.lng>=bb.w&&p.lng<=bb.e);
   const cnt = document.getElementById('loc-count'); if (cnt) cnt.textContent = pts.length;
-  const box = document.getElementById('loc-pins');
-  if (box) box.innerHTML = pts.map(p => {
-    const x=((p.lng-bb.w)/(bb.e-bb.w))*100, y=((bb.n-p.lat)/(bb.n-bb.s))*100;
+  const latlng = [];
+  for (const p of pts) {
     const c = p.suspended?'#e5484d':p.active?'#3aa0ff':p.verified?'#46c37b':'#e8b84b';
-    return `<button title="${esc(p.name||'user')}${p.city?(' · '+esc(p.city)):''}" onclick="locPin('${p.id}')" style="position:absolute;left:${x.toFixed(2)}%;top:${y.toFixed(2)}%;transform:translate(-50%,-50%);width:12px;height:12px;border-radius:50%;background:${c};border:1.5px solid #fff;box-shadow:0 0 0 1px rgba(0,0,0,.5);cursor:pointer;padding:0;opacity:.9"></button>`;
-  }).join('');
-  const empty = document.getElementById('loc-empty');
-  if (empty) {
-    let msg = '';
-    if (!LOC.points.length) msg = 'No user has shared a live location yet.<br>Pins appear here as users open the app with location enabled.';
-    else if (!matched.length) msg = `${LOC.points.length} user(s) have a location, but your filters hide them all.<br>Uncheck the filters above.`;
-    else if (!pts.length) msg = `${matched.length} user(s) match, but none are in this view — tap “World” or “Fit”.`;
-    empty.style.display = msg ? 'flex' : 'none';
-    empty.innerHTML = msg;
+    const m = L.circleMarker([p.lat, p.lng], { radius: 7, color: '#fff', weight: 1.5, fillColor: c, fillOpacity: .95 });
+    m.bindPopup(locPopupHtml(p), { minWidth: 210 });
+    m.addTo(LOC.markers);
+    latlng.push([p.lat, p.lng]);
   }
+  const empty = document.getElementById('loc-empty');
+  if (empty) empty.textContent = !LOC.points.length
+    ? 'No user has shared a live location yet — pins appear as users open the app with location on.'
+    : (!pts.length ? 'Your filters hide every located user — uncheck the filters above.' : '');
+  if (fit && latlng.length) LOC.map.fitBounds(latlng, { padding: [40,40], maxZoom: 13 });
 }
-function locPin(id) {
-  const p = LOC.points.find(x => String(x.id)===String(id)); if (!p) return;
-  const pop = document.getElementById('loc-pop'); if (!pop) return;
+function locFit() { drawMap(true); }
+function locPopupHtml(p) {
   const maps = `https://www.google.com/maps/search/?api=1&query=${p.lat},${p.lng}`;
-  pop.innerHTML = `<div class="card" style="margin-top:10px">
-    <div class="row" style="justify-content:space-between;align-items:center"><b>${esc(p.name||'User')} ${p.verified?'<span class="pill g">verified</span>':''}${p.suspended?' <span class="pill r">suspended</span>':''}</b><button onclick="document.getElementById('loc-pop').innerHTML=''">✕</button></div>
-    <div class="hint" style="color:var(--mut)">${esc(p.city||'')}${p.active?' · active now':(p.at?(' · last seen '+relTime(p.at)):'')}</div>
-    <div class="hint" style="color:var(--mut);font-family:monospace;font-size:11px">${Number(p.lat).toFixed(5)}, ${Number(p.lng).toFixed(5)}${p.accuracy?(' · ±'+Math.round(p.accuracy)+' m'):''}</div>
-    ${p.device && p.device.type ? `<div class="hint" style="color:var(--mut);margin-top:2px">${devLabel(p.device)} · ${p.device.mobile ? 'mobile' : 'desktop'}</div>` : ''}
-    <div id="loc-trailinfo" class="hint" style="margin-top:6px;color:var(--mut)"></div>
-    <div class="row" style="gap:8px;margin-top:8px;flex-wrap:wrap">
-      <button onclick="openUserFromMap('${p.id}')">Open full detail</button>
-      <button onclick="window.open('${maps}','_blank','noopener')">Open in device map</button>
-      <button onclick="locTrail('${p.id}')">Show 7-day trail</button>
+  return `<div style="min-width:190px;line-height:1.5">
+    <b>${esc(p.name||'User')}</b> ${p.verified?'✓':''}${p.suspended?' 🚫':''}<br>
+    <span style="color:#777;font-size:12px">${esc(p.city||'')}${p.active?' · active now':(p.at?' · '+relTime(p.at):'')}</span><br>
+    <span style="font-family:monospace;font-size:11px">${Number(p.lat).toFixed(5)}, ${Number(p.lng).toFixed(5)}${p.accuracy?(' · ±'+Math.round(p.accuracy)+' m'):''}</span>
+    ${p.device&&p.device.type?`<br><span style="font-size:12px">${devLabel(p.device)} · ${p.device.mobile?'mobile':'desktop'}</span>`:''}
+    <div style="margin-top:7px;display:flex;gap:6px;flex-wrap:wrap">
+      <button onclick="openUserFromMap('${p.id}')">Full detail</button>
+      <button onclick="window.open('${maps}','_blank','noopener')">Device map</button>
+      <button onclick="loadTrailOnMap('${p.id}')">7-day trail</button>
     </div></div>`;
 }
-async function locTrail(id) {
-  const info = document.getElementById('loc-trailinfo'); if (info) info.textContent = 'Loading trail…';
+async function loadTrailOnMap(id) {
   try {
     const r = await api('/users/'+id+'/location-trail?days=7');
-    const bb = LOC.bbox, pinbox = document.getElementById('loc-pins');
-    let svg = document.getElementById('loc-trail-svg');
-    if (!svg && pinbox) { pinbox.insertAdjacentHTML('afterbegin', '<svg id="loc-trail-svg" viewBox="0 0 100 100" preserveAspectRatio="none" style="position:absolute;inset:0;width:100%;height:100%;pointer-events:none"></svg>'); svg = document.getElementById('loc-trail-svg'); }
-    const pts = (r.trail||[]).filter(t => t.lat>=bb.s&&t.lat<=bb.n&&t.lng>=bb.w&&t.lng<=bb.e);
-    const poly = pts.map(t => `${(((t.lng-bb.w)/(bb.e-bb.w))*100).toFixed(2)},${(((bb.n-t.lat)/(bb.n-bb.s))*100).toFixed(2)}`).join(' ');
-    if (svg) svg.innerHTML = poly ? `<polyline points="${poly}" fill="none" stroke="#ffd23f" stroke-width="1.4" vector-effect="non-scaling-stroke" opacity=".95"/>` : '';
-    if (info) info.textContent = `Trail: ${r.points} fix(es) over 7 days · been here ~${fmtDur(r.dwellMs)}`;
+    if (LOC.trail) { LOC.map.removeLayer(LOC.trail); LOC.trail = null; }
+    const line = (r.trail||[]).map(t => [t.lat, t.lng]);
+    if (line.length) {
+      const grp = L.featureGroup();
+      L.polyline(line, { color: '#ffd23f', weight: 3, opacity: .95 }).addTo(grp);
+      L.circleMarker(line[line.length-1], { radius: 5, color: '#ffd23f', weight: 1, fillColor: '#ffd23f', fillOpacity: 1 }).addTo(grp);
+      grp.addTo(LOC.map); LOC.trail = grp;
+      LOC.map.fitBounds(grp.getBounds(), { padding: [50,50], maxZoom: 16 });
+    }
+    toast(`Trail: ${r.points} fix(es) over 7 days · been within 150 m for ~${fmtDur(r.dwellMs)}`);
+  } catch (e) { toast(e.message); }
+}
+// ---- Per-user mini map (on the Users & Chats detail) ----
+let U_MAP = null;
+function userLocCardHtml(u) {
+  const loc = u.profile && u.profile.location;
+  if (!loc || typeof loc.lat !== 'number' || typeof loc.lng !== 'number') {
+    return `<div class="card"><h3 style="margin:0 0 6px">Location</h3><div style="color:var(--mut);font-size:13px">No live location captured yet — it appears here once the user opens the app with location enabled.</div></div>`;
+  }
+  const maps = `https://www.google.com/maps/search/?api=1&query=${loc.lat},${loc.lng}`;
+  return `<div class="card">
+    <div class="row" style="justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+      <h3 style="margin:0">Location</h3>
+      <div style="display:flex;gap:6px;flex-wrap:wrap">
+        <button class="ghost" onclick="window.open('${maps}','_blank','noopener')">Open in device map</button>
+        <button class="ghost" onclick="userTrail('${u._id}')">Show 7-day trail</button>
+      </div>
+    </div>
+    <div style="font-family:monospace;font-size:12px;color:var(--mut);margin:4px 0 8px">${Number(loc.lat).toFixed(5)}, ${Number(loc.lng).toFixed(5)}${loc.accuracy?(' · ±'+Math.round(loc.accuracy)+' m accuracy'):''}${loc.updatedAt?(' · '+new Date(loc.updatedAt).toLocaleString()):''}</div>
+    <div id="u-map" style="width:100%;height:340px;border:1px solid var(--line);border-radius:10px;overflow:hidden;background:#04070f;z-index:0"></div>
+    <div id="u-trailinfo" style="color:var(--mut);font-size:12px;margin-top:6px"></div>
+  </div>`;
+}
+function renderUserMiniMap(u) {
+  const el = document.getElementById('u-map'); if (!el || !window.L) return;
+  if (U_MAP) { U_MAP.remove(); U_MAP = null; }
+  const loc = u.profile.location;
+  const { esri, nasa, streets } = baseLayers();
+  const map = L.map('u-map', { layers: [esri] }).setView([loc.lat, loc.lng], 15);
+  U_MAP = map;
+  L.control.layers({ 'Satellite': esri, 'NASA': nasa, 'Streets': streets }, {}, { collapsed: true }).addTo(map);
+  L.circleMarker([loc.lat, loc.lng], { radius: 8, color: '#fff', weight: 2, fillColor: '#3aa0ff', fillOpacity: .95 }).addTo(map);
+  if (loc.accuracy) L.circle([loc.lat, loc.lng], { radius: loc.accuracy, color: '#3aa0ff', weight: 1, fillColor: '#3aa0ff', fillOpacity: .12 }).addTo(map);
+  setTimeout(() => map.invalidateSize(), 80);
+}
+async function userTrail(id) {
+  const info = document.getElementById('u-trailinfo'); if (info) info.textContent = 'Loading trail…';
+  try {
+    const r = await api('/users/'+id+'/location-trail?days=7');
+    if (U_MAP && window.L) {
+      const line = (r.trail||[]).map(t => [t.lat, t.lng]);
+      if (line.length) {
+        const grp = L.featureGroup();
+        L.polyline(line, { color: '#ffd23f', weight: 3, opacity: .95 }).addTo(grp);
+        L.circleMarker(line[line.length-1], { radius: 5, color: '#ffd23f', weight: 1, fillColor: '#ffd23f', fillOpacity: 1 }).addTo(grp);
+        grp.addTo(U_MAP);
+        U_MAP.fitBounds(grp.getBounds(), { padding: [40,40], maxZoom: 16 });
+      }
+    }
+    if (info) info.textContent = `Trail: ${r.points} fix(es) over 7 days · been within 150 m for ~${fmtDur(r.dwellMs)}`;
   } catch (e) { if (info) info.textContent = e.message; }
 }
 
