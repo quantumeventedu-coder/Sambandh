@@ -18,7 +18,7 @@ const User = require('./models/User');
 const Notification = require('./models/Notification');
 const { requireAuth, requireAdmin } = require('./routes-auth');
 const crypto = require('crypto');
-const { uploadToR2 } = require('./services/storage');
+const { uploadToR2, uploadPrivate } = require('./services/storage');
 const { decideIdDocument, decideSelfie, decideClaimDocument } = require('./services/verify-engine');
 const { track } = require('./services/analytics');
 
@@ -91,8 +91,8 @@ router.post('/id', requireAuth, async (req, res, next) => {
         // Random token → an unguessable object key, so the stored ID can't be fetched by
         // enumerating predictable URLs; and it's auto-deleted after 30 days (doc-retention).
         const key = `verification/${req.userId}/id/${d.idType}_${Date.now()}_${crypto.randomBytes(8).toString('hex')}.jpg`;
-        const url = await uploadToR2(key, buffer, 'image/jpeg');
-        documents.push({ type: d.idType, url, key, uploadedAt: new Date() });
+        await uploadPrivate(key, buffer, 'image/jpeg');   // PRIVATE bucket — no public URL
+        documents.push({ type: d.idType, key, private: true, uploadedAt: new Date() });
 
         decision = await decideIdDocument(user, buffer, d.idType, d.document.filename);
         // Fail secure: auto-approve ONLY when the Trust Engine is confident (band
@@ -161,7 +161,7 @@ router.post('/selfie', requireAuth, async (req, res, next) => {
 
     const buffer = Buffer.from(base64, 'base64');
     const key = `verification/${req.userId}/id/selfie_${Date.now()}_${crypto.randomBytes(8).toString('hex')}.jpg`;
-    const url = await uploadToR2(key, buffer, 'image/jpeg');
+    await uploadPrivate(key, buffer, 'image/jpeg');   // PRIVATE bucket — no public URL
 
     // Our own face verification: the browser sends a 128-d face descriptor
     // (@vladmandic/face-api). Validate server-side, then check for the same face
@@ -188,7 +188,7 @@ router.post('/selfie', requireAuth, async (req, res, next) => {
       userId: req.userId,
       type: 'selfie',
       claim: { checks: decision.checks },
-      documents: [{ type: 'selfie', url, key, uploadedAt: new Date() }],
+      documents: [{ type: 'selfie', key, private: true, uploadedAt: new Date() }],
       status: decision.approved ? 'approved' : 'rejected',
       submittedAt: new Date(),
       reviewedAt: new Date(),
@@ -284,8 +284,8 @@ router.post('/profession', requireAuth, async (req, res, next) => {
     for (const doc of d.documents) {
       const buffer = Buffer.from(doc.base64, 'base64');
       const key = `verification/${req.userId}/profession/${Date.now()}_${crypto.randomBytes(8).toString('hex')}_${doc.filename}`;
-      const url = await uploadToR2(key, buffer, getMimeType(doc.filename));
-      uploadedDocs.push({ type: doc.type, url, key, uploadedAt: new Date() });
+      await uploadPrivate(key, buffer, getMimeType(doc.filename));   // PRIVATE bucket
+      uploadedDocs.push({ type: doc.type, key, private: true, uploadedAt: new Date() });
     }
     if (d.linkedinUrl) uploadedDocs.push({ type: 'linkedin_link', value: d.linkedinUrl, uploadedAt: new Date() });
     if (d.registrationNumber) uploadedDocs.push({ type: 'registration_number', value: d.registrationNumber, uploadedAt: new Date() });
@@ -364,8 +364,8 @@ router.post('/education', requireAuth, async (req, res, next) => {
     for (const doc of d.documents) {
       const buffer = Buffer.from(doc.base64, 'base64');
       const key = `verification/${req.userId}/education/${Date.now()}_${crypto.randomBytes(8).toString('hex')}_${doc.filename}`;
-      const url = await uploadToR2(key, buffer, getMimeType(doc.filename));
-      uploadedDocs.push({ type: 'degree', url, key, uploadedAt: new Date() });
+      await uploadPrivate(key, buffer, getMimeType(doc.filename));   // PRIVATE bucket
+      uploadedDocs.push({ type: 'degree', key, private: true, uploadedAt: new Date() });
     }
 
     const first = d.documents[0];
