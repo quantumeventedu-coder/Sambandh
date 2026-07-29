@@ -784,4 +784,18 @@ router.get('/users/:id/location-trail', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+// View a verification document via a short-lived SIGNED URL (docs live in the PRIVATE bucket —
+// no public URL). Returns 410 once the original has been deleted past its retention window.
+router.get('/verifications/:id/doc/:index', async (req, res, next) => {
+  try {
+    const v = await require('./models/Verification').findById(req.params.id);
+    if (!v) return res.status(404).json({ error: 'Verification not found' });
+    const d = (v.documents || [])[Number(req.params.index)];
+    if (!d) return res.status(404).json({ error: 'Document not found' });
+    if (!d.key && !d.url) return res.status(410).json({ error: 'Document was deleted (past its retention window).' });
+    const url = (d.private && d.key) ? await require('./services/storage').signedUrl(d.key, 120) : (d.url || null);
+    res.json({ url, private: !!d.private, type: d.type, expiresInSec: d.private ? 120 : null });
+  } catch (err) { next(err); }
+});
+
 module.exports = router;

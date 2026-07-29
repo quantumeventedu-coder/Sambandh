@@ -9,7 +9,7 @@ const retention = require('../src/services/doc-retention');
 
 beforeAll(db.start); afterAll(db.stop); afterEach(db.clear);
 const uid = () => new (require('../src/db/odm').Types.ObjectId)();
-const doc = (over = {}) => ({ type: 'passport', url: 'u', key: 'verification/u/id/a.jpg', uploadedAt: new Date(), ...over });
+const doc = (over = {}) => ({ type: 'passport', key: 'verification/u/id/a.jpg', private: true, uploadedAt: new Date(), ...over });
 
 describe('keyOf — resolve the storage object key', () => {
   test('prefers the stored key, else parses the URL (Supabase public / local)', () => {
@@ -29,8 +29,8 @@ describe('purgeExpiredDocuments', () => {
 
     const res = await retention.purgeExpiredDocuments(new Date());
     expect(res).toEqual({ records: 1, files: 1 });
-    expect(spy).toHaveBeenCalledWith('verification/u/id/OLD.jpg');
-    expect(spy).not.toHaveBeenCalledWith('verification/u/id/NEW.jpg');
+    expect(spy).toHaveBeenCalledWith('verification/u/id/OLD.jpg', { private: true });
+    expect(spy).not.toHaveBeenCalledWith('verification/u/id/NEW.jpg', { private: true });
 
     const e = await Verification.findById(expired._id);
     expect(e.documents.length).toBe(0);              // URL/reference gone
@@ -56,8 +56,8 @@ describe('purgeUserDocuments — account erasure removes the image files', () =>
     await Verification.create({ userId: u, type: 'selfie', documents: [doc({ type: 'selfie', key: 'k2' })] });
     const n = await retention.purgeUserDocuments(u);
     expect(n).toBe(2);
-    expect(spy).toHaveBeenCalledWith('k1');
-    expect(spy).toHaveBeenCalledWith('k2');
+    expect(spy).toHaveBeenCalledWith('k1', { private: true });
+    expect(spy).toHaveBeenCalledWith('k2', { private: true });
     spy.mockRestore();
   });
 });

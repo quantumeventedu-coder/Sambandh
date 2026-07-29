@@ -26,7 +26,7 @@ async function deleteDocs(docs) {
   let n = 0;
   for (const d of (docs || [])) {
     const k = keyOf(d);
-    if (k && await storage.deleteFile(k)) n++;
+    if (k && await storage.deleteFile(k, { private: !!d.private })) n++;   // private bucket for new docs
   }
   return n;
 }
