@@ -101,5 +101,16 @@ describe('GET /superadmin/users/:id/location-trail', () => {
     expect(r.body.points).toBe(2);
     expect(r.body.trail.length).toBe(2);
     expect(r.body.dwellMs).toBeGreaterThanOrEqual(29 * 60000);   // ~30 min within 150 m of the latest
+    expect(r.body.demo).toBeFalsy();                              // a real user → real pings, not synthesised
+  });
+
+  test('a PREVIEW account gets a demo trail synthesised around its current pin (ending on it)', async () => {
+    await mkUser({ preview: true, profile: { firstName: 'Preview', city: 'Guwahati', location: { lat: 26.18, lng: 91.69 } } });
+    const r = await request(app).get('/superadmin/users/' + TEST_USER_ID + '/location-trail?days=7');
+    expect(r.body.demo).toBe(true);
+    expect(r.body.points).toBe(8);
+    const last = r.body.trail[r.body.trail.length - 1];          // newest fix sits exactly on the current pin
+    expect(last.lat).toBeCloseTo(26.18, 5);
+    expect(last.lng).toBeCloseTo(91.69, 5);
   });
 });
