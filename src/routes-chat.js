@@ -226,6 +226,9 @@ router.post('/:chatId/block', requireAuth, requireLaunched, async (req, res, nex
       return res.status(404).json({ error: 'Chat not found' });
     }
     await Chat.findByIdAndUpdate(chat._id, { status: 'blocked' });
+    // Instantly sever any live-location share between the two participants.
+    const peerId = chat.participants.find(p => p.toString() !== req.userId);
+    if (peerId) await require('./routes-couple-location').revokeSharesForPair(req.app.get('io'), req.userId, peerId);
     res.json({ ok: true });
   } catch (err) { next(err); }
 });
