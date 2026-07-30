@@ -150,6 +150,23 @@ router.post('/shares/:id/revoke', requireAuth, async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+// Extend an active share's time limit (reset from now, still capped at the hard max). Either
+// participant; active-only. Nudges both clients to refresh their countdown.
+router.post('/shares/:id/extend', requireAuth, async (req, res, next) => {
+  try {
+    const s = await LocationShare.findById(req.params.id);
+    if (!s || !isParticipant(s, req.userId)) return res.status(404).json({ error: 'Share not found' });
+    if (s.status !== 'active') return res.status(409).json({ error: 'Only an active share can be extended.' });
+    const mins = Math.min(Number(req.body && req.body.durationMins) || 60, DURATION_CAP_MIN);
+    const expiresAt = new Date(Date.now() + mins * 60000);
+    const won = await market.atomicUpdate(LocationShare, { _id: s._id, status: 'active' }, { $set: { expiresAt } });
+    if (!won) return res.status(409).json({ error: 'Only an active share can be extended.' });
+    emit(req, s.a, 'location_share_active', { shareId: s._id });
+    emit(req, s.b, 'location_share_active', { shareId: s._id });
+    res.json({ ok: true, expiresAt });
+  } catch (err) { next(err); }
+});
+
 // Cold-open / poll-fallback read of the peer's latest position. Fail-closed.
 router.get('/shares/:id/peer', requireAuth, async (req, res, next) => {
   try {
