@@ -107,6 +107,7 @@ app.use('/api/ai', require('./routes-ai')); // reusable AI API (per-app X-AI-Key
 app.use('/api/superadmin', require('./routes-superadmin')); // owner-only, SUPER_ADMIN_KEY
 app.use('/api/developer', require('./routes-developer')); // internal STAFF console (own accounts + 2FA + scopes)
 app.use('/api/marketplace', require('./routes-marketplace')); // native partner/listing/order marketplace (in-house escrow + commission)
+app.use('/api/couple/location', require('./routes-couple-location')); // consented, mutual, revocable live-location sharing between matches
 app.use('/api/consultation', require('./routes-consultation')); // bookable consultations (slots + sessions) on the marketplace core
 app.use('/api/verification-services', require('./routes-verification-services')); // consent-gated verification product on the AAV Trust Engine
 app.use('/api/vault', require('./routes-vault')); // encrypted-at-rest document vault (AAV-scanned, consent-shareable)

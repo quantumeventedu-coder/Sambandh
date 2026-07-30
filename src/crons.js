@@ -150,6 +150,13 @@ async function nightlyBatch() {
     if (r && r.reclaimed) console.log('[CRON] marketplace sweep:', r.reclaimed, 'stranded-captures-refunded');
   } catch (e) { console.error('[CRON] marketplace sweep:', e.message); }
 
+  // 10c. Couple location-share expiry: hard-stop + null any share past its cap (also enforced
+  // on every read, but this reclaims stragglers so no stale position can ever be served).
+  try {
+    const r = await require('./routes-couple-location').sweepExpiredShares();
+    if (r && r.expired) console.log('[CRON] location-share sweep:', r.expired, 'expired');
+  } catch (e) { console.error('[CRON] location-share sweep:', e.message); }
+
   console.log('[CRON] Nightly batch complete');
 }
 

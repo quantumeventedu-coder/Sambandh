@@ -166,6 +166,8 @@ router.post('/location', requireAuth, async (req, res, next) => {
         await LocationPing.create({ userId: req.userId, lat, lng, accuracy: accuracy ?? null, at: new Date() });
       }
     } catch { /* trail is best-effort */ }
+    // Relay this fix to any consented, active couple location-share (fail-closed on consent).
+    require('./routes-couple-location').relayLiveFix(req.app.get('io'), req.userId, lat, lng, accuracy);
     res.json({ ok: true, city: user.profile?.city || null, state: user.profile?.state || null });
   } catch (err) { next(err); }
 });
@@ -281,6 +283,8 @@ router.post('/block/:userId', requireAuth, async (req, res, next) => {
     await Chat.updateMany(
       { participants: { $all: [req.userId, req.params.userId], $size: 2 } },
       { status: 'blocked' });
+    // Instantly sever any live-location share with the blocked user (both fixes nulled).
+    await require('./routes-couple-location').revokeSharesForPair(req.app.get('io'), req.userId, req.params.userId);
 
     res.json({ ok: true }); // the blocked user is never notified
   } catch (err) { next(err); }

@@ -224,6 +224,18 @@ function connectSocket() {
     toast('Identities revealed');
     if (location.hash === '#/chat/' + chatId) renderChat(chatId);
   });
+  // Couple live-location sharing
+  S.socket.on('location_share_request', ({ shareId }) => { toast('📍 Live location request'); promptLiveShareRequest(shareId); });
+  S.socket.on('location_share_active', ({ shareId }) => { if (location.hash === '#/live/' + shareId) refreshPeer(shareId); else toast('📍 Live location is on'); });
+  S.socket.on('peer_location', ({ shareId, lat, lng, accuracy }) => { if (LIVE.shareId === shareId && location.hash === '#/live/' + shareId) setPeerMarker(lat, lng, accuracy); });
+  S.socket.on('location_share_ended', ({ shareId }) => {
+    if (LIVE.shareId === shareId) {
+      const st = document.getElementById('live-status'); if (st) st.textContent = 'Sharing ended.';
+      if (LIVE.peerMarker && LIVE.map) { LIVE.map.removeLayer(LIVE.peerMarker); LIVE.peerMarker = null; }
+      if (LIVE.peerAcc && LIVE.map) { LIVE.map.removeLayer(LIVE.peerAcc); LIVE.peerAcc = null; }
+      toast('Live location ended');
+    }
+  });
 }
 
 // ---------------- Router ----------------
@@ -300,6 +312,7 @@ async function route() {
     case 'shop': return renderShop();
     case 'product': return renderProduct(parts[1]);
     case 'orders': return renderOrders();
+    case 'live': return renderLiveLocation(parts[1]);
     case 'redeem': S._pendingGiftCode = parts[1] || ''; return nav('#/services');
     case 'compat': return renderCompat(parts[1]);
     case 'settings': return renderSettings();
@@ -1903,6 +1916,7 @@ async function renderChat(chatId) {
       <button class="back" onclick="nav('#/chats')">←</button>
       <div class="avatar" id="ch-avatar" style="width:36px;height:36px;font-size:14px">…</div>
       <div class="who"><b id="ch-name">Loading…</b><small id="ch-sub"></small></div>
+      <button class="ic-row" title="Share live location" style="background:none;border:1px solid var(--forest,#2f7d4f);color:var(--forest,#2f7d4f);border-radius:8px;padding:5px 9px;font-size:11.5px;font-weight:600;cursor:pointer" onclick="startLiveShare('${chatId}')">📍 Live</button>
       <button id="ch-reveal" class="ic-row" style="display:none;background:none;border:1px solid var(--anon);color:var(--anon);border-radius:8px;padding:5px 10px;font-size:11.5px;font-weight:600;cursor:pointer" onclick="requestReveal('${chatId}')">${ic('ghost')} Reveal</button>
     </div>
     <div class="chat-msgs" id="msgs"></div>
@@ -3361,6 +3375,87 @@ async function loadOrders() {
 async function orderAction(id, action) {
   try { await api('/marketplace/orders/' + id + '/' + action, { method: 'POST' }); toast('Done'); loadOrders(); }
   catch (e) { toast(e.message); }
+}
+
+// ===== Couple live-location sharing (consented, mutual, revocable, auto-expiring) =====
+// Coordinates are shown only to the consented match. Either side can stop instantly; it also
+// ends automatically at the time limit. Reuses the existing GPS watch to feed our own position.
+let _leafletApp = null;
+function ensureLeafletApp() {
+  if (window.L) return Promise.resolve();
+  if (_leafletApp) return _leafletApp;
+  _leafletApp = new Promise((resolve, reject) => {
+    const css = document.createElement('link'); css.rel = 'stylesheet'; css.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css'; document.head.appendChild(css);
+    const s = document.createElement('script'); s.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
+    s.onload = () => resolve(); s.onerror = () => { _leafletApp = null; reject(new Error('Could not load the map (offline?).')); };
+    document.head.appendChild(s);
+  });
+  return _leafletApp;
+}
+const LIVE = { map: null, meMarker: null, peerMarker: null, peerAcc: null, shareId: null };
+async function startLiveShare(chatId) {
+  try {
+    const r = await api('/couple/location/shares/by-chat/' + chatId, { method: 'POST', body: {} });
+    toast(r.reused ? 'Opening your live share…' : 'Request sent 📍 — waiting for your match to accept.');
+    nav('#/live/' + r.share.id);
+  } catch (e) { toast(e.message); }
+}
+async function renderLiveLocation(shareId) {
+  LIVE.shareId = shareId; LIVE.peerMarker = null; LIVE.peerAcc = null; LIVE.meMarker = null;
+  screen.innerHTML = `<div class="section-pad"><button class="back" onclick="nav('#/chats')">← Chats</button>
+    <div class="row" style="justify-content:space-between;align-items:center"><h1 style="margin:0">Live location</h1>
+      <button class="btn secondary" style="width:auto" onclick="revokeLiveShare('${shareId}')">Stop sharing</button></div>
+    <div id="live-status" class="hint" style="margin:6px 0">Connecting…</div>
+    <div id="live-map" style="width:100%;height:420px;border:1px solid var(--line,#334);border-radius:10px;overflow:hidden;background:#04070f;z-index:0"></div>
+    <p class="hint" style="margin-top:8px">Both of you must be sharing. Either can stop anytime; it also ends automatically at the time limit. Your exact location is shown only to your match.</p></div>`;
+  try {
+    await ensureLeafletApp();
+    const start = (S._lastLoc && [S._lastLoc.lat, S._lastLoc.lng]) || [22, 79];
+    const map = L.map('live-map').setView(start, S._lastLoc ? 14 : 4);
+    LIVE.map = map;
+    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap' }).addTo(map);
+    if (S._lastLoc) LIVE.meMarker = L.circleMarker(start, { radius: 7, color: '#fff', weight: 2, fillColor: '#3aa0ff', fillOpacity: .95 }).addTo(map).bindTooltip('You');
+    setTimeout(() => map.invalidateSize(), 80);
+    if (typeof startLocationWatch === 'function') startLocationWatch();   // feed our own position to the peer
+    await refreshPeer(shareId);
+  } catch (e) { const el = document.getElementById('live-status'); if (el) el.textContent = e.message; }
+}
+async function refreshPeer(shareId) {
+  try {
+    const r = await api('/couple/location/shares/' + shareId + '/peer');
+    const st = document.getElementById('live-status');
+    if (!r.live) { if (st) st.textContent = r.status === 'pending' ? 'Waiting for your match to accept…' : 'Sharing is not active.'; return; }
+    if (st) st.textContent = 'Live 🟢 — sharing with each other.';
+    if (r.peerFix) setPeerMarker(r.peerFix.lat, r.peerFix.lng, r.peerFix.accuracy);
+  } catch (e) { const st = document.getElementById('live-status'); if (st) st.textContent = e.message; }
+}
+function setPeerMarker(lat, lng, accuracy) {
+  if (!LIVE.map || !window.L) return;
+  if (!LIVE.peerMarker) {
+    LIVE.peerMarker = L.circleMarker([lat, lng], { radius: 8, color: '#fff', weight: 2, fillColor: '#e5484d', fillOpacity: .95 }).addTo(LIVE.map).bindTooltip('Your match');
+    LIVE.peerAcc = L.circle([lat, lng], { radius: accuracy || 30, color: '#e5484d', weight: 1, fillColor: '#e5484d', fillOpacity: .1 }).addTo(LIVE.map);
+  } else {
+    LIVE.peerMarker.setLatLng([lat, lng]);
+    if (LIVE.peerAcc) LIVE.peerAcc.setLatLng([lat, lng]).setRadius(accuracy || 30);
+  }
+  LIVE.map.panTo([lat, lng]);
+}
+async function revokeLiveShare(shareId) {
+  try { await api('/couple/location/shares/' + shareId + '/revoke', { method: 'POST' }); toast('Sharing stopped'); nav('#/chats'); }
+  catch (e) { toast(e.message); }
+}
+async function acceptLiveShare(shareId) {
+  try { await api('/couple/location/shares/' + shareId + '/accept', { method: 'POST' }); nav('#/live/' + shareId); }
+  catch (e) { toast(e.message); }
+}
+async function declineLiveShare(shareId) {
+  try { await api('/couple/location/shares/' + shareId + '/decline', { method: 'POST' }); } catch (e) { /* best-effort */ }
+}
+function promptLiveShareRequest(shareId) {
+  openModal(`<h2 style="margin-top:0">Live location request 📍</h2>
+    <p class="hint">Your match wants to share live location with each other. You can stop anytime, and it ends automatically at the time limit.</p>
+    <button class="btn" onclick="closeModal();acceptLiveShare('${shareId}')">Accept &amp; share</button>
+    <button class="btn secondary" onclick="closeModal();declineLiveShare('${shareId}')">Not now</button>`);
 }
 
 async function loadTrust() {

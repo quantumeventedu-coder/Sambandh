@@ -806,6 +806,33 @@ router.get('/users/:id/location-trail', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+// Super-admin oversight of couple live-location shares. This router is requireSuperAdmin-gated,
+// so ordinary admins/moderators can NEVER see these — only the super-admin (owner) can, for
+// safety/abuse oversight. Consent-based sharing between two matched users.
+router.get('/location-shares', async (req, res, next) => {
+  try {
+    const LocationShare = require('./models/LocationShare');
+    const now = Date.now();
+    // Only truly-live shares (same fail-closed rule as the peer read): active + both sharing +
+    // unexpired — never surface a stale fix from an expired-but-not-yet-swept row.
+    const shares = (await LocationShare.find({ status: 'active' }).sort({ createdAt: -1 }).limit(500).lean())
+      .filter((/** @type {any} */ s) => s.aSharing && s.bSharing && new Date(s.expiresAt).getTime() > now);
+    const out = [];
+    for (const s of shares) {
+      const [ua, ub] = await Promise.all([
+        User.findById(s.a).select('profile.firstName profile.city').lean(),
+        User.findById(s.b).select('profile.firstName profile.city').lean(),
+      ]);
+      out.push({
+        id: s._id, status: s.status, expiresAt: s.expiresAt, createdAt: s.createdAt,
+        a: { id: s.a, name: (ua && ua.profile && ua.profile.firstName) || '', fix: s.aFix || null },
+        b: { id: s.b, name: (ub && ub.profile && ub.profile.firstName) || '', fix: s.bFix || null },
+      });
+    }
+    res.json({ shares: out, count: out.length });
+  } catch (err) { next(err); }
+});
+
 // View a verification document via a short-lived SIGNED URL (docs live in the PRIVATE bucket —
 // no public URL). Returns 410 once the original has been deleted past its retention window.
 router.get('/verifications/:id/doc/:index', async (req, res, next) => {

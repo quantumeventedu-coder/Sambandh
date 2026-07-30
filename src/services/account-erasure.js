@@ -29,6 +29,7 @@ async function eraseUser(id) {
     Notification.deleteMany({ userId: id }).catch(() => {}),
     Verification.deleteMany({ userId: id }).catch(() => {}),
     require('../models/LocationPing').deleteMany({ userId: id }).catch(() => {}),
+    require('../models/LocationShare').deleteMany({ pair: id }).catch(() => {}),
     Message.updateMany({ from: id }, { text: '[deleted]', deleted: true }).catch(() => {}),
     Chat.updateMany({ participants: id }, { status: 'archived' }).catch(() => {}),
   ]);
