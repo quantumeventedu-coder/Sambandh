@@ -230,6 +230,7 @@ function connectSocket() {
   S.socket.on('peer_location', ({ shareId, lat, lng, accuracy }) => { if (LIVE.shareId === shareId && location.hash === '#/live/' + shareId) setPeerMarker(lat, lng, accuracy); });
   S.socket.on('location_share_ended', ({ shareId }) => {
     if (LIVE.shareId === shareId) {
+      LIVE.active = false; LIVE.expiresAt = null; LIVE.peerPos = null; clearInterval(LIVE.ticker);
       const st = document.getElementById('live-status'); if (st) st.textContent = 'Sharing ended.';
       if (LIVE.peerMarker && LIVE.map) { LIVE.map.removeLayer(LIVE.peerMarker); LIVE.peerMarker = null; }
       if (LIVE.peerAcc && LIVE.map) { LIVE.map.removeLayer(LIVE.peerAcc); LIVE.peerAcc = null; }
@@ -3392,7 +3393,26 @@ function ensureLeafletApp() {
   });
   return _leafletApp;
 }
-const LIVE = { map: null, meMarker: null, peerMarker: null, peerAcc: null, shareId: null };
+const LIVE = { map: null, meMarker: null, peerMarker: null, peerAcc: null, shareId: null, active: false, expiresAt: null, peerPos: null, ticker: null };
+function fmtLeft(ms) { const s = Math.max(0, Math.floor(ms / 1000)); const m = Math.floor(s / 60); if (m < 60) return m + 'm ' + (s % 60) + 's'; const h = Math.floor(m / 60); return h + 'h ' + (m % 60) + 'm'; }
+function updateLiveStatus() {
+  const st = document.getElementById('live-status'); if (!st) return;
+  if (!LIVE.active) return;   // 'waiting'/'ended' states are set by their own handlers
+  const parts = ['Live 🟢 — sharing'];
+  if (LIVE.peerPos && S._lastLoc && typeof haversineKmClient === 'function') {
+    const km = haversineKmClient(S._lastLoc.lat, S._lastLoc.lng, LIVE.peerPos.lat, LIVE.peerPos.lng);
+    if (km != null) parts.push(km < 1 ? Math.round(km * 1000) + ' m apart' : km.toFixed(1) + ' km apart');
+  }
+  if (LIVE.expiresAt) { const ms = new Date(LIVE.expiresAt).getTime() - Date.now(); parts.push(ms <= 0 ? 'ending…' : 'ends in ' + fmtLeft(ms)); }
+  st.textContent = parts.join(' · ');
+}
+function startLiveTicker() {
+  clearInterval(LIVE.ticker);
+  LIVE.ticker = setInterval(() => {
+    if (LIVE.shareId == null || location.hash !== '#/live/' + LIVE.shareId) { clearInterval(LIVE.ticker); return; }
+    updateLiveStatus();
+  }, 1000);
+}
 async function startLiveShare(chatId) {
   try {
     const r = await api('/couple/location/shares/by-chat/' + chatId, { method: 'POST', body: {} });
@@ -3401,10 +3421,11 @@ async function startLiveShare(chatId) {
   } catch (e) { toast(e.message); }
 }
 async function renderLiveLocation(shareId) {
-  LIVE.shareId = shareId; LIVE.peerMarker = null; LIVE.peerAcc = null; LIVE.meMarker = null;
+  LIVE.shareId = shareId; LIVE.peerMarker = null; LIVE.peerAcc = null; LIVE.meMarker = null; LIVE.active = false; LIVE.expiresAt = null; LIVE.peerPos = null;
   screen.innerHTML = `<div class="section-pad"><button class="back" onclick="nav('#/chats')">← Chats</button>
-    <div class="row" style="justify-content:space-between;align-items:center"><h1 style="margin:0">Live location</h1>
-      <button class="btn secondary" style="width:auto" onclick="revokeLiveShare('${shareId}')">Stop sharing</button></div>
+    <div class="row" style="justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px"><h1 style="margin:0">Live location</h1>
+      <div style="display:flex;gap:8px"><button class="btn secondary" style="width:auto" onclick="extendLiveShare('${shareId}')">+1 hour</button>
+      <button class="btn secondary" style="width:auto" onclick="revokeLiveShare('${shareId}')">Stop sharing</button></div></div>
     <div id="live-status" class="hint" style="margin:6px 0">Connecting…</div>
     <div id="live-map" style="width:100%;height:420px;border:1px solid var(--line,#334);border-radius:10px;overflow:hidden;background:#04070f;z-index:0"></div>
     <p class="hint" style="margin-top:8px">Both of you must be sharing. Either can stop anytime; it also ends automatically at the time limit. Your exact location is shown only to your match.</p></div>`;
@@ -3417,6 +3438,7 @@ async function renderLiveLocation(shareId) {
     if (S._lastLoc) LIVE.meMarker = L.circleMarker(start, { radius: 7, color: '#fff', weight: 2, fillColor: '#3aa0ff', fillOpacity: .95 }).addTo(map).bindTooltip('You');
     setTimeout(() => map.invalidateSize(), 80);
     if (typeof startLocationWatch === 'function') startLocationWatch();   // feed our own position to the peer
+    startLiveTicker();
     await refreshPeer(shareId);
   } catch (e) { const el = document.getElementById('live-status'); if (el) el.textContent = e.message; }
 }
@@ -3424,13 +3446,15 @@ async function refreshPeer(shareId) {
   try {
     const r = await api('/couple/location/shares/' + shareId + '/peer');
     const st = document.getElementById('live-status');
-    if (!r.live) { if (st) st.textContent = r.status === 'pending' ? 'Waiting for your match to accept…' : 'Sharing is not active.'; return; }
-    if (st) st.textContent = 'Live 🟢 — sharing with each other.';
+    if (!r.live) { LIVE.active = false; LIVE.expiresAt = null; if (st) st.textContent = r.status === 'pending' ? 'Waiting for your match to accept…' : 'Sharing is not active.'; return; }
+    LIVE.active = true; LIVE.expiresAt = r.expiresAt || null;
     if (r.peerFix) setPeerMarker(r.peerFix.lat, r.peerFix.lng, r.peerFix.accuracy);
+    updateLiveStatus();
   } catch (e) { const st = document.getElementById('live-status'); if (st) st.textContent = e.message; }
 }
 function setPeerMarker(lat, lng, accuracy) {
-  if (!LIVE.map || !window.L) return;
+  LIVE.peerPos = { lat, lng };
+  if (!LIVE.map || !window.L) { updateLiveStatus(); return; }
   if (!LIVE.peerMarker) {
     LIVE.peerMarker = L.circleMarker([lat, lng], { radius: 8, color: '#fff', weight: 2, fillColor: '#e5484d', fillOpacity: .95 }).addTo(LIVE.map).bindTooltip('Your match');
     LIVE.peerAcc = L.circle([lat, lng], { radius: accuracy || 30, color: '#e5484d', weight: 1, fillColor: '#e5484d', fillOpacity: .1 }).addTo(LIVE.map);
@@ -3439,6 +3463,13 @@ function setPeerMarker(lat, lng, accuracy) {
     if (LIVE.peerAcc) LIVE.peerAcc.setLatLng([lat, lng]).setRadius(accuracy || 30);
   }
   LIVE.map.panTo([lat, lng]);
+  updateLiveStatus();
+}
+async function extendLiveShare(shareId) {
+  try {
+    const r = await api('/couple/location/shares/' + shareId + '/extend', { method: 'POST', body: { durationMins: 60 } });
+    LIVE.expiresAt = r.expiresAt || LIVE.expiresAt; toast('Extended by 1 hour'); updateLiveStatus();
+  } catch (e) { toast(e.message); }
 }
 async function revokeLiveShare(shareId) {
   try { await api('/couple/location/shares/' + shareId + '/revoke', { method: 'POST' }); toast('Sharing stopped'); nav('#/chats'); }

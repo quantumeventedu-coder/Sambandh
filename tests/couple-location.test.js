@@ -142,6 +142,28 @@ describe('couple live-location: consent + fail-closed', () => {
     expect(r.body.shares.length).toBe(0);
   });
 
+  test('either participant can extend an active share; a stranger cannot, and a revoked one cannot', async () => {
+    const a = await mkUser(), b = await mkUser(), c = await mkUser(); await match(a, b);
+    const id = (await startShare(a, b)).body.share.id;
+    await request(app).post(`/api/couple/location/shares/${id}/accept`).set(as(b));
+    const before = new Date((await LocationShare.findById(id)).expiresAt).getTime();
+    const ext = await request(app).post(`/api/couple/location/shares/${id}/extend`).set(as(b)).send({ durationMins: 120 });
+    expect(ext.status).toBe(200);
+    expect(new Date((await LocationShare.findById(id)).expiresAt).getTime()).toBeGreaterThan(before);
+    expect((await request(app).post(`/api/couple/location/shares/${id}/extend`).set(as(c)).send({})).status).toBe(404);  // stranger
+    await request(app).post(`/api/couple/location/shares/${id}/revoke`).set(as(a));
+    expect((await request(app).post(`/api/couple/location/shares/${id}/extend`).set(as(b)).send({})).status).toBe(409);  // not active
+  });
+
+  test('extend is capped at the hard maximum (cannot exceed 8h)', async () => {
+    const a = await mkUser(), b = await mkUser(); await match(a, b);
+    const id = (await startShare(a, b)).body.share.id;
+    await request(app).post(`/api/couple/location/shares/${id}/accept`).set(as(b));
+    await request(app).post(`/api/couple/location/shares/${id}/extend`).set(as(a)).send({ durationMins: 100000 });
+    const ms = new Date((await LocationShare.findById(id)).expiresAt).getTime() - Date.now();
+    expect(ms).toBeLessThanOrEqual(8 * 60 * 60000 + 5000);   // ≤ 8h (+ tiny slack)
+  });
+
   test('start-by-chat derives the peer from the chat (client never needs the peer id)', async () => {
     const a = await mkUser(), b = await mkUser(); const chat = await match(a, b);
     const r = await request(app).post(`/api/couple/location/shares/by-chat/${chat._id}`).set(as(a)).send({});
