@@ -65,13 +65,38 @@ function quote(listing, partner) {
   return { amountCHF, commissionRate: rate, commissionCHF, partnerPayoutCHF };
 }
 
+/** Validate + normalise a postal delivery address. Physical goods have to ship
+ * somewhere — GPS is never used for that. Returns a clean address or null if it's
+ * missing a mandatory field. @param {any} a */
+function normalizeAddress(a) {
+  if (!a || typeof a !== 'object') return null;
+  const s = (/** @type {any} */ v, /** @type {number} */ n) => (typeof v === 'string' ? v.trim().slice(0, n) : '');
+  const out = {
+    name: s(a.name, 120), phone: s(a.phone, 20),
+    line1: s(a.line1, 200), line2: s(a.line2, 200),
+    city: s(a.city, 80), state: s(a.state, 80),
+    pincode: s(a.pincode, 12), landmark: s(a.landmark, 120),
+    country: s(a.country, 3) || 'IN'
+  };
+  if (!out.name || !out.phone || !out.line1 || !out.city || !out.pincode) return null;   // mandatory fields
+  return out;
+}
+
 /**
  * Create an order (status 'created'). Decrements finite stock (rejects if none).
- * @param {{ userId:any, listing:any, partner:any, scheduledFor?:Date, notes?:string }} args
+ * Physical products (kind:'product') require a valid `shippingAddress`, or the order is rejected.
+ * @param {{ userId:any, listing:any, partner:any, scheduledFor?:Date, notes?:string, shippingAddress?:any, giftForUserId?:any }} args
  */
-async function createOrder({ userId, listing, partner, scheduledFor, notes }) {
+async function createOrder({ userId, listing, partner, scheduledFor, notes, shippingAddress, giftForUserId }) {
   if (!listing || !listing.active) throw new Error('Listing unavailable');
   if (!partner || !partner.active) throw new Error('Partner unavailable');
+  // Fail-closed: a physical product must have somewhere to be delivered, or the order
+  // is invalid. Reject BEFORE reserving stock so a bad request never holds inventory.
+  let ship = null;
+  if (listing.kind === 'product') {
+    ship = normalizeAddress(shippingAddress);
+    if (!ship) throw new Error('A delivery address (name, phone, street, city, PIN) is required for physical products');
+  }
   const tracksStock = typeof listing.stock === 'number';
   if (tracksStock) {
     // Atomic conditional decrement — the ONLY defence against oversell under
@@ -85,6 +110,7 @@ async function createOrder({ userId, listing, partner, scheduledFor, notes }) {
     amountCHF: q.amountCHF, commissionRate: q.commissionRate,
     commissionCHF: q.commissionCHF, partnerPayoutCHF: q.partnerPayoutCHF,
     status: 'created', stockReserved: tracksStock, escrowHeld: false,
+    shippingAddress: ship, giftForUserId: giftForUserId || null,
     scheduledFor, notes, createdAt: new Date(), updatedAt: new Date()
   });
 }
@@ -205,5 +231,5 @@ async function addReview({ userId, order, rating, text }) {
 
 module.exports = {
   DEFAULT_COMMISSION, FALLBACK_COMMISSION, TRANSITIONS,
-  quote, createOrder, transition, rank, distanceKm, addReview, round2, atomicUpdate
+  quote, createOrder, transition, rank, distanceKm, addReview, round2, atomicUpdate, normalizeAddress
 };
