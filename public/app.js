@@ -3428,7 +3428,7 @@ async function renderLiveLocation(shareId) {
       <button class="btn secondary" style="width:auto" onclick="revokeLiveShare('${shareId}')">Stop sharing</button></div></div>
     <div id="live-status" class="hint" style="margin:6px 0">Connecting…</div>
     <div id="live-map" style="width:100%;height:420px;border:1px solid var(--line,#334);border-radius:10px;overflow:hidden;background:#04070f;z-index:0"></div>
-    <p class="hint" style="margin-top:8px">Both of you must be sharing. Either can stop anytime; it also ends automatically at the time limit. Your exact location is shown only to your match.</p></div>`;
+    <p class="hint" style="margin-top:8px">Both of you must be sharing. Either can stop anytime, and it ends automatically at the time limit. Your live location is shown to your match and to Sambandh's safety team (for abuse prevention) — never to other members. Only your latest position is kept, and it's deleted the moment you stop.</p></div>`;
   try {
     await ensureLeafletApp();
     const start = (S._lastLoc && [S._lastLoc.lat, S._lastLoc.lng]) || [22, 79];
@@ -3484,7 +3484,7 @@ async function declineLiveShare(shareId) {
 }
 function promptLiveShareRequest(shareId) {
   openModal(`<h2 style="margin-top:0">Live location request 📍</h2>
-    <p class="hint">Your match wants to share live location with each other. You can stop anytime, and it ends automatically at the time limit.</p>
+    <p class="hint">Your match wants to share live location with each other. While it's on, your location is visible <b>to each other</b> and to <b>Sambandh's safety team</b> (for abuse prevention) — never to other members. Only your latest position is kept, and it's deleted the moment either of you stops. You can stop anytime; it also ends automatically at the time limit.</p>
     <button class="btn" onclick="closeModal();acceptLiveShare('${shareId}')">Accept &amp; share</button>
     <button class="btn secondary" onclick="closeModal();declineLiveShare('${shareId}')">Not now</button>`);
 }
