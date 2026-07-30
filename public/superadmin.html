@@ -255,7 +255,31 @@ async function renderTest() {
     <h3 style="font-family:Georgia,serif;margin-bottom:4px">System Test — every subsystem, unrestricted</h3>
     <div class="sub">Runs each engine and integration live and reports pass/fail. This is your rehearsal console — it shows exactly where the app is solid and where quality is low (unconfigured integrations, fallbacks).</div>
     <div class="bar" style="margin:12px 0"><button class="gold" onclick="runTest()">Run full self-test</button><span id="test-summary" class="sub"></span></div>
-    <div id="test-results"></div></div>`;
+    <div id="test-results"></div></div>
+    <div class="card">
+      <h3 style="font-family:Georgia,serif;margin-bottom:4px">Storage &amp; private bucket</h3>
+      <div class="sub">Verification documents (ID/selfie) live in a PRIVATE bucket — no public URL, read only via short-lived signed links. It auto-creates on the first upload; click below to create it now and prove it works (write → sign → read → delete).</div>
+      <div class="bar" style="margin:12px 0"><button class="gold" onclick="ensureStorage(this)">Connect &amp; test private bucket</button><span id="storage-summary" class="sub"></span></div>
+      <div id="storage-results"></div></div>`;
+}
+async function ensureStorage(btn) {
+  if (btn) btn.disabled = true;
+  const sum = document.getElementById('storage-summary'), out = document.getElementById('storage-results');
+  if (sum) sum.textContent = ' Connecting…';
+  try {
+    const cfg = await api('/storage');
+    const r = await apiPost('/storage/ensure', {});
+    const yn = (v) => v ? '✓' : '✗';
+    const b = (x) => x.ok ? (x.existed ? 'already present' : x.created ? 'created' : 'ok') : ('FAILED — ' + esc(x.detail || x.error || ('status ' + x.status)));
+    if (sum) sum.textContent = r.test.ok ? ' ✓ private bucket connected & verified' : ' ✗ check failed — see below';
+    if (out) out.innerHTML = `<pre style="white-space:pre-wrap">Provider: ${esc(cfg.provider)}${cfg.configured ? '' : ' (Supabase NOT configured — set SUPABASE_URL + SUPABASE_SERVICE_KEY on the server)'}
+Public bucket  (${esc(cfg.publicBucket)}): ${b(r.ensured.public)}
+Private bucket (${esc(cfg.privateBucket)}): ${b(r.ensured.private)}
+
+Round-trip self-test (${esc(r.test.mode || '')}): ${r.test.ok ? 'PASS' : 'FAIL'}
+  upload ${yn(r.test.steps.upload)}  ·  sign ${yn(r.test.steps.sign)}  ·  read-back ${yn(r.test.steps.read)}  ·  delete ${yn(r.test.steps.delete)}${r.test.error ? '\n  error: ' + esc(r.test.error) : ''}</pre>`;
+  } catch (e) { if (sum) sum.textContent = ' ' + e.message; }
+  finally { if (btn) btn.disabled = false; }
 }
 async function runTest() {
   const box = $('#test-results'); const sum = $('#test-summary');

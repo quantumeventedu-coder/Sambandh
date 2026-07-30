@@ -806,6 +806,20 @@ router.get('/users/:id/location-trail', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+// Storage / private-bucket health. GET reports config; POST ensures BOTH buckets exist now and
+// round-trip self-tests the PRIVATE bucket (upload→sign→read→delete) so the owner can verify the
+// verification-document bucket is truly connected without waiting for a first upload.
+router.get('/storage', (req, res) => res.json(require('./services/storage').storageStatus()));
+router.post('/storage/ensure', async (req, res, next) => {
+  try {
+    const storage = require('./services/storage');
+    const ensured = await storage.ensureBuckets();
+    const test = await storage.selfTest();
+    await audit('sa_storage_ensure', 'system', 'storage', { ensured, testOk: test.ok });
+    res.json({ ensured, test });
+  } catch (err) { next(err); }
+});
+
 // Super-admin oversight of couple live-location shares. This router is requireSuperAdmin-gated,
 // so ordinary admins/moderators can NEVER see these — only the super-admin (owner) can, for
 // safety/abuse oversight. Consent-based sharing between two matched users.
