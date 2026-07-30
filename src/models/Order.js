@@ -37,6 +37,12 @@ const OrderSchema = new mongoose.Schema({
     country: { type: String, default: 'IN' }
   },
   giftForUserId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+  // Gift-acceptance gate — ORTHOGONAL to the money state machine (no new money states).
+  // A gift order stays 'pending' until the RECIPIENT accepts and supplies their OWN
+  // private address (the buyer never sees it); 'declined' triggers an escrow-safe refund.
+  // 'none' for ordinary self-purchases.
+  giftStatus: { type: String, enum: ['none', 'pending', 'accepted', 'declined'], default: 'none', index: true },
+  giftRespondedAt: Date,
   stockReserved: { type: Boolean, default: false },   // true iff createOrder atomically decremented finite stock
   escrowHeld: { type: Boolean, default: false },
   escrowReleasedAt: Date,

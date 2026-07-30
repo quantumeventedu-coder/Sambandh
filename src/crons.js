@@ -143,6 +143,13 @@ async function nightlyBatch() {
     if (r && (r.expired || r.reclaimed)) console.log('[CRON] verification sweep:', r.expired, 'expired-refunded,', r.reclaimed, 'late-capture-refunded');
   } catch (e) { console.error('[CRON] verification sweep:', e.message); }
 
+  // 10b. Marketplace reconciliation: reverse any payment that captured after its order was
+  // cancelled/refunded or its gift declined (async UPI/webhook capture can land late).
+  try {
+    const r = await require('./services/marketplace').reconcileStrandedOrders();
+    if (r && r.reclaimed) console.log('[CRON] marketplace sweep:', r.reclaimed, 'stranded-captures-refunded');
+  } catch (e) { console.error('[CRON] marketplace sweep:', e.message); }
+
   console.log('[CRON] Nightly batch complete');
 }
 

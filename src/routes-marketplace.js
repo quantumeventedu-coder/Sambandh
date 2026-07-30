@@ -16,12 +16,19 @@ const Partner = require('./models/Partner');
 const Listing = require('./models/Listing');
 const Order = require('./models/Order');
 const Payment = require('./models/Payment');
+const User = require('./models/User');
 const market = require('./services/marketplace');
+const { sharesActiveMatch } = require('./services/verification-service');
 
 const router = express.Router();
 const staff = requireSuperOrScope('market:manage');
 
 const msg = (/** @type {unknown} */ e) => (e instanceof Error ? e.message : String(e));
+// In-app notify (best-effort; never blocks the response). Lazy require avoids a require cycle.
+const notify = (/** @type {any} */ uid, /** @type {any} */ n) => {
+  try { return /** @type {any} */ (require('./routes-notifications')).deliverNotification(uid, n).catch(() => {}); }
+  catch { return Promise.resolve(); }
+};
 
 // ---- serialisers (never leak commission, contact, or internal fields to buyers) --
 const pubPartner = (/** @type {any} */ p) => p && ({
@@ -33,10 +40,14 @@ const pubListing = (/** @type {any} */ l) => l && ({
   category: l.category, kind: l.kind, priceCHF: l.priceCHF, tierBand: l.tierBand,
   city: l.city, featured: !!l.featured, stock: l.stock, active: l.active
 });
-const pubOrder = (/** @type {any} */ o) => o && ({
+// `callerId` makes the address privacy-aware: the buyer of a GIFT must NEVER see the
+// recipient's private delivery address. Pass req.userId at buyer/recipient-facing sites;
+// omit it for staff serialisation (staff need the address to fulfil).
+const pubOrder = (/** @type {any} */ o, /** @type {any} */ callerId = null) => o && ({
   id: o._id, listingId: o.listingId, partnerId: o.partnerId, kind: o.kind,
   amountCHF: o.amountCHF, status: o.status, escrowHeld: !!o.escrowHeld,
-  shippingAddress: o.shippingAddress || null, giftForUserId: o.giftForUserId || null,
+  giftForUserId: o.giftForUserId || null, giftStatus: o.giftStatus || 'none',
+  shippingAddress: (o.giftForUserId && callerId && String(callerId) === String(o.userId)) ? null : (o.shippingAddress || null),
   scheduledFor: o.scheduledFor, createdAt: o.createdAt, paymentId: o.paymentId
 });
 
@@ -103,21 +114,28 @@ router.post('/orders', requireAuth, async (req, res, next) => {
     const partner = await Partner.findById(listing.partnerId);
     if (!partner || !partner.active) return res.status(404).json({ error: 'Partner unavailable' });
 
+    // Gifting is only ever to a real, mutual match — never a stranger, never yourself.
+    const giftFor = parsed.data.giftForUserId;
+    if (giftFor) {
+      if (String(giftFor) === String(req.userId)) return res.status(400).json({ error: "You can't gift yourself." });
+      if (!(await sharesActiveMatch(req.userId, giftFor))) return res.status(403).json({ error: 'You can only send a gift to one of your matches.' });
+    }
     const order = await market.createOrder({
       userId: req.userId, listing, partner,
       scheduledFor: parsed.data.scheduledFor ? new Date(parsed.data.scheduledFor) : undefined,
       notes: parsed.data.notes,
       shippingAddress: parsed.data.shippingAddress,
-      giftForUserId: parsed.data.giftForUserId
+      giftForUserId: giftFor
     });
-    // Payment on the existing rail; escrow only holds once this is 'captured'.
-    const payment = await Payment.create({
-      userId: req.userId, purpose: 'marketplace_order', amountCHF: order.amountCHF,
-      currency: 'CHF', status: 'created',
+    // Payable order on the REAL rail (dev + Razorpay), exactly like gift-pass/verification —
+    // returns { devMode, orderId, key, amount, currency, payment, ... } that payDirectOrder drives.
+    // Escrow still only holds once confirm-payment sees the linked Payment 'captured'.
+    const quoted = await /** @type {any} */ (require('./routes-payment')).createQuotedOrder({
+      userId: req.userId, purpose: 'marketplace_order', amountCHF: order.amountCHF, label: listing.title,
       metadata: { orderId: String(order._id), listingId: String(listing._id), partnerId: String(partner._id), commissionCHF: order.commissionCHF }
     });
-    await Order.findByIdAndUpdate(order._id, { paymentId: payment._id });
-    res.status(201).json({ order: pubOrder({ ...order, paymentId: payment._id }), payment: { id: payment._id, amountCHF: payment.amountCHF, status: payment.status } });
+    await Order.findByIdAndUpdate(order._id, { paymentId: quoted.payment._id });
+    res.status(201).json({ order: quoted, marketplaceOrderId: order._id, listingTitle: listing.title, isGift: !!giftFor });
   } catch (err) {
     if (/delivery address/i.test(msg(err))) return res.status(400).json({ error: msg(err) });
     if (/stock|unavailable/i.test(msg(err))) return res.status(409).json({ error: msg(err) });
@@ -135,7 +153,7 @@ async function myOrder(req, res) {
 router.get('/orders', requireAuth, async (req, res, next) => {
   try {
     const orders = await Order.find({ userId: req.userId }).sort({ createdAt: -1 }).limit(100).lean();
-    res.json({ orders: orders.map(pubOrder) });
+    res.json({ orders: orders.map((/** @type {any} */ o) => pubOrder(o, req.userId)) });
   } catch (err) { next(err); }
 });
 
@@ -146,8 +164,21 @@ router.post('/orders/:id/confirm-payment', requireAuth, async (req, res, next) =
     const order = await myOrder(req, res); if (!order) return;
     const payment = order.paymentId ? await Payment.findById(order.paymentId) : null;
     if (!payment || payment.status !== 'captured') return res.status(402).json({ error: 'Payment not captured' });
+    // The order may have been cancelled/refunded or the gift declined BEFORE this (possibly
+    // async UPI/webhook) capture landed — reverse the charge instead of stranding the buyer's
+    // money in a dead-end 409. (A nightly sweep, market.reconcileStrandedOrders, is the backstop.)
+    if (['cancelled', 'refunded'].includes(order.status) || order.giftStatus === 'declined') {
+      await market.atomicUpdate(Payment, { _id: payment._id, status: 'captured' }, { $set: { status: 'refunded', refundedAt: new Date() } });
+      return res.status(409).json({ error: 'This order is no longer active; the payment has been refunded.' });
+    }
     const updated = await market.transition(order, 'paid', { paymentId: payment._id });
-    res.json({ order: pubOrder(updated) });
+    // A gift only reaches the recipient once it's actually paid — notify them now to accept.
+    if (order.giftForUserId) {
+      const buyer = await User.findById(order.userId).select('profile.firstName').lean();
+      const from = (buyer && buyer.profile && buyer.profile.firstName) || 'A match';
+      notify(order.giftForUserId, { type: 'gift_received', severity: 'info', title: 'You’ve received a gift 🎁', body: `${from} sent you a gift. Open Gifts to accept and choose your delivery address.` });
+    }
+    res.json({ order: pubOrder(updated, req.userId) });
   } catch (err) { return res.status(409).json({ error: msg(err) }); }
 });
 
@@ -159,7 +190,7 @@ router.post('/orders/:id/complete', requireAuth, async (req, res, next) => {
     const order = await myOrder(req, res); if (!order) return;
     if (order.status !== 'fulfilled') return res.status(409).json({ error: 'Order is not awaiting your confirmation' });
     const updated = await market.transition(order, 'completed');
-    res.json({ order: pubOrder(updated) });
+    res.json({ order: pubOrder(updated, req.userId) });
   } catch (err) { return res.status(409).json({ error: msg(err) }); }
 });
 
@@ -167,7 +198,7 @@ router.post('/orders/:id/cancel', requireAuth, async (req, res, next) => {
   try {
     const order = await myOrder(req, res); if (!order) return;
     const updated = await market.transition(order, 'cancelled');
-    res.json({ order: pubOrder(updated) });
+    res.json({ order: pubOrder(updated, req.userId) });
   } catch (err) { return res.status(409).json({ error: msg(err) }); }
 });
 
@@ -175,7 +206,7 @@ router.post('/orders/:id/dispute', requireAuth, async (req, res, next) => {
   try {
     const order = await myOrder(req, res); if (!order) return;
     const updated = await market.transition(order, 'disputed', { disputeReason: String((req.body && req.body.reason) || '').slice(0, 500) });
-    res.json({ order: pubOrder(updated) });
+    res.json({ order: pubOrder(updated, req.userId) });
   } catch (err) { return res.status(409).json({ error: msg(err) }); }
 });
 
@@ -187,6 +218,98 @@ router.post('/orders/:id/review', requireAuth, async (req, res, next) => {
     const review = await market.addReview({ userId: req.userId, order, rating, text: req.body && req.body.text });
     res.status(201).json({ review: { id: review._id, rating: review.rating, text: review.text } });
   } catch (err) { return res.status(409).json({ error: msg(err) }); }
+});
+
+// ==== Gift recipient: accept (with a PRIVATE address) or decline =============
+/** Owner-check keyed on the RECIPIENT (giftForUserId), not the buyer. @param {any} req @param {any} res */
+async function myGift(req, res) {
+  const order = await Order.findById(req.params.id);
+  if (!order || String(order.giftForUserId) !== String(req.userId)) { res.status(404).json({ error: 'Gift not found' }); return null; }
+  return order;
+}
+
+// Gifts awaiting me — only ones the buyer has actually paid for (status paid+).
+router.get('/orders/gifts', requireAuth, async (req, res, next) => {
+  try {
+    const pending = await Order.find({ giftForUserId: req.userId, giftStatus: 'pending' }).sort({ createdAt: -1 }).limit(100).lean();
+    const paid = pending.filter((/** @type {any} */ o) => ['paid', 'confirmed', 'fulfilled'].includes(o.status));
+    const out = [];
+    for (const o of paid) {
+      const [listing, buyer] = await Promise.all([
+        Listing.findById(o.listingId).lean(),
+        User.findById(o.userId).select('profile.firstName').lean(),
+      ]);
+      out.push({
+        id: o._id, kind: o.kind, amountCHF: o.amountCHF, status: o.status,
+        listing: listing ? { title: listing.title, description: listing.description } : null,
+        from: (buyer && buyer.profile && buyer.profile.firstName) || 'A match',
+        needsAddress: o.kind === 'product', createdAt: o.createdAt,
+      });
+    }
+    res.json({ gifts: out });
+  } catch (err) { next(err); }
+});
+
+// Recipient accepts + (for products) supplies THEIR OWN address. Atomic pending→accepted.
+router.post('/orders/:id/accept-gift', requireAuth, async (req, res, next) => {
+  try {
+    const order = await myGift(req, res); if (!order) return;
+    if (order.giftStatus !== 'pending') return res.status(409).json({ error: 'This gift is no longer pending.' });
+    let addr = null;
+    if (order.kind === 'product') {
+      addr = market.normalizeAddress(req.body && req.body.shippingAddress);
+      if (!addr) return res.status(400).json({ error: 'A delivery address (name, phone, street, city, PIN) is required.' });
+    }
+    const won = await market.atomicUpdate(Order, { _id: order._id, giftStatus: 'pending' }, { $set: { giftStatus: 'accepted', shippingAddress: addr, giftRespondedAt: new Date() } });
+    if (!won) return res.status(409).json({ error: 'This gift is no longer pending.' });
+    notify(order.userId, { type: 'gift_received', severity: 'info', title: 'Your gift was accepted 🎁', body: 'Your match accepted your gift — it will be prepared for delivery.' });
+    const fresh = await Order.findById(order._id).lean();
+    res.json({ ok: true, order: pubOrder(fresh, req.userId) });
+  } catch (err) { next(err); }
+});
+
+// Recipient declines → escrow-safe reversal of the buyer's payment. The money reversal is
+// AUTHORITATIVE and runs FIRST: we only mark the gift 'declined' once the refund actually
+// succeeded, we never swallow the failure into a false "refunded", and we handle every money
+// state that still holds funds — INCLUDING 'disputed' (so a disputed gift can't be left stranded
+// or later resolved to a payout). A failed reversal stays retryable (giftStatus remains 'pending').
+router.post('/orders/:id/decline-gift', requireAuth, async (req, res, next) => {
+  try {
+    const order = await myGift(req, res); if (!order) return;
+    if (order.giftStatus !== 'pending') return res.status(409).json({ error: 'This gift is no longer pending.' });
+    if (['fulfilled', 'completed'].includes(order.status)) return res.status(409).json({ error: 'This gift has already been prepared for delivery.' });
+    let refunded = false;
+    try {
+      if (order.status === 'created') { await market.transition(order, 'cancelled'); refunded = true; }
+      else if (['paid', 'confirmed', 'disputed'].includes(order.status)) { await market.transition(order, 'refunded'); refunded = true; }
+      // (already 'cancelled'/'refunded' → nothing to reverse; refunded stays false)
+    } catch { return res.status(409).json({ error: 'Could not process the decline right now — please try again.' }); }
+    // Mark declined only AFTER a successful (or unnecessary) reversal. The transition's own CAS
+    // on status is the serialisation point, so concurrent declines can't double-refund.
+    await market.atomicUpdate(Order, { _id: order._id, giftStatus: 'pending' }, { $set: { giftStatus: 'declined', giftRespondedAt: new Date() } });
+    notify(order.userId, { type: 'gift_received', severity: 'info', title: 'Your gift was declined', body: refunded ? 'Your match declined the gift; the payment has been refunded.' : 'Your match declined the gift.' });
+    res.json({ ok: true, declined: true, refunded });
+  } catch (err) { next(err); }
+});
+
+// Giftable matches for the picker — REVEALED matches only (you gift someone you know);
+// an anonymous match's identity is never exposed here. Gift creation is still gated by
+// sharesActiveMatch server-side, so this is only the convenience list.
+router.get('/gift-recipients', requireAuth, async (req, res, next) => {
+  try {
+    const Chat = require('./models/Chat');
+    const chats = await Chat.find({ participants: req.userId, status: 'active' }).limit(50).lean();
+    const out = [];
+    for (const c of chats) {
+      const otherId = (c.participants || []).find((/** @type {any} */ p) => String(p) !== String(req.userId));
+      if (!otherId) continue;
+      if (c.anonymity && c.anonymity.isAnonymous && !c.anonymity.revealedAt) continue;   // keep anonymous matches anonymous
+      const u = await User.findById(otherId).select('profile.firstName profile.photos').lean();
+      if (!u) continue;
+      out.push({ userId: otherId, name: (u.profile && u.profile.firstName) || 'Match', photo: (u.profile && u.profile.photos && u.profile.photos[0] && u.profile.photos[0].url) || null });
+    }
+    res.json({ recipients: out });
+  } catch (err) { next(err); }
 });
 
 // ==== Staff: partners + listings (market:manage) ============================

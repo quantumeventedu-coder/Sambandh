@@ -297,6 +297,9 @@ async function route() {
     case 'room': return renderRoom(parts[1]);
     case 'astro': return renderAstro();
     case 'services': return renderServices();
+    case 'shop': return renderShop();
+    case 'product': return renderProduct(parts[1]);
+    case 'orders': return renderOrders();
     case 'redeem': S._pendingGiftCode = parts[1] || ''; return nav('#/services');
     case 'compat': return renderCompat(parts[1]);
     case 'settings': return renderSettings();
@@ -3130,6 +3133,9 @@ async function renderServices() {
     <h1>Your services</h1>
     <p class="sub">Trust, verification, your private document vault, and things worth your time.</p>
     <div id="svc-trust" class="card"><div class="empty">Loading your Trust Score…</div></div>
+    <div class="card" style="cursor:pointer" onclick="nav('#/shop')"><div class="row" style="justify-content:space-between;align-items:center">
+      <div><b>Shop &amp; Gifts 🛍️</b><div class="hint">Real products from verified partners — buy for yourself, or gift a match privately.</div></div>
+      <span aria-hidden="true" style="font-size:20px">→</span></div></div>
     <h2 class="svc-h">Recommended for you</h2>
     <div id="svc-commerce"><div class="empty">Finding relevant options…</div></div>
     <h2 class="svc-h">Document vault <span class="hint">· encrypted &amp; private to you</span></h2>
@@ -3188,6 +3194,173 @@ async function redeemGiftCode() {
     if (inp) inp.value = '';
     loadTrust();
   } catch (e) { toast(e.message); }
+}
+
+// ===== Marketplace: shop → product checkout → gift a match → orders =====
+// A physical product ships to a postal address (never GPS). Gifting is PRIVATE:
+// the recipient enters their own address, which the buyer never sees.
+const pill = (/** @type {string} */ text, /** @type {string} */ bg) =>
+  `<span style="display:inline-block;font-size:11px;font-weight:700;padding:1px 7px;border-radius:10px;background:${bg};color:#fff">${esc(text)}</span>`;
+
+async function renderShop() {
+  screen.innerHTML = `<div class="section-pad">
+    <button class="back" onclick="nav('#/services')">← Services</button>
+    <div class="row" style="justify-content:space-between;align-items:center">
+      <h1 style="margin:0">Shop &amp; Gifts</h1>
+      <button class="btn secondary" style="width:auto" onclick="nav('#/orders')">My orders</button>
+    </div>
+    <p class="sub">Real products from verified partners. Buy for yourself, or gift a match — delivered privately.</p>
+    <div id="shop-list"><div class="empty">Loading…</div></div>
+  </div>`;
+  loadListings();
+}
+async function loadListings() {
+  const el = document.getElementById('shop-list'); if (!el) return;
+  try {
+    const geo = S._lastLoc ? `&lat=${S._lastLoc.lat}&lng=${S._lastLoc.lng}` : '';
+    const r = await api('/marketplace/listings?limit=30' + geo);
+    const items = (r.results || []).filter((/** @type {any} */ x) => x.listing);
+    if (!items.length) { el.innerHTML = '<div class="empty">No products available yet — check back soon.</div>'; return; }
+    el.innerHTML = items.map((/** @type {any} */ x) => {
+      const l = x.listing, p = x.partner || {};
+      return `<div class="card" style="cursor:pointer" onclick="nav('#/product/${l.id}')">
+        <div class="row" style="justify-content:space-between;align-items:flex-start">
+          <div><b>${esc(l.title)}</b> ${p.verified ? pill('verified', '#14683a') : ''} ${x.sponsored ? pill('sponsored', '#8a6a10') : ''}
+            <div class="hint">${esc(p.name || '')}${l.city ? ' · ' + esc(l.city) : ''}</div>
+            ${l.description ? `<div class="hint">${esc(String(l.description).slice(0, 90))}</div>` : ''}</div>
+          <div style="text-align:right;white-space:nowrap"><b>CHF ${l.priceCHF}</b>${l.stock === 0 ? '<div class="hint" style="color:var(--sindoor)">out of stock</div>' : ''}</div>
+        </div></div>`;
+    }).join('');
+  } catch (e) { el.innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+}
+async function renderProduct(id) {
+  screen.innerHTML = `<div class="section-pad"><button class="back" onclick="nav('#/shop')">← Shop</button><div id="product"><div class="empty">Loading…</div></div></div>`;
+  try {
+    const { listing, partner } = await api('/marketplace/listings/' + id);
+    S._product = listing;
+    const isProduct = listing.kind === 'product';
+    document.getElementById('product').innerHTML = `
+      <h1 style="margin:.2em 0">${esc(listing.title)}</h1>
+      <div class="hint">${esc((partner && partner.name) || '')}${listing.city ? ' · ' + esc(listing.city) : ''}${partner && partner.verified ? ' · verified ✓' : ''}</div>
+      <div class="card" style="margin:10px 0"><b>CHF ${listing.priceCHF}</b>${listing.description ? `<p class="hint" style="margin:.4em 0 0">${esc(listing.description)}</p>` : ''}</div>
+      ${isProduct ? `<div id="buy-address">${addressFormHtml('sa')}</div>` : '<div class="hint">This is a service/booking — no delivery address needed.</div>'}
+      <button class="btn mt" onclick="placeOrder('${listing.id}')">Buy for myself</button>
+      <button class="btn secondary" onclick="openGiftPicker('${listing.id}')">🎁 Gift to a match</button>
+      <p class="hint" style="margin-top:8px">Gifting is private: your match provides their own delivery address — you never see it.</p>`;
+  } catch (e) { const el = document.getElementById('product'); if (el) el.innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+}
+function addressFormHtml(prefix) {
+  return `<div class="card"><b>Delivery address</b>
+    <div class="field mt"><input id="${prefix}-name" aria-label="Full name" placeholder="Full name"/></div>
+    <div class="field"><input id="${prefix}-phone" aria-label="Phone" placeholder="Phone"/></div>
+    <div class="field"><input id="${prefix}-l1" aria-label="Flat, house and street" placeholder="Flat / house, street"/></div>
+    <div class="row" style="gap:8px"><input id="${prefix}-city" aria-label="City" placeholder="City"/><input id="${prefix}-pin" aria-label="PIN code" placeholder="PIN code"/></div>
+    <div class="row" style="gap:8px"><input id="${prefix}-state" aria-label="State (optional)" placeholder="State (optional)"/><input id="${prefix}-landmark" aria-label="Landmark (optional)" placeholder="Landmark (optional)"/></div>
+  </div>`;
+}
+function readAddress(prefix) {
+  const v = (/** @type {string} */ id) => { const el = document.getElementById(prefix + '-' + id); return (el && el.value || '').trim(); };
+  return { name: v('name'), phone: v('phone'), line1: v('l1'), city: v('city'), pincode: v('pin'), state: v('state'), landmark: v('landmark') };
+}
+async function placeOrder(listingId, giftForUserId) {
+  try {
+    /** @type {any} */
+    const body = { listingId };
+    if (giftForUserId) { body.giftForUserId = giftForUserId; }
+    else if ((S._product || {}).kind === 'product') {
+      const a = readAddress('sa');
+      if (!a.name || !a.phone || !a.line1 || !a.city || !a.pincode) return toast('Please fill name, phone, street, city and PIN.');
+      body.shippingAddress = a;
+    }
+    const r = await api('/marketplace/orders', { method: 'POST', body });
+    await payDirectOrder(r.order, 'marketplace_order', r.listingTitle || 'Order', async () => {
+      await api('/marketplace/orders/' + r.marketplaceOrderId + '/confirm-payment', { method: 'POST' });
+      closeModal();
+      toast(giftForUserId ? 'Gift sent 🎁 — your match will choose delivery.' : 'Order placed ✓');
+      nav('#/orders');
+    });
+  } catch (e) { toast(e.message); }
+}
+async function openGiftPicker(listingId) {
+  try {
+    const r = await api('/marketplace/gift-recipients');
+    const recips = r.recipients || [];
+    const rows = recips.length
+      ? recips.map((/** @type {any} */ p) => `<button class="btn secondary" style="justify-content:flex-start" onclick="placeOrder('${listingId}','${p.userId}')">${esc(p.name)}</button>`).join('')
+      : '<div class="empty">You have no revealed matches to gift yet.</div>';
+    openModal(`<h2 style="margin-top:0">Gift to a match 🎁</h2>
+      <p class="hint">They accept privately and enter their own delivery address — you never see it.</p>
+      <div style="display:flex;flex-direction:column;gap:8px">${rows}</div>
+      <button class="btn secondary mt" onclick="closeModal()">Cancel</button>`);
+  } catch (e) { toast(e.message); }
+}
+async function renderOrders() {
+  screen.innerHTML = `<div class="section-pad"><button class="back" onclick="nav('#/shop')">← Shop</button>
+    <h1 style="margin:.2em 0">My orders</h1>
+    <h2 style="font-size:1.05rem;margin:16px 0 8px">Gifts for you 🎁</h2>
+    <div id="orders-gifts"><div class="empty">Loading…</div></div>
+    <h2 style="font-size:1.05rem;margin:16px 0 8px">Your orders</h2>
+    <div id="orders-list"><div class="empty">Loading…</div></div></div>`;
+  loadIncomingGifts(); loadOrders();
+}
+async function loadIncomingGifts() {
+  const el = document.getElementById('orders-gifts'); if (!el) return;
+  try {
+    const r = await api('/marketplace/orders/gifts');
+    const gifts = r.gifts || [];
+    if (!gifts.length) { el.innerHTML = '<div class="empty">No gifts waiting.</div>'; return; }
+    el.innerHTML = gifts.map((/** @type {any} */ g) => `<div class="card">
+      <b>${esc((g.listing && g.listing.title) || 'A gift')}</b> <span class="hint">from ${esc(g.from)}</span>
+      ${g.listing && g.listing.description ? `<div class="hint">${esc(String(g.listing.description).slice(0, 100))}</div>` : ''}
+      <div class="row mt" style="gap:8px"><button class="btn" style="width:auto" onclick="acceptGift('${g.id}',${g.needsAddress ? 'true' : 'false'})">Accept</button>
+      <button class="btn secondary" style="width:auto" onclick="declineGift('${g.id}')">Decline</button></div></div>`).join('');
+  } catch (e) { el.innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+}
+async function acceptGift(id, needsAddress) {
+  if (needsAddress) {
+    openModal(`<h2 style="margin-top:0">Where should we deliver?</h2>
+      <p class="hint">Only the seller sees this — never the sender.</p>
+      ${addressFormHtml('ga')}
+      <button class="btn mt" onclick="submitAcceptGift('${id}')">Confirm delivery address</button>
+      <button class="btn secondary" onclick="closeModal()">Cancel</button>`);
+  } else { submitAcceptGift(id); }
+}
+async function submitAcceptGift(id) {
+  try {
+    /** @type {any} */
+    const body = {};
+    const a = readAddress('ga');
+    if (a.name || a.line1) body.shippingAddress = a;   // present only when the address form was shown
+    await api('/marketplace/orders/' + id + '/accept-gift', { method: 'POST', body });
+    closeModal(); toast('Gift accepted 🎁'); loadIncomingGifts();
+  } catch (e) { toast(e.message); }
+}
+async function declineGift(id) {
+  if (!confirm('Decline this gift? The sender will be refunded.')) return;
+  try { await api('/marketplace/orders/' + id + '/decline-gift', { method: 'POST' }); toast('Gift declined'); loadIncomingGifts(); }
+  catch (e) { toast(e.message); }
+}
+async function loadOrders() {
+  const el = document.getElementById('orders-list'); if (!el) return;
+  try {
+    const r = await api('/marketplace/orders');
+    const orders = r.orders || [];
+    if (!orders.length) { el.innerHTML = '<div class="empty">No orders yet.</div>'; return; }
+    el.innerHTML = orders.map((/** @type {any} */ o) => {
+      const gift = o.giftForUserId ? ` · gift (${esc(o.giftStatus)})` : '';
+      const acts = [];
+      if (o.status === 'fulfilled') acts.push(`<button class="btn" style="width:auto" onclick="orderAction('${o.id}','complete')">Confirm received</button>`);
+      if (['created', 'paid', 'confirmed'].includes(o.status)) acts.push(`<button class="btn secondary" style="width:auto" onclick="orderAction('${o.id}','cancel')">Cancel</button>`);
+      return `<div class="card"><div class="row" style="justify-content:space-between;align-items:center">
+        <b>${o.kind === 'service' ? 'Service' : 'Product'}</b>${pill(o.status + gift, '#4a4a55')}</div>
+        <div class="hint">CHF ${o.amountCHF}</div>
+        ${acts.length ? `<div class="row mt" style="gap:8px">${acts.join('')}</div>` : ''}</div>`;
+    }).join('');
+  } catch (e) { el.innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+}
+async function orderAction(id, action) {
+  try { await api('/marketplace/orders/' + id + '/' + action, { method: 'POST' }); toast('Done'); loadOrders(); }
+  catch (e) { toast(e.message); }
 }
 
 async function loadTrust() {
