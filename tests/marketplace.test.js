@@ -40,6 +40,8 @@ async function seedPartnerListing(over = {}) {
   const listing = await Listing.create({ partnerId: partner._id, category: partner.category, title: 'Rose box', kind: 'product', priceCHF: 100, tierBand: 'essential', city: 'Guwahati', active: true, ...over.listing });
   return { partner, listing };
 }
+// A valid postal address — physical products (kind:'product') require one to be deliverable.
+const ADDR = { name: 'Aarav', phone: '+919000000001', line1: '12 MG Road', city: 'Guwahati', state: 'Assam', pincode: '781001' };
 
 describe('engine: commission quote', () => {
   test('category default and rounding', () => {
@@ -61,7 +63,7 @@ describe('engine: escrow state machine is fail-closed', () => {
   test('illegal transitions throw; the happy path releases escrow on completion', async () => {
     const { partner, listing } = await seedPartnerListing();
     const user = await mkUser();
-    const order = await market.createOrder({ userId: user._id, listing, partner });
+    const order = await market.createOrder({ userId: user._id, listing, partner, shippingAddress: ADDR });
     await expect(market.transition(order, 'completed')).rejects.toThrow(/Illegal/); // created → completed forbidden
 
     const paid = await market.transition(order, 'paid');
@@ -75,7 +77,7 @@ describe('engine: escrow state machine is fail-closed', () => {
   test('cancelling a paid order drops escrow and restocks', async () => {
     const { partner, listing } = await seedPartnerListing({ listing: { stock: 1 } });
     const user = await mkUser();
-    const order = await market.createOrder({ userId: user._id, listing, partner });
+    const order = await market.createOrder({ userId: user._id, listing, partner, shippingAddress: ADDR });
     expect((await Listing.findById(listing._id)).stock).toBe(0);       // reserved
     await market.transition(order, 'paid');
     await market.transition(await Order.findById(order._id), 'cancelled');
@@ -84,7 +86,43 @@ describe('engine: escrow state machine is fail-closed', () => {
   test('out-of-stock order is rejected', async () => {
     const { partner, listing } = await seedPartnerListing({ listing: { stock: 0 } });
     const user = await mkUser();
-    await expect(market.createOrder({ userId: user._id, listing, partner })).rejects.toThrow(/stock/i);
+    await expect(market.createOrder({ userId: user._id, listing, partner, shippingAddress: ADDR })).rejects.toThrow(/stock/i);
+  });
+});
+
+describe('delivery: physical products require a postal address (GPS is never used to ship)', () => {
+  test('a product order with NO address is rejected — and reserves no stock', async () => {
+    const { partner, listing } = await seedPartnerListing({ listing: { stock: 5 } });
+    const user = await mkUser();
+    await expect(market.createOrder({ userId: user._id, listing, partner })).rejects.toThrow(/delivery address/i);
+    expect((await Listing.findById(listing._id)).stock).toBe(5);   // rejected before reserving inventory
+  });
+  test('an incomplete address (missing PIN) is rejected', async () => {
+    const { partner, listing } = await seedPartnerListing();
+    const user = await mkUser();
+    const bad = { name: 'A', phone: '+919000000001', line1: '12 MG Road', city: 'Guwahati' };  // no pincode
+    await expect(market.createOrder({ userId: user._id, listing, partner, shippingAddress: bad })).rejects.toThrow(/delivery address/i);
+  });
+  test('a valid address is stored on the order (and a service order needs none)', async () => {
+    const { partner, listing } = await seedPartnerListing();
+    const user = await mkUser();
+    const order = await market.createOrder({ userId: user._id, listing, partner, shippingAddress: ADDR, giftForUserId: user._id });
+    expect(order.shippingAddress.pincode).toBe('781001');
+    expect(order.shippingAddress.country).toBe('IN');            // defaulted
+    expect(String(order.giftForUserId)).toBe(String(user._id));
+    const svc = await Listing.create({ partnerId: partner._id, category: 'coach', title: 'Session', kind: 'service', priceCHF: 50, tierBand: 'essential', city: 'Guwahati', active: true });
+    const sOrder = await market.createOrder({ userId: user._id, listing: svc, partner });  // no address needed
+    expect(sOrder.shippingAddress).toBeNull();
+  });
+  test('the HTTP order route rejects a physical order without an address (400)', async () => {
+    const pRes = await request(app).post('/api/marketplace/partners').set(SK).send({ name: 'Blooms', category: 'gift', city: 'Guwahati' });
+    const lRes = await request(app).post(`/api/marketplace/partners/${pRes.body.partner.id}/listings`).set(SK).send({ title: 'Rose box', kind: 'product', priceCHF: 100, tierBand: 'essential', city: 'Guwahati' });
+    const buyer = await mkUser();
+    const noAddr = await request(app).post('/api/marketplace/orders').set(auth(buyer)).send({ listingId: lRes.body.listing.id });
+    expect(noAddr.status).toBe(400);
+    const withAddr = await request(app).post('/api/marketplace/orders').set(auth(buyer)).send({ listingId: lRes.body.listing.id, shippingAddress: ADDR });
+    expect(withAddr.status).toBe(201);
+    expect(withAddr.body.order.shippingAddress.pincode).toBe('781001');
   });
 });
 
@@ -166,7 +204,7 @@ describe('routes: full escrow lifecycle end-to-end', () => {
   test('another user cannot touch my order; staff endpoints need market:manage', async () => {
     const { partner, listing } = await seedPartnerListing();
     const buyer = await mkUser(); const stranger = await mkUser();
-    const order = await market.createOrder({ userId: buyer._id, listing, partner });
+    const order = await market.createOrder({ userId: buyer._id, listing, partner, shippingAddress: ADDR });
     const asStranger = await request(app).post(`/api/marketplace/orders/${order._id}/cancel`).set(auth(stranger));
     expect(asStranger.status).toBe(404);   // owner isolation
     const noKey = await request(app).post('/api/marketplace/partners').send({ name: 'x', category: 'gift' });
@@ -179,8 +217,8 @@ describe('hardening: fixes from the adversarial money-review', () => {
     const { partner, listing } = await seedPartnerListing({ listing: { stock: 1 } });
     const u1 = await mkUser(), u2 = await mkUser();
     const results = await Promise.allSettled([
-      market.createOrder({ userId: u1._id, listing, partner }),
-      market.createOrder({ userId: u2._id, listing, partner })
+      market.createOrder({ userId: u1._id, listing, partner, shippingAddress: ADDR }),
+      market.createOrder({ userId: u2._id, listing, partner, shippingAddress: ADDR })
     ]);
     expect(results.filter(r => r.status === 'fulfilled').length).toBe(1);
     const failed = results.filter(r => r.status === 'rejected');
@@ -193,7 +231,7 @@ describe('hardening: fixes from the adversarial money-review', () => {
   test('compare-and-set: only one concurrent transition from a status wins', async () => {
     const { partner, listing } = await seedPartnerListing();
     const user = await mkUser();
-    const order = await market.createOrder({ userId: user._id, listing, partner });
+    const order = await market.createOrder({ userId: user._id, listing, partner, shippingAddress: ADDR });
     const results = await Promise.allSettled([market.transition(order, 'paid'), market.transition(order, 'paid')]);
     expect(results.filter(r => r.status === 'fulfilled').length).toBe(1);
     expect(results.filter(r => r.status === 'rejected').length).toBe(1);
@@ -203,7 +241,7 @@ describe('hardening: fixes from the adversarial money-review', () => {
   test('concurrent cancel + refund restocks exactly once', async () => {
     const { partner, listing } = await seedPartnerListing({ listing: { stock: 1 } });
     const user = await mkUser();
-    const order = await market.createOrder({ userId: user._id, listing, partner });   // stock 1→0, reserved
+    const order = await market.createOrder({ userId: user._id, listing, partner, shippingAddress: ADDR });   // stock 1→0, reserved
     await market.transition(order, 'paid');
     const paidOrder = await Order.findById(order._id);
     const results = await Promise.allSettled([market.transition(paidOrder, 'cancelled'), market.transition(paidOrder, 'refunded')]);
@@ -214,7 +252,7 @@ describe('hardening: fixes from the adversarial money-review', () => {
   test('cancelling a paid order reverses the captured Payment (no stranded funds)', async () => {
     const { partner, listing } = await seedPartnerListing();
     const user = await mkUser();
-    const order = await market.createOrder({ userId: user._id, listing, partner });
+    const order = await market.createOrder({ userId: user._id, listing, partner, shippingAddress: ADDR });
     const payment = await Payment.create({ userId: user._id, purpose: 'marketplace_order', amountCHF: order.amountCHF, status: 'captured' });
     await market.transition(order, 'paid', { paymentId: payment._id });
     await market.transition(await Order.findById(order._id), 'cancelled');

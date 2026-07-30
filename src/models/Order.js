@@ -25,6 +25,18 @@ const OrderSchema = new mongoose.Schema({
   commissionCHF: Number,                      // Sambandh revenue
   partnerPayoutCHF: Number,                    // held in escrow, released on completion
   status: { type: String, enum: ORDER_STATES, default: 'created', index: true },
+  // Physical delivery destination — REQUIRED for kind:'product' (enforced in
+  // services/marketplace.createOrder), null for services/bookings. The buyer's GPS
+  // location is NEVER used for delivery; this is the postal address they provide and
+  // the fulfilling partner ships to. For a gift to a match, `giftForUserId` records
+  // who it's for (the address can be the buyer's own or the recipient's, as given).
+  shippingAddress: {
+    name: String, phone: String,
+    line1: String, line2: String,
+    city: String, state: String, pincode: String, landmark: String,
+    country: { type: String, default: 'IN' }
+  },
+  giftForUserId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
   stockReserved: { type: Boolean, default: false },   // true iff createOrder atomically decremented finite stock
   escrowHeld: { type: Boolean, default: false },
   escrowReleasedAt: Date,

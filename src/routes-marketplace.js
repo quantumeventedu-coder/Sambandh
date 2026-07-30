@@ -36,6 +36,7 @@ const pubListing = (/** @type {any} */ l) => l && ({
 const pubOrder = (/** @type {any} */ o) => o && ({
   id: o._id, listingId: o.listingId, partnerId: o.partnerId, kind: o.kind,
   amountCHF: o.amountCHF, status: o.status, escrowHeld: !!o.escrowHeld,
+  shippingAddress: o.shippingAddress || null, giftForUserId: o.giftForUserId || null,
   scheduledFor: o.scheduledFor, createdAt: o.createdAt, paymentId: o.paymentId
 });
 
@@ -78,10 +79,19 @@ router.get('/listings/:id', requireAuth, async (req, res, next) => {
 });
 
 // ==== Consumer: order + escrow lifecycle ====================================
+const addressSchema = z.object({
+  name: z.string().min(1).max(120), phone: z.string().min(5).max(20),
+  line1: z.string().min(1).max(200), line2: z.string().max(200).optional(),
+  city: z.string().min(1).max(80), state: z.string().max(80).optional(),
+  pincode: z.string().min(3).max(12), landmark: z.string().max(120).optional(),
+  country: z.string().max(3).optional()
+}).optional();
 const orderSchema = z.object({
   listingId: z.string().min(1),
   scheduledFor: z.string().datetime().optional(),
-  notes: z.string().max(1000).optional()
+  notes: z.string().max(1000).optional(),
+  shippingAddress: addressSchema,               // required for physical products (enforced in createOrder)
+  giftForUserId: z.string().max(64).optional()  // buying a physical product as a gift for a match
 });
 
 router.post('/orders', requireAuth, async (req, res, next) => {
@@ -96,7 +106,9 @@ router.post('/orders', requireAuth, async (req, res, next) => {
     const order = await market.createOrder({
       userId: req.userId, listing, partner,
       scheduledFor: parsed.data.scheduledFor ? new Date(parsed.data.scheduledFor) : undefined,
-      notes: parsed.data.notes
+      notes: parsed.data.notes,
+      shippingAddress: parsed.data.shippingAddress,
+      giftForUserId: parsed.data.giftForUserId
     });
     // Payment on the existing rail; escrow only holds once this is 'captured'.
     const payment = await Payment.create({
@@ -107,6 +119,7 @@ router.post('/orders', requireAuth, async (req, res, next) => {
     await Order.findByIdAndUpdate(order._id, { paymentId: payment._id });
     res.status(201).json({ order: pubOrder({ ...order, paymentId: payment._id }), payment: { id: payment._id, amountCHF: payment.amountCHF, status: payment.status } });
   } catch (err) {
+    if (/delivery address/i.test(msg(err))) return res.status(400).json({ error: msg(err) });
     if (/stock|unavailable/i.test(msg(err))) return res.status(409).json({ error: msg(err) });
     next(err);
   }
