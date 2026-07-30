@@ -17,6 +17,7 @@ const Partner = require('../src/models/Partner');
 const Listing = require('../src/models/Listing');
 const Order = require('../src/models/Order');
 const Payment = require('../src/models/Payment');
+const Chat = require('../src/models/Chat');
 const market = require('../src/services/marketplace');
 
 const app = express();
@@ -106,10 +107,9 @@ describe('delivery: physical products require a postal address (GPS is never use
   test('a valid address is stored on the order (and a service order needs none)', async () => {
     const { partner, listing } = await seedPartnerListing();
     const user = await mkUser();
-    const order = await market.createOrder({ userId: user._id, listing, partner, shippingAddress: ADDR, giftForUserId: user._id });
+    const order = await market.createOrder({ userId: user._id, listing, partner, shippingAddress: ADDR });
     expect(order.shippingAddress.pincode).toBe('781001');
     expect(order.shippingAddress.country).toBe('IN');            // defaulted
-    expect(String(order.giftForUserId)).toBe(String(user._id));
     const svc = await Listing.create({ partnerId: partner._id, category: 'coach', title: 'Session', kind: 'service', priceCHF: 50, tierBand: 'essential', city: 'Guwahati', active: true });
     const sOrder = await market.createOrder({ userId: user._id, listing: svc, partner });  // no address needed
     expect(sOrder.shippingAddress).toBeNull();
@@ -122,7 +122,7 @@ describe('delivery: physical products require a postal address (GPS is never use
     expect(noAddr.status).toBe(400);
     const withAddr = await request(app).post('/api/marketplace/orders').set(auth(buyer)).send({ listingId: lRes.body.listing.id, shippingAddress: ADDR });
     expect(withAddr.status).toBe(201);
-    expect(withAddr.body.order.shippingAddress.pincode).toBe('781001');
+    expect((await Order.findById(withAddr.body.marketplaceOrderId)).shippingAddress.pincode).toBe('781001');
   });
 });
 
@@ -163,11 +163,11 @@ describe('routes: full escrow lifecycle end-to-end', () => {
     expect(browse.status).toBe(200);
     expect(browse.body.results.length).toBe(1);
 
-    // place order → creates a Payment (not yet captured)
+    // place order → returns a payable order (dev/Razorpay) + the marketplace order id
     const oRes = await request(app).post('/api/marketplace/orders').set(auth(buyer)).send({ listingId });
     expect(oRes.status).toBe(201);
-    const orderId = oRes.body.order.id;
-    const paymentId = oRes.body.payment.id;
+    const orderId = oRes.body.marketplaceOrderId;
+    const paymentId = oRes.body.order.payment._id;
 
     // escrow cannot hold before capture
     const early = await request(app).post(`/api/marketplace/orders/${orderId}/confirm-payment`).set(auth(buyer));
@@ -266,7 +266,7 @@ describe('hardening: fixes from the adversarial money-review', () => {
     const listingId = lRes.body.listing.id;
     const buyer = await mkUser();
     const oRes = await request(app).post('/api/marketplace/orders').set(auth(buyer)).send({ listingId });
-    const orderId = oRes.body.order.id, paymentId = oRes.body.payment.id;
+    const orderId = oRes.body.marketplaceOrderId, paymentId = oRes.body.order.payment._id;
     await Payment.findByIdAndUpdate(paymentId, { status: 'captured' });
     await request(app).post(`/api/marketplace/orders/${orderId}/confirm-payment`).set(auth(buyer));
     await request(app).post(`/api/marketplace/orders/${orderId}/dispute`).set(auth(buyer)).send({ reason: 'stalling' });
@@ -296,5 +296,141 @@ describe('hardening: fixes from the adversarial money-review', () => {
     expect(after.stock).toBe(5); expect(after.priceCHF).toBe(100);    // strings ignored
     await request(app).patch(`/api/marketplace/listings/${listing._id}`).set(SK).send({ stock: 2.5 });
     expect((await Listing.findById(listing._id)).stock).toBe(5);      // float stock ignored
+  });
+});
+
+describe('gift to a match: private (blind) delivery', () => {
+  const matchThem = (a, b) => Chat.create({ participants: [a._id, b._id], status: 'active' });
+  async function paidGift() {
+    const { partner, listing } = await seedPartnerListing();               // product 'Rose box'
+    const buyer = await mkUser(), recipient = await mkUser();
+    await matchThem(buyer, recipient);
+    const oRes = await request(app).post('/api/marketplace/orders').set(auth(buyer)).send({ listingId: String(listing._id), giftForUserId: String(recipient._id) });
+    const orderId = oRes.body.marketplaceOrderId, paymentId = oRes.body.order.payment._id;
+    await Payment.findByIdAndUpdate(paymentId, { status: 'captured' });
+    await request(app).post(`/api/marketplace/orders/${orderId}/confirm-payment`).set(auth(buyer));   // → paid, recipient notified
+    return { partner, listing, buyer, recipient, orderId, paymentId };
+  }
+
+  test('gifting needs no buyer address, but must be a real match (never a stranger/self)', async () => {
+    const { listing } = await seedPartnerListing();
+    const buyer = await mkUser(), other = await mkUser();
+    const stranger = await request(app).post('/api/marketplace/orders').set(auth(buyer)).send({ listingId: String(listing._id), giftForUserId: String(other._id) });
+    expect(stranger.status).toBe(403);
+    const self = await request(app).post('/api/marketplace/orders').set(auth(buyer)).send({ listingId: String(listing._id), giftForUserId: String(buyer._id) });
+    expect(self.status).toBe(400);
+    await matchThem(buyer, other);
+    const ok = await request(app).post('/api/marketplace/orders').set(auth(buyer)).send({ listingId: String(listing._id), giftForUserId: String(other._id) });
+    expect(ok.status).toBe(201);                                           // no shippingAddress needed
+    const ord = await Order.findById(ok.body.marketplaceOrderId);
+    expect(ord.giftStatus).toBe('pending');
+    expect(ord.shippingAddress).toBeNull();
+  });
+
+  test('recipient accepts with a PRIVATE address the buyer never sees; fulfilment gated until then', async () => {
+    const { buyer, recipient, orderId } = await paidGift();
+    // staff cannot advance a gift that is not yet accepted
+    const preConfirm = await request(app).post(`/api/marketplace/orders/${orderId}/confirm`).set(SK);
+    expect(preConfirm.status).toBe(409);
+
+    // recipient sees the paid, pending gift
+    const gifts = await request(app).get('/api/marketplace/orders/gifts').set(auth(recipient));
+    expect(gifts.body.gifts.length).toBe(1);
+    expect(gifts.body.gifts[0].needsAddress).toBe(true);
+
+    // recipient accepts with their own address
+    const RA = { name: 'Meera', phone: '+919111111111', line1: '9 Fancy Bazar', city: 'Guwahati', pincode: '781001' };
+    const acc = await request(app).post(`/api/marketplace/orders/${orderId}/accept-gift`).set(auth(recipient)).send({ shippingAddress: RA });
+    expect(acc.status).toBe(200);
+
+    // the BUYER never sees the recipient's address
+    const buyerView = await request(app).get('/api/marketplace/orders').set(auth(buyer));
+    const bo = buyerView.body.orders.find(o => String(o.id) === String(orderId));
+    expect(bo.giftStatus).toBe('accepted');
+    expect(bo.shippingAddress).toBeNull();
+
+    // staff (fulfilment) CAN see it, and can now confirm + fulfil
+    expect((await Order.findById(orderId)).shippingAddress.pincode).toBe('781001');
+    await request(app).post(`/api/marketplace/orders/${orderId}/confirm`).set(SK);
+    const okFulfil = await request(app).post(`/api/marketplace/orders/${orderId}/fulfill`).set(SK);
+    expect(okFulfil.status).toBe(200);
+  });
+
+  test('declining a paid gift refunds the buyer and drops escrow', async () => {
+    const { recipient, orderId, paymentId } = await paidGift();
+    const dec = await request(app).post(`/api/marketplace/orders/${orderId}/decline-gift`).set(auth(recipient));
+    expect(dec.status).toBe(200);
+    const ord = await Order.findById(orderId);
+    expect(ord.giftStatus).toBe('declined');
+    expect(ord.status).toBe('refunded');
+    expect(ord.escrowHeld).toBe(false);
+    expect((await Payment.findById(paymentId)).status).toBe('refunded');
+  });
+
+  test('a stranger cannot accept or decline my gift', async () => {
+    const { orderId } = await paidGift();
+    const stranger = await mkUser();
+    const a = await request(app).post(`/api/marketplace/orders/${orderId}/accept-gift`).set(auth(stranger)).send({ shippingAddress: ADDR });
+    expect(a.status).toBe(404);
+    const d = await request(app).post(`/api/marketplace/orders/${orderId}/decline-gift`).set(auth(stranger));
+    expect(d.status).toBe(404);
+  });
+
+  test('a late capture on a CANCELLED order is reversed, not stranded (confirm-payment)', async () => {
+    const { listing } = await seedPartnerListing();
+    const buyer = await mkUser();
+    const oRes = await request(app).post('/api/marketplace/orders').set(auth(buyer)).send({ listingId: String(listing._id), shippingAddress: ADDR });
+    const orderId = oRes.body.marketplaceOrderId, paymentId = oRes.body.order.payment._id;
+    await request(app).post(`/api/marketplace/orders/${orderId}/cancel`).set(auth(buyer));   // cancel the still-'created' order
+    await Payment.findByIdAndUpdate(paymentId, { status: 'captured' });                       // gateway captures LATE
+    const cp = await request(app).post(`/api/marketplace/orders/${orderId}/confirm-payment`).set(auth(buyer));
+    expect(cp.status).toBe(409);
+    expect((await Payment.findById(paymentId)).status).toBe('refunded');                      // money returned, not stranded
+  });
+
+  test('reconcileStrandedOrders reverses a capture that landed after cancel (nightly backstop)', async () => {
+    const { partner, listing } = await seedPartnerListing();
+    const buyer = await mkUser();
+    const order = await market.createOrder({ userId: buyer._id, listing, partner, shippingAddress: ADDR });
+    const payment = await Payment.create({ userId: buyer._id, purpose: 'marketplace_order', amountCHF: order.amountCHF, razorpayOrderId: 'late1', status: 'created' });
+    await Order.findByIdAndUpdate(order._id, { paymentId: payment._id });
+    await market.transition(order, 'cancelled');
+    await Payment.findByIdAndUpdate(payment._id, { status: 'captured' });                     // late capture on a dead order
+    const r = await market.reconcileStrandedOrders();
+    expect(r.reclaimed).toBeGreaterThanOrEqual(1);
+    expect((await Payment.findById(payment._id)).status).toBe('refunded');
+  });
+
+  test('declining a DISPUTED gift refunds it — no stranded escrow, honest refund flag', async () => {
+    const { buyer, recipient, orderId, paymentId } = await paidGift();
+    await request(app).post(`/api/marketplace/orders/${orderId}/dispute`).set(auth(buyer)).send({ reason: 'slow' });
+    const dec = await request(app).post(`/api/marketplace/orders/${orderId}/decline-gift`).set(auth(recipient));
+    expect(dec.status).toBe(200);
+    expect(dec.body.refunded).toBe(true);
+    const o = await Order.findById(orderId);
+    expect(o.status).toBe('refunded');
+    expect(o.escrowHeld).toBe(false);
+    expect((await Payment.findById(paymentId)).status).toBe('refunded');
+  });
+
+  test('a still-pending (disputed) gift cannot be resolved to completed → no payout without acceptance', async () => {
+    const { buyer, orderId } = await paidGift();
+    await request(app).post(`/api/marketplace/orders/${orderId}/dispute`).set(auth(buyer)).send({ reason: 'slow' });
+    const resolve = await request(app).post(`/api/marketplace/orders/${orderId}/resolve-dispute`).set(SK).send({ outcome: 'complete' });
+    expect(resolve.status).toBe(409);                       // gift gate blocks completed without acceptance
+    const o = await Order.findById(orderId);
+    expect(o.status).toBe('disputed');
+    expect(o.escrowHeld).toBe(true);                        // payout NOT released to the partner
+  });
+
+  test('gift-recipients lists revealed matches and hides anonymous ones', async () => {
+    const me = await mkUser(), friend = await mkUser(), secret = await mkUser();
+    await Chat.create({ participants: [me._id, friend._id], status: 'active' });                          // revealed by default
+    await Chat.create({ participants: [me._id, secret._id], status: 'active', anonymity: { isAnonymous: true } });
+    const r = await request(app).get('/api/marketplace/gift-recipients').set(auth(me));
+    expect(r.status).toBe(200);
+    const ids = r.body.recipients.map((/** @type {any} */ x) => String(x.userId));
+    expect(ids).toContain(String(friend._id));
+    expect(ids).not.toContain(String(secret._id));
   });
 });

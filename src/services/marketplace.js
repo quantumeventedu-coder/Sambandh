@@ -92,8 +92,14 @@ async function createOrder({ userId, listing, partner, scheduledFor, notes, ship
   if (!partner || !partner.active) throw new Error('Partner unavailable');
   // Fail-closed: a physical product must have somewhere to be delivered, or the order
   // is invalid. Reject BEFORE reserving stock so a bad request never holds inventory.
+  // EXCEPTION — gifts: the RECIPIENT supplies their own address on acceptance (the buyer
+  // must never know it), so a gift starts address-less and 'pending' instead.
+  const isGift = !!giftForUserId;
   let ship = null;
-  if (listing.kind === 'product') {
+  let giftStatus = 'none';
+  if (isGift) {
+    giftStatus = 'pending';
+  } else if (listing.kind === 'product') {
     ship = normalizeAddress(shippingAddress);
     if (!ship) throw new Error('A delivery address (name, phone, street, city, PIN) is required for physical products');
   }
@@ -110,7 +116,7 @@ async function createOrder({ userId, listing, partner, scheduledFor, notes, ship
     amountCHF: q.amountCHF, commissionRate: q.commissionRate,
     commissionCHF: q.commissionCHF, partnerPayoutCHF: q.partnerPayoutCHF,
     status: 'created', stockReserved: tracksStock, escrowHeld: false,
-    shippingAddress: ship, giftForUserId: giftForUserId || null,
+    shippingAddress: ship, giftForUserId: giftForUserId || null, giftStatus,
     scheduledFor, notes, createdAt: new Date(), updatedAt: new Date()
   });
 }
@@ -128,6 +134,14 @@ async function transition(order, to, opts = {}) {
   const allowed = TRANSITIONS[order.status];
   if (!allowed) throw new Error(`Unknown order status: ${order.status}`);
   if (!allowed.includes(to)) throw new Error(`Illegal transition ${order.status} → ${to}`);
+  // Gift gate (fail-closed, regardless of caller): a gift may only ADVANCE toward payout
+  // (confirmed / fulfilled / completed) once the recipient has ACCEPTED — which is also when a
+  // valid delivery address exists. This blocks two payout holes: a still-'pending' or a
+  // 'declined' gift being pushed to 'completed' via dispute-resolution. Refund/cancel/dispute
+  // are never gated, so a gift can always be reversed.
+  if (order.giftForUserId && (to === 'confirmed' || to === 'fulfilled' || to === 'completed') && order.giftStatus !== 'accepted') {
+    throw new Error(order.giftStatus === 'declined' ? 'Gift was declined by the recipient' : 'Gift not yet accepted by the recipient');
+  }
 
   /** @type {Record<string, any>} */
   const set = { status: to, updatedAt: new Date() };
@@ -155,6 +169,31 @@ async function transition(order, to, opts = {}) {
     }
   }
   return { ...order, ...set };
+}
+
+/**
+ * Reconciliation backstop: a marketplace Payment can capture ASYNCHRONOUSLY (UPI collect /
+ * webhook) AFTER its order was cancelled/refunded or its gift declined — capture is keyed on
+ * razorpayOrderId and never references order state. Reverse any such stranded capture so the
+ * buyer is never charged for a dead order. Idempotent CAS; mirrors verification-service.sweepStaleCases.
+ */
+async function reconcileStrandedOrders() {
+  let reclaimed = 0;
+  const buckets = await Promise.all([
+    Order.find({ status: 'cancelled' }).limit(2000),
+    Order.find({ status: 'refunded' }).limit(2000),
+    Order.find({ giftStatus: 'declined' }).limit(2000),
+  ]);
+  const seen = new Set();
+  for (const list of buckets) {
+    for (const o of list) {
+      if (!o.paymentId || seen.has(String(o._id))) continue;
+      seen.add(String(o._id));
+      const won = await atomicUpdate(Payment, { _id: o.paymentId, status: 'captured' }, { $set: { status: 'refunded', refundedAt: new Date() } });
+      if (won) reclaimed++;
+    }
+  }
+  return { reclaimed };
 }
 
 // ---- Budget-aware + local-first ranking -----------------------------------
@@ -231,5 +270,5 @@ async function addReview({ userId, order, rating, text }) {
 
 module.exports = {
   DEFAULT_COMMISSION, FALLBACK_COMMISSION, TRANSITIONS,
-  quote, createOrder, transition, rank, distanceKm, addReview, round2, atomicUpdate, normalizeAddress
+  quote, createOrder, transition, rank, distanceKm, addReview, round2, atomicUpdate, normalizeAddress, reconcileStrandedOrders
 };
