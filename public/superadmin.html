@@ -920,11 +920,16 @@ async function renderLocations() {
           <label><input type="checkbox" onchange="LOC.flt.suspended=this.checked;drawMap()"> Suspended</label>
           <label><input type="checkbox" onchange="LOC.flt.hidePreview=this.checked;drawMap()"> Hide preview</label>
           <button onclick="locFit()">Fit</button><button onclick="LOC.map&&LOC.map.flyToBounds([[6,67],[37,98]])">India</button><button onclick="LOC.map&&LOC.map.setView([20,0],2)">World</button>
+          <button class="gold" onclick="showMyDevice()">📍 My device</button>
         </div>
       </div>
-      <p style="color:#888;font-size:12px;margin:6px 0 10px">Updates <b>live every 15 s</b> — pins move as users move. Scroll to <b>zoom</b>, drag to <b>pan</b>, switch <b>Satellite / NASA / Streets</b> top-right, tap a pin for detail. The faint ring is the GPS <b>accuracy</b>. Exact coordinates are <b>admin-only</b>, captured <b>only while a user has the app open</b>. Legend: <span style="color:#46c37b">●</span> verified · <span style="color:#3aa0ff">●</span> active now · <span style="color:#e5484d">●</span> suspended.</p>
+      <p style="color:#888;font-size:12px;margin:6px 0 10px">Updates <b>live every 15 s</b> — pins move as users move. Scroll to <b>zoom</b>, drag to <b>pan</b>, switch <b>Satellite / NASA / Streets</b> top-right, tap a pin for detail. The faint ring is the GPS <b>accuracy</b> (desktops have no GPS → ~50–150 m via Wi‑Fi; a phone gives ~5–20 m). Coordinates are captured <b>only while a user has the app open</b> — this admin console does not read your GPS, so your own device isn't a user pin; use <b>“My device”</b> to drop a reference marker. Legend: <span style="color:#46c37b">●</span> verified · <span style="color:#3aa0ff">●</span> active now · <span style="color:#e5484d">●</span> suspended.</p>
+      <div id="loc-menote" style="font-size:12px;margin:0 0 8px"></div>
       <div id="loc-map" style="width:100%;height:600px;border:1px solid var(--line);border-radius:10px;overflow:hidden;background:#04070f;z-index:0"></div>
       <div id="loc-empty" style="color:var(--mut);font-size:13px;margin-top:8px"></div>
+      <style>#loc-log td,#loc-log th,#loc-history td,#loc-history th{padding:6px 10px;border-bottom:1px solid var(--line);white-space:nowrap}#loc-log th,#loc-history th{text-align:left;color:var(--mut);font-weight:600}</style>
+      <div id="loc-log" style="margin-top:16px"></div>
+      <div id="loc-history"></div>
     </div>`;
   initLocMap();
   if (LOC.timer) clearInterval(LOC.timer);
@@ -974,9 +979,69 @@ function drawMap(fit) {
   if (empty) empty.textContent = !LOC.points.length
     ? 'No user has shared a live location yet — pins appear as users open the app with location on.'
     : (!pts.length ? 'Your filters hide every located user — uncheck the filters above.' : '');
+  renderLocLog(pts);
   if (fit && latlng.length) LOC.map.fitBounds(latlng, { padding: [40,40], maxZoom: 13 });
 }
 function locFit() { drawMap(true); }
+// Drop a reference marker for THIS browser's device (the admin console never records it as a
+// user pin). Shows live accuracy so precision is visible (desktop Wi-Fi ≈ 100 m, phone GPS ≈ 5–20 m).
+function showMyDevice() {
+  if (!LOC.map || !navigator.geolocation) { toast('Geolocation unavailable'); return; }
+  toast('Locating this device…');
+  navigator.geolocation.getCurrentPosition(pos => {
+    const lat = pos.coords.latitude, lng = pos.coords.longitude, acc = pos.coords.accuracy;
+    if (LOC.meMarker) LOC.map.removeLayer(LOC.meMarker);
+    if (LOC.meAcc) LOC.map.removeLayer(LOC.meAcc);
+    LOC.meAcc = L.circle([lat, lng], { radius: acc || 30, color: '#ffd23f', weight: 1, fillColor: '#ffd23f', fillOpacity: .12 }).addTo(LOC.map);
+    LOC.meMarker = L.circleMarker([lat, lng], { radius: 9, color: '#111', weight: 2, fillColor: '#ffd23f', fillOpacity: 1 }).addTo(LOC.map).bindTooltip('You (this device)');
+    LOC.map.setView([lat, lng], acc && acc < 60 ? 16 : 14);
+    const note = document.getElementById('loc-menote');
+    if (note) note.innerHTML = `📍 <b>You (this device)</b>: <span style="font-family:monospace">${lat.toFixed(5)}, ${lng.toFixed(5)}</span> · ±${Math.round(acc)} m ${acc > 60 ? '<span style="color:#b23b3b">(coarse — this device has no GPS; open the app on a phone for ~5–20 m)</span>' : '<span style="color:#46c37b">(GPS)</span>'} · <span style="color:var(--mut)">reference only, not saved</span>`;
+    toast('Your device: ±' + Math.round(acc) + ' m');
+  }, err => toast('Could not get your location: ' + err.message), { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 });
+}
+function locStatusStr(p) {
+  return [p.verified ? '<span style="color:#46c37b">verified</span>' : '', p.active ? '<span style="color:#3aa0ff">active</span>' : '', p.suspended ? '<span style="color:#e5484d">suspended</span>' : '', p.preview ? '<span style="color:var(--mut)">preview</span>' : ''].filter(Boolean).join(' · ') || '—';
+}
+function renderLocLog(pts) {
+  const el = document.getElementById('loc-log'); if (!el) return;
+  const head = `<h3 style="font-family:Georgia,serif;margin:0 0 8px">Location log <span style="color:var(--mut);font-weight:400">· ${pts.length} shown (matches the map + filters)</span></h3>`;
+  if (!pts.length) { el.innerHTML = head + '<div style="color:var(--mut);font-size:13px">No located users match.</div>'; return; }
+  const rows = pts.map(p => {
+    const nm = String(p.name || 'User').replace(/'/g, '’');
+    return `<tr>
+      <td><b>${esc(p.name || 'User')}</b></td>
+      <td>${esc(p.city || '—')}</td>
+      <td style="font-family:monospace;font-size:11px">${Number(p.lat).toFixed(5)}, ${Number(p.lng).toFixed(5)}</td>
+      <td>${p.accuracy ? ('±' + Math.round(p.accuracy) + ' m') : '—'}</td>
+      <td>${p.device && p.device.type ? devLabel(p.device) : '—'}</td>
+      <td>${locStatusStr(p)}</td>
+      <td>${p.active ? 'now' : (p.at ? esc(relTime(p.at)) : '—')}</td>
+      <td><button onclick="showLocHistory('${p.id}','${esc(nm)}')">History</button> <button onclick="loadTrailOnMap('${p.id}')">Trail</button> <button onclick="openUserFromMap('${p.id}')">Detail</button></td>
+    </tr>`;
+  }).join('');
+  el.innerHTML = head + `<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:13px"><thead><tr>
+    <th>User</th><th>City</th><th>Coordinates</th><th>Accuracy</th><th>Device</th><th>Status</th><th>Last seen</th><th>History</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+}
+async function showLocHistory(id, name) {
+  const el = document.getElementById('loc-history'); if (!el) return;
+  el.innerHTML = '<div class="card" style="margin-top:12px">Loading history…</div>';
+  el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  try {
+    const r = await api('/users/' + id + '/location-trail?days=30');
+    const trail = (r.trail || []).slice().reverse();   // newest first
+    const close = `<button onclick="hideLocHistory()">✕</button>`;
+    if (!trail.length) { el.innerHTML = `<div class="card" style="margin-top:12px"><div class="row" style="justify-content:space-between;align-items:center"><b>Location history — ${esc(name)}</b>${close}</div><div style="color:var(--mut);font-size:13px;margin-top:6px">No recorded history yet. History builds as this user moves with the app open (kept 30 days).</div></div>`; return; }
+    const rows = trail.map(t => `<tr><td>${esc(new Date(t.at).toLocaleString())}</td><td style="font-family:monospace;font-size:11px">${Number(t.lat).toFixed(5)}, ${Number(t.lng).toFixed(5)}</td><td>${t.accuracy ? ('±' + Math.round(t.accuracy) + ' m') : '—'}</td><td><button onclick="window.open('https://www.google.com/maps/search/?api=1&query=${t.lat},${t.lng}','_blank','noopener')">Map</button></td></tr>`).join('');
+    el.innerHTML = `<div class="card" style="margin-top:12px">
+      <div class="row" style="justify-content:space-between;align-items:center"><b>Location history — ${esc(name)}</b>${close}</div>
+      <div style="color:var(--mut);font-size:12px;margin:4px 0 8px">${r.points} fix(es)${r.demo ? ' (demo)' : ''} over 30 days · been within 150 m of the latest for ~${fmtDur(r.dwellMs)} · newest first</div>
+      <div style="overflow-x:auto;max-height:340px;overflow-y:auto"><table style="width:100%;border-collapse:collapse;font-size:13px"><thead><tr><th>When</th><th>Coordinates</th><th>Accuracy</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>
+      <button style="margin-top:8px" onclick="loadTrailOnMap('${id}')">Show this trail on the map ↑</button>
+    </div>`;
+  } catch (e) { el.innerHTML = `<div class="card" style="margin-top:12px">${esc(e.message)}</div>`; }
+}
+function hideLocHistory() { const el = document.getElementById('loc-history'); if (el) el.innerHTML = ''; }
 function locPopupHtml(p) {
   const maps = `https://www.google.com/maps/search/?api=1&query=${p.lat},${p.lng}`;
   return `<div style="min-width:190px;line-height:1.5">
