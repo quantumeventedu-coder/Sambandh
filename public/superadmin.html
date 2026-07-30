@@ -73,6 +73,7 @@
       <button id="tb-commerce" onclick="show('commerce')">Commerce &amp; Tax</button>
       <button id="tb-coupons" onclick="show('coupons')">Coupons</button>
       <button id="tb-locations" onclick="show('locations')">Locations</button>
+      <button id="tb-shares" onclick="show('shares')">Live Shares</button>
     </div>
     <div id="view"></div>
   </div>
@@ -131,7 +132,8 @@ async function connect() {
 
 function show(tab) {
   if (tab !== 'locations' && LOC.timer) { clearInterval(LOC.timer); LOC.timer = null; }   // stop live polling when leaving the map
-  ['overview','users','llm','audit','test','commerce','coupons','locations'].forEach(t => $('#tb-'+t).classList.toggle('on', t===tab));
+  if (tab !== 'shares' && SHARES.timer) { clearInterval(SHARES.timer); SHARES.timer = null; }
+  ['overview','users','llm','audit','test','commerce','coupons','locations','shares'].forEach(t => $('#tb-'+t).classList.toggle('on', t===tab));
   if (tab==='overview') renderOverview();
   if (tab==='users') renderUsers();
   if (tab==='llm') renderLLM();
@@ -140,6 +142,7 @@ function show(tab) {
   if (tab==='commerce') renderCommerce();
   if (tab==='coupons') renderCoupons();
   if (tab==='locations') renderLocations();
+  if (tab==='shares') renderShares();
 }
 
 // ---- Commerce & Tax editor: prices, per-country taxes, gateway fee, cancellation ----
@@ -1027,6 +1030,110 @@ async function userTrail(id) {
       ? `Trail: ${r.points} fix(es)${r.demo?' (demo)':''} over 7 days · been within 150 m for ~${fmtDur(r.dwellMs)}`
       : 'No movement recorded yet — a trail appears once this user moves with the app open.';
   } catch (e) { if (info) info.textContent = e.message; }
+}
+
+// ---- Live couple location-shares oversight (SUPER-ADMIN ONLY) ----
+// Consent-based, mutual shares between matched couples. The backend only returns currently-
+// active shares (revoke/expiry drop them instantly), so this view is inherently fail-closed.
+const SHARES = { map: null, layer: null, timer: null, data: [] };
+function shKm(a, b) {
+  if (!a || !b) return null;
+  const R = 6371, r = (/** @type {number} */ d) => d * Math.PI / 180;
+  const dLat = r(b.lat - a.lat), dLng = r(b.lng - a.lng);
+  const s = Math.sin(dLat / 2) ** 2 + Math.cos(r(a.lat)) * Math.cos(r(b.lat)) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.min(1, Math.sqrt(s)));
+}
+function shDist(a, b) { const km = shKm(a, b); return km == null ? null : (km < 1 ? Math.round(km * 1000) + ' m' : km.toFixed(1) + ' km'); }
+function shExpiresIn(t) {
+  const ms = new Date(t).getTime() - Date.now();
+  if (ms <= 0) return 'expired'; const m = Math.round(ms / 60000);
+  if (m < 60) return 'in ' + m + ' min'; const h = Math.floor(m / 60); return 'in ' + h + 'h ' + (m % 60) + 'm';
+}
+async function renderShares() {
+  $('#view').innerHTML = '<div class="card">Loading live shares…</div>';
+  try { await ensureLeaflet(); await loadSharesData(); }
+  catch (e) { $('#view').innerHTML = '<div class="card">' + esc(e.message) + '</div>'; return; }
+  $('#view').innerHTML = `
+    <div class="card">
+      <div class="row" style="justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+        <h3 style="font-family:Georgia,serif;margin:0">Live location shares <span style="color:var(--mut);font-weight:400">· <span id="sh-count">${SHARES.data.length}</span> active · <span style="color:#e5484d">●</span> <span style="color:#46c37b">LIVE</span> <span id="sh-updated" style="color:var(--mut);font-size:12px"></span></span></h3>
+        <button onclick="shFit()">Fit</button>
+      </div>
+      <p style="color:#888;font-size:12px;margin:6px 0 10px">Consent-based, mutual live-location shares between matched couples. Visible to the <b>super-admin only</b> (never ordinary admins). Only <b>currently-active</b> shares appear — a revoke or expiry removes them instantly. Updates live every 15 s. <span style="color:#e5484d">●</span> partner A · <span style="color:#3aa0ff">●</span> partner B · the dashed line joins the couple.</p>
+      <div id="sh-map" style="width:100%;height:520px;border:1px solid var(--line);border-radius:10px;overflow:hidden;background:#04070f;z-index:0"></div>
+      <div id="sh-list" style="margin-top:12px"></div>
+    </div>`;
+  initShMap();
+  if (SHARES.timer) clearInterval(SHARES.timer);
+  SHARES.timer = setInterval(refreshShares, 15000);
+}
+async function loadSharesData() { const r = await api('/location-shares'); SHARES.data = r.shares || []; }
+function initShMap() {
+  if (SHARES.map) { SHARES.map.remove(); SHARES.map = null; }
+  const { esri, nasa, streets } = baseLayers();
+  const map = L.map('sh-map', { worldCopyJump: true, layers: [streets] }).setView([22, 79], 4);
+  SHARES.map = map;
+  L.control.layers({ 'Streets': streets, 'Satellite': esri, 'NASA': nasa }, {}, { collapsed: true }).addTo(map);
+  SHARES.layer = L.layerGroup().addTo(map);
+  drawShares(true);
+  setTimeout(() => map.invalidateSize(), 80);
+}
+function drawShares(fit) {
+  if (!SHARES.map || !window.L) return;
+  SHARES.layer.clearLayers();
+  const cnt = document.getElementById('sh-count'); if (cnt) cnt.textContent = SHARES.data.length;
+  const pts = [];
+  for (const s of SHARES.data) {
+    const af = s.a.fix, bf = s.b.fix;
+    if (af) { L.circleMarker([af.lat, af.lng], { radius: 8, color: '#fff', weight: 2, fillColor: '#e5484d', fillOpacity: .95 }).bindPopup(shPopup(s, 'a')).addTo(SHARES.layer); pts.push([af.lat, af.lng]); }
+    if (bf) { L.circleMarker([bf.lat, bf.lng], { radius: 8, color: '#fff', weight: 2, fillColor: '#3aa0ff', fillOpacity: .95 }).bindPopup(shPopup(s, 'b')).addTo(SHARES.layer); pts.push([bf.lat, bf.lng]); }
+    if (af && bf) L.polyline([[af.lat, af.lng], [bf.lat, bf.lng]], { color: '#ffd23f', weight: 2, dashArray: '5,6', opacity: .8 }).addTo(SHARES.layer);
+  }
+  renderShList();
+  if (fit && pts.length) SHARES.map.fitBounds(pts, { padding: [50, 50], maxZoom: 14 });
+}
+function shPopup(s, side) {
+  const p = s[side], other = s[side === 'a' ? 'b' : 'a'];
+  const maps = `https://www.google.com/maps/search/?api=1&query=${p.fix.lat},${p.fix.lng}`;
+  const km = shDist(s.a.fix, s.b.fix);
+  return `<div style="min-width:180px;line-height:1.5"><b>${esc(p.name || 'User')}</b> (${side.toUpperCase()})<br>
+    <span style="color:#777;font-size:12px">sharing with ${esc(other.name || 'their match')}</span><br>
+    <span style="font-family:monospace;font-size:11px">${Number(p.fix.lat).toFixed(5)}, ${Number(p.fix.lng).toFixed(5)}</span>
+    ${km ? `<br><span style="font-size:12px">${km} apart</span>` : ''}
+    <br><span style="font-size:12px">expires ${esc(shExpiresIn(s.expiresAt))}</span>
+    <div style="margin-top:6px;display:flex;gap:6px;flex-wrap:wrap">
+      <button onclick="openUserFromMap('${p.id}')">Full detail</button>
+      <button onclick="window.open('${maps}','_blank','noopener')">Device map</button>
+    </div></div>`;
+}
+function renderShList() {
+  const el = document.getElementById('sh-list'); if (!el) return;
+  if (!SHARES.data.length) { el.innerHTML = '<div style="color:var(--mut);font-size:13px">No active live shares right now. Couples who start sharing appear here in real time.</div>'; return; }
+  el.innerHTML = SHARES.data.map(s => {
+    const km = shDist(s.a.fix, s.b.fix);
+    const waiting = (!s.a.fix || !s.b.fix) ? ' · waiting for a fix' : '';
+    return `<div class="card" style="margin:0 0 8px;padding:10px 12px">
+      <div class="row" style="justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+        <div><b><span style="color:#e5484d">●</span> ${esc(s.a.name || 'A')}</b> ↔ <b><span style="color:#3aa0ff">●</span> ${esc(s.b.name || 'B')}</b>
+          <div class="hint" style="color:var(--mut)">${km ? km + ' apart · ' : ''}started ${esc(relTime(s.createdAt))} · expires ${esc(shExpiresIn(s.expiresAt))}${waiting}</div></div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap">
+          <button onclick="shFocus('${s.id}')">Focus</button>
+          <button onclick="openUserFromMap('${s.a.id}')">A detail</button>
+          <button onclick="openUserFromMap('${s.b.id}')">B detail</button>
+        </div>
+      </div></div>`;
+  }).join('');
+}
+function shFocus(id) {
+  const s = SHARES.data.find(x => String(x.id) === String(id)); if (!s || !SHARES.map) return;
+  const pts = [s.a.fix, s.b.fix].filter(Boolean).map(f => [f.lat, f.lng]);
+  if (pts.length) SHARES.map.fitBounds(pts, { padding: [60, 60], maxZoom: 15 });
+}
+function shFit() { drawShares(true); }
+async function refreshShares() {
+  if (!SHARES.map) return;
+  try { await loadSharesData(); drawShares(false); const lu = document.getElementById('sh-updated'); if (lu) lu.textContent = '· updated just now'; }
+  catch { /* keep the last good view */ }
 }
 
 fetch('/health').then(r=>r.json()).then(h => {
