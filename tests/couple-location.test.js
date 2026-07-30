@@ -174,6 +174,24 @@ describe('couple live-location: consent + fail-closed', () => {
     expect((await request(app).post(`/api/couple/location/shares/by-chat/${chat._id}`).set(as(c)).send({})).status).toBe(404);
   });
 
+  test('super-admin share log lists ALL statuses (metadata only; coords cleared for inactive)', async () => {
+    const a = await mkUser(), b = await mkUser(), c = await mkUser(); await match(a, b); await match(a, c);
+    const id1 = (await startShare(a, b)).body.share.id;                          // → active
+    await request(app).post(`/api/couple/location/shares/${id1}/accept`).set(as(b));
+    await pushFix(a, 26.1, 91.7);
+    const id2 = (await startShare(a, c)).body.share.id;                          // → revoked
+    await request(app).post(`/api/couple/location/shares/${id2}/accept`).set(as(c));
+    await request(app).post(`/api/couple/location/shares/${id2}/revoke`).set(as(a));
+    const r = await request(app).get('/superadmin/location-shares/log').set(as(a));
+    expect(r.status).toBe(200);
+    expect(r.body.log.length).toBe(2);
+    const active = r.body.log.find((/** @type {any} */ x) => x.status === 'active');
+    const revoked = r.body.log.find((/** @type {any} */ x) => x.status === 'revoked');
+    expect(active.hasLocation).toBe(true);
+    expect(revoked.hasLocation).toBe(false);                                     // coords cleared on revoke
+    expect(JSON.stringify(r.body.log)).not.toMatch(/aFix|bFix|"lat"/);           // no raw coordinates in the log
+  });
+
   test('super-admin oversight lists active shares (ordinary admins have no such route)', async () => {
     const a = await mkUser(), b = await mkUser(); await match(a, b);
     const id = (await startShare(a, b)).body.share.id;

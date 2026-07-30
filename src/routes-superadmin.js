@@ -847,6 +847,34 @@ router.get('/location-shares', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+// Share LOG — recent shares of ALL statuses (pending/active/revoked/declined/expired) with their
+// key details, for super-admin audit. Coordinates are NOT included for inactive shares (they are
+// nulled the moment a share stops — that ephemerality is the privacy guarantee), only metadata.
+router.get('/location-shares/log', async (req, res, next) => {
+  try {
+    const LocationShare = require('./models/LocationShare');
+    const shares = await LocationShare.find({}).sort({ createdAt: -1 }).limit(150).lean();
+    const out = [];
+    for (const s of shares) {
+      const [ua, ub] = await Promise.all([
+        User.findById(s.a).select('profile.firstName').lean(),
+        User.findById(s.b).select('profile.firstName').lean(),
+      ]);
+      out.push({
+        id: s._id, status: s.status,
+        a: { id: s.a, name: (ua && ua.profile && ua.profile.firstName) || '' },
+        b: { id: s.b, name: (ub && ub.profile && ub.profile.firstName) || '' },
+        initiator: s.a,
+        createdAt: s.createdAt, expiresAt: s.expiresAt,
+        revokedAt: s.revokedAt || null, revokedBy: s.revokedBy || null,
+        aSharing: !!s.aSharing, bSharing: !!s.bSharing,
+        hasLocation: s.status === 'active' && !!(s.aFix || s.bFix),   // coords exist only while active
+      });
+    }
+    res.json({ log: out, count: out.length });
+  } catch (err) { next(err); }
+});
+
 // View a verification document via a short-lived SIGNED URL (docs live in the PRIVATE bucket —
 // no public URL). Returns 410 once the original has been deleted past its retention window.
 router.get('/verifications/:id/doc/:index', async (req, res, next) => {
