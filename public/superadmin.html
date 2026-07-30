@@ -1059,7 +1059,8 @@ async function userTrail(id) {
 // ---- Live couple location-shares oversight (SUPER-ADMIN ONLY) ----
 // Consent-based, mutual shares between matched couples. The backend only returns currently-
 // active shares (revoke/expiry drop them instantly), so this view is inherently fail-closed.
-const SHARES = { map: null, layer: null, timer: null, data: [] };
+const SHARES = { map: null, layer: null, timer: null, data: [], log: [] };
+function shStatusColor(st) { return st === 'active' ? '#14683a' : st === 'pending' ? '#8a6a10' : st === 'revoked' ? '#b23b3b' : st === 'declined' ? '#7a4a10' : '#4a4a55'; }
 function shKm(a, b) {
   if (!a || !b) return null;
   const R = 6371, r = (/** @type {number} */ d) => d * Math.PI / 180;
@@ -1086,10 +1087,50 @@ async function renderShares() {
       <p style="color:#888;font-size:12px;margin:6px 0 10px">Consent-based, mutual live-location shares between matched couples. Visible to the <b>super-admin only</b> (never ordinary admins). Only <b>currently-active</b> shares appear — a revoke or expiry removes them instantly. Updates live every 15 s. <span style="color:#e5484d">●</span> partner A · <span style="color:#3aa0ff">●</span> partner B · the dashed line joins the couple.</p>
       <div id="sh-map" style="width:100%;height:520px;border:1px solid var(--line);border-radius:10px;overflow:hidden;background:#04070f;z-index:0"></div>
       <div id="sh-list" style="margin-top:12px"></div>
+      <style>#sh-log td,#sh-log th{padding:6px 10px;border-bottom:1px solid var(--line);white-space:nowrap}#sh-log th{text-align:left;color:var(--mut);font-weight:600}</style>
+      <div id="sh-log" style="margin-top:16px"></div>
     </div>`;
   initShMap();
+  loadShareLog();
   if (SHARES.timer) clearInterval(SHARES.timer);
   SHARES.timer = setInterval(refreshShares, 15000);
+}
+async function loadShareLog() {
+  const el = document.getElementById('sh-log'); if (!el) return;
+  try { const r = await api('/location-shares/log'); SHARES.log = r.log || []; renderShLog(); }
+  catch (e) { el.innerHTML = '<div style="color:var(--mut);font-size:13px">' + esc(e.message) + '</div>'; }
+}
+function renderShLog() {
+  const el = document.getElementById('sh-log'); if (!el) return;
+  const head = `<h3 style="font-family:Georgia,serif;margin:0 0 8px">Share log <span style="color:var(--mut);font-weight:400">· ${SHARES.log.length} recent (all statuses)</span></h3>`;
+  if (!SHARES.log.length) { el.innerHTML = head + '<div style="color:var(--mut);font-size:13px">No shares have been created yet.</div>'; return; }
+  const rows = SHARES.log.map(s => {
+    const byA = String(s.initiator) === String(s.a.id);
+    const endInfo = s.status === 'active' ? ('expires ' + shExpiresIn(s.expiresAt))
+      : s.status === 'revoked' ? ('revoked ' + (s.revokedAt ? relTime(s.revokedAt) : '') + (s.revokedBy ? ' by ' + esc(String(s.revokedBy) === String(s.a.id) ? (s.a.name || 'A') : (s.b.name || 'B')) : ''))
+      : s.status === 'declined' ? 'declined by ' + esc(s.b.name || 'B')
+      : s.status === 'expired' ? ('expired ' + relTime(s.expiresAt))
+      : ('expires ' + shExpiresIn(s.expiresAt));
+    const loc = s.status === 'active'
+      ? (s.hasLocation ? '<span style="color:#46c37b">● live</span>' : '<span style="color:var(--mut)">waiting</span>')
+      : '<span style="color:var(--mut)">cleared</span>';
+    const pill = `<span style="display:inline-block;font-size:11px;font-weight:700;padding:1px 8px;border-radius:10px;background:${shStatusColor(s.status)};color:#fff">${esc(s.status)}</span>`;
+    return `<tr>
+      <td><b>${esc(s.a.name || 'A')}</b> ↔ <b>${esc(s.b.name || 'B')}</b></td>
+      <td>${esc(byA ? (s.a.name || 'A') : (s.b.name || 'B'))}</td>
+      <td>${pill}</td>
+      <td>${esc(relTime(s.createdAt))}</td>
+      <td>${endInfo}</td>
+      <td>${s.aSharing ? 'A ✓' : 'A ✗'} · ${s.bSharing ? 'B ✓' : 'B ✗'}</td>
+      <td>${loc}</td>
+      <td><button onclick="openUserFromMap('${s.a.id}')">A</button> <button onclick="openUserFromMap('${s.b.id}')">B</button></td>
+    </tr>`;
+  }).join('');
+  el.innerHTML = head +
+    `<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:13px"><thead><tr>
+      <th>Couple</th><th>Initiated by</th><th>Status</th><th>Started</th><th>Ends / ended</th><th>Consent</th><th>Location</th><th>Detail</th></tr></thead>
+      <tbody>${rows}</tbody></table></div>
+    <p style="color:#888;font-size:11.5px;margin-top:8px">Coordinates exist only while a share is <b>active</b> (plotted on the map above). Ended shares keep metadata for audit, but their location is <b>deleted</b> — that ephemerality is the privacy guarantee.</p>`;
 }
 async function loadSharesData() { const r = await api('/location-shares'); SHARES.data = r.shares || []; }
 function initShMap() {
@@ -1156,7 +1197,7 @@ function shFocus(id) {
 function shFit() { drawShares(true); }
 async function refreshShares() {
   if (!SHARES.map) return;
-  try { await loadSharesData(); drawShares(false); const lu = document.getElementById('sh-updated'); if (lu) lu.textContent = '· updated just now'; }
+  try { await loadSharesData(); drawShares(false); loadShareLog(); const lu = document.getElementById('sh-updated'); if (lu) lu.textContent = '· updated just now'; }
   catch { /* keep the last good view */ }
 }
 
