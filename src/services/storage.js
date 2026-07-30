@@ -130,5 +130,60 @@ async function deleteFile(objectKey, opts = {}) {
   } catch { return false; }
 }
 
+// Current storage config (for an admin "is it connected?" read). Never exposes the key.
+function storageStatus() {
+  return {
+    configured: useSupabase(),
+    provider: useSupabase() ? 'supabase' : 'local-disk',
+    publicBucket: BUCKET,
+    privateBucket: PRIVATE_BUCKET,
+  };
+}
+
+// Explicitly, idempotently create a bucket and REPORT the real result (unlike ensureBucket,
+// which is fire-and-forget on the upload path). "Already exists" counts as success.
+async function createBucket(bucket, isPublic) {
+  if (!useSupabase()) return { bucket, ok: true, mode: 'local' };
+  const base = supaBase(), serviceKey = process.env.SUPABASE_SERVICE_KEY;
+  let res;
+  try {
+    res = await fetch(`${base}/storage/v1/bucket`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${serviceKey}`, apikey: serviceKey, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: bucket, name: bucket, public: !!isPublic }),
+    });
+  } catch (e) { return { bucket, ok: false, error: e instanceof Error ? e.message : String(e) }; }
+  if (res.ok) { ensured.add(bucket); return { bucket, ok: true, created: true, public: !!isPublic }; }
+  const detail = await res.text().catch(() => '');
+  if (res.status === 409 || /already exists|duplicate/i.test(detail)) { ensured.add(bucket); return { bucket, ok: true, existed: true, public: !!isPublic }; }
+  return { bucket, ok: false, status: res.status, detail: detail.slice(0, 200) };
+}
+
+// Ensure BOTH buckets exist now (so the private bucket isn't blocked on a first upload).
+async function ensureBuckets() {
+  return {
+    configured: useSupabase(),
+    public: await createBucket(BUCKET, true),
+    private: await createBucket(PRIVATE_BUCKET, false),
+  };
+}
+
+// Round-trip proof the PRIVATE bucket is truly connected: write → sign → read-back → delete.
+// Works in both Supabase and local-disk modes. Cleans up after itself.
+async function selfTest() {
+  const key = `_healthcheck/private-${Date.now()}.txt`;
+  const payload = Buffer.from('sambandh-private-bucket-ok');
+  const steps = { upload: false, sign: false, read: false, delete: false };
+  try {
+    await uploadPrivate(key, payload, 'text/plain'); steps.upload = true;
+    steps.sign = !!(await signedUrl(key, 60));
+    steps.read = Buffer.compare(await readFile(key, { private: true }), payload) === 0;
+    steps.delete = await deleteFile(key, { private: true });
+    return { ok: steps.upload && steps.read, steps, bucket: PRIVATE_BUCKET, mode: useSupabase() ? 'supabase' : 'local' };
+  } catch (e) {
+    return { ok: false, steps, bucket: PRIVATE_BUCKET, error: e instanceof Error ? e.message : String(e) };
+  }
+}
+
 // `uploadToR2` kept as an alias for existing PUBLIC callers.
-module.exports = { uploadFile, uploadToR2: uploadFile, uploadPrivate, signedUrl, readFile, deleteFile, UPLOADS_ROOT, PRIVATE_BUCKET };
+module.exports = { uploadFile, uploadToR2: uploadFile, uploadPrivate, signedUrl, readFile, deleteFile, UPLOADS_ROOT, BUCKET, PRIVATE_BUCKET, storageStatus, createBucket, ensureBuckets, selfTest };
