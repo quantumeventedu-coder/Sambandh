@@ -127,6 +127,7 @@ router.get('/sessions', requireAuth, async (req, res, next) => {
         category: (partner && partner.category) || null,
         city: (partner && partner.city) || null,
         title: (listing && listing.title) || 'Consultation',
+        listingId: (slot && slot.listingId) || (order && order.listingId) || null,
         scheduledFor: (slot && slot.startsAt) || (order && order.scheduledFor) || null,
         durationMin: (slot && slot.durationMin) || null,
         amountCHF: order ? order.amountCHF : null,
@@ -143,6 +144,26 @@ async function mySession(req, res) {
   if (!s || String(s.userId) !== String(req.userId)) { res.status(404).json({ error: 'Session not found' }); return null; }
   return s;
 }
+
+// Reschedule a scheduled booking to another OPEN slot of the SAME offering — keeps the same
+// order/payment (no refund/re-charge). Atomic: reserve the new slot before freeing the old.
+router.post('/sessions/:id/reschedule', requireAuth, async (req, res, next) => {
+  try {
+    const session = await mySession(req, res); if (!session) return;
+    if (session.status !== 'scheduled') return res.status(409).json({ error: 'Only a scheduled appointment can be rescheduled.' });
+    const parsed = z.object({ slotId: z.string().min(1) }).safeParse(req.body || {});
+    if (!parsed.success) return res.status(400).json({ error: 'slotId required' });
+    const [oldSlot, newSlot] = await Promise.all([Slot.findById(session.slotId), Slot.findById(parsed.data.slotId)]);
+    if (!newSlot || newSlot.status !== 'open' || new Date(newSlot.startsAt).getTime() < Date.now()) return res.status(409).json({ error: 'That slot is not available' });
+    if (!oldSlot || String(newSlot.listingId) !== String(oldSlot.listingId)) return res.status(400).json({ error: 'Pick a slot for the same offering' });
+    const reserved = await market.atomicUpdate(Slot, { _id: newSlot._id, status: 'open' }, { $set: { status: 'booked', orderId: String(session.orderId) } });
+    if (!reserved) return res.status(409).json({ error: 'That slot was just taken' });
+    await market.atomicUpdate(Slot, { _id: session.slotId }, { $set: { status: 'open', orderId: null } });   // free the old
+    await Order.findByIdAndUpdate(session.orderId, { scheduledFor: new Date(newSlot.startsAt) });
+    await Session.findByIdAndUpdate(session._id, { slotId: newSlot._id });
+    res.json({ ok: true, scheduledFor: newSlot.startsAt });
+  } catch (err) { return res.status(409).json({ error: msg(err) }); }
+});
 
 // Buyer cancels a booking before it's fulfilled → refund + free the slot.
 router.post('/sessions/:id/cancel', requireAuth, async (req, res, next) => {

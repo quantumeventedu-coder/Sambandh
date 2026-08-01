@@ -2277,6 +2277,7 @@ async function loadAppointments() {
       const st = s.status === 'active' ? 'in progress' : (s.status === 'ended' && s.orderStatus === 'completed' ? 'completed' : s.status);
       const acts = [];
       if (['scheduled', 'active', 'ended'].includes(s.status)) acts.push(`<button class="btn secondary" style="width:auto" onclick="nav('#/session/${s.id}')">Message</button>`);
+      if (s.status === 'scheduled' && s.listingId) acts.push(`<button class="btn secondary" style="width:auto" onclick="apptReschedule('${s.id}','${s.listingId}')">Reschedule</button>`);
       if (s.status === 'scheduled') acts.push(`<button class="btn secondary" style="width:auto" onclick="apptCancel('${s.id}')">Cancel &amp; refund</button>`);
       if (s.status === 'ended' && s.orderStatus === 'fulfilled') acts.push(`<button class="btn" style="width:auto" onclick="apptComplete('${s.orderId}')">Confirm &amp; release payment</button>`);
       if (s.status === 'ended' && s.orderStatus === 'completed') acts.push(`<button class="btn secondary" style="width:auto" onclick="reviewModal('${s.orderId}', loadAppointments)">Leave a review</button>`);
@@ -2300,6 +2301,20 @@ async function apptCancel(id) {
 }
 async function apptComplete(orderId) {
   try { await api('/marketplace/orders/' + orderId + '/complete', { method: 'POST' }); toast('Confirmed — payment released'); loadAppointments(); }
+  catch (e) { toast(e.message); }
+}
+async function apptReschedule(sessionId, listingId) {
+  if (!listingId) return toast('This appointment can’t be rescheduled.');
+  try {
+    const r = await api('/consultation/listings/' + listingId + '/slots');
+    const slots = (r.slots || []).slice(0, 20);
+    if (!slots.length) return toast('No other open slots right now.');
+    const rows = slots.map((/** @type {any} */ s) => `<button class="btn secondary" style="justify-content:flex-start" onclick="doReschedule('${sessionId}','${s.id}')">${esc(new Date(s.startsAt).toLocaleString([], { weekday: 'short', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }))} · ${s.durationMin}m</button>`).join('');
+    openModal(`<h2 style="margin-top:0">Reschedule</h2><p class="hint">Pick a new time — same consultant, same session, no extra charge.</p><div style="display:flex;flex-direction:column;gap:8px">${rows}</div><button class="btn secondary mt" onclick="closeModal()">Cancel</button>`);
+  } catch (e) { toast(e.message); }
+}
+async function doReschedule(sessionId, slotId) {
+  try { await api('/consultation/sessions/' + sessionId + '/reschedule', { method: 'POST', body: { slotId } }); closeModal(); toast('Rescheduled ✓'); loadAppointments(); }
   catch (e) { toast(e.message); }
 }
 // ===== Find a professional (services discovery) =====
