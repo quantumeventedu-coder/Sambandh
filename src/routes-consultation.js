@@ -153,6 +153,45 @@ router.post('/sessions/:id/cancel', requireAuth, async (req, res, next) => {
   } catch (err) { return res.status(409).json({ error: msg(err) }); }
 });
 
+// ==== Booking-scoped chat (client ↔ consultant) =============================
+const SessionMessage = require('./models/SessionMessage');
+/** The peer user of a session (consultant↔client), null if none, undefined if not a participant.
+ * @param {any} session @param {any} userId */
+async function sessionPeerOf(session, userId) {
+  if (String(session.userId) === String(userId)) {
+    const partner = await Partner.findById(session.partnerId).select('ownerUserId').lean();
+    return (partner && partner.ownerUserId) || null;   // I'm the client → peer is the consultant
+  }
+  const partner = await Partner.findById(session.partnerId).select('ownerUserId').lean();
+  if (partner && String(partner.ownerUserId) === String(userId)) return session.userId;   // I'm the consultant → peer is the client
+  return undefined;   // not a participant
+}
+/** Load a session the caller participates in (client or owning consultant). @param {any} req @param {any} res */
+async function participantSession(req, res) {
+  const s = await Session.findById(req.params.id);
+  if (!s) { res.status(404).json({ error: 'Session not found' }); return null; }
+  const peer = await sessionPeerOf(s, req.userId);
+  if (peer === undefined) { res.status(404).json({ error: 'Session not found' }); return null; }
+  return { session: s, peerId: peer };
+}
+router.get('/sessions/:id/thread', requireAuth, async (req, res, next) => {
+  try {
+    const p = await participantSession(req, res); if (!p) return;
+    const msgs = await SessionMessage.find({ sessionId: req.params.id }).sort({ at: 1 }).limit(500).lean();
+    res.json({ messages: msgs.map((/** @type {any} */ m) => ({ id: m._id, mine: String(m.from) === String(req.userId), text: m.text, at: m.at })) });
+  } catch (err) { next(err); }
+});
+router.post('/sessions/:id/thread', requireAuth, async (req, res, next) => {
+  try {
+    const p = await participantSession(req, res); if (!p) return;
+    const text = String((req.body && req.body.text) || '').trim().slice(0, 4000);
+    if (!text) return res.status(400).json({ error: 'text required' });
+    const m = await SessionMessage.create({ sessionId: req.params.id, from: req.userId, text, at: new Date() });
+    if (p.peerId) { const io = req.app.get('io'); if (io) io.to('user:' + p.peerId).emit('session_message', { sessionId: req.params.id, from: req.userId, text, at: m.at }); }
+    res.status(201).json({ ok: true, message: { id: m._id, mine: true, text, at: m.at } });
+  } catch (err) { next(err); }
+});
+
 // ==== Staff / consultant: availability + running the session ================
 router.post('/listings/:id/slots', staff, async (req, res, next) => {
   try {

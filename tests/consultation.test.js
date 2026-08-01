@@ -120,6 +120,26 @@ describe('access control', () => {
   });
 });
 
+describe('booking-scoped chat', () => {
+  test('client and consultant can message; a stranger cannot', async () => {
+    const proUser = await mkUser();
+    const partner = await Partner.create({ name: 'Coach', category: 'coach', active: true, ownerUserId: proUser._id });
+    const listing = await Listing.create({ partnerId: partner._id, category: 'coach', title: 'S', kind: 'booking', priceCHF: 100, active: true });
+    const slot = await Slot.create({ partnerId: partner._id, listingId: listing._id, startsAt: new Date(Date.now() + 3600000), durationMin: 30, status: 'open' });
+    const client = await mkUser();
+    const bRes = await request(app).post('/api/consultation/book').set(auth(client)).send({ slotId: String(slot._id) });
+    const sessionId = bRes.body.session.id;
+    expect((await request(app).post(`/api/consultation/sessions/${sessionId}/thread`).set(auth(client)).send({ text: 'Hi' })).status).toBe(201);
+    const read = await request(app).get(`/api/consultation/sessions/${sessionId}/thread`).set(auth(proUser));   // consultant reads
+    expect(read.body.messages.length).toBe(1);
+    expect(read.body.messages[0].mine).toBe(false);
+    expect((await request(app).post(`/api/consultation/sessions/${sessionId}/thread`).set(auth(proUser)).send({ text: 'Hello' })).status).toBe(201);
+    const stranger = await mkUser();
+    expect((await request(app).get(`/api/consultation/sessions/${sessionId}/thread`).set(auth(stranger))).status).toBe(404);
+    expect((await request(app).post(`/api/consultation/sessions/${sessionId}/thread`).set(auth(stranger)).send({ text: 'x' })).status).toBe(404);
+  });
+});
+
 describe('public professional profile', () => {
   test('GET /consultants/:id returns bio + rating + offerings with open-slot counts', async () => {
     const partner = await Partner.create({ name: 'Coach A', category: 'coach', active: true, verified: true, bio: 'I help people.', languages: ['English', 'Hindi'], experienceYears: 8, ratingAvg: 4.5, ratingCount: 12 });
