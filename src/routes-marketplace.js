@@ -321,6 +321,7 @@ const staffPartner = (p) => p && ({
   legalName: p.legalName, registration: p.registration || { kind: 'none' },
   contactPerson: p.contactPerson || {}, address: p.address, website: p.website,
   city: p.city, email: p.email, phone: p.phone, tier: p.tier || 'standard',
+  bio: p.bio || '', languages: p.languages || [], experienceYears: p.experienceYears ?? null, photoUrl: p.photoUrl || '',
   verified: !!p.verified, active: p.active !== false, suspended: !!p.suspended, suspendReason: p.suspendReason,
   verification: p.verification || { status: 'unverified' },
   documents: (p.documents || []).map((/** @type {any} */ d, /** @type {number} */ i) => ({ index: i, type: d.type, evidenceHash: d.evidenceHash, aavDecision: d.aavDecision, mime: d.mime, size: d.size, uploadedBy: d.uploadedBy, uploadedAt: d.uploadedAt })),
@@ -377,6 +378,11 @@ router.patch('/partners/:id', staff, async (req, res, next) => {
     /** @type {Record<string, any>} */ const set = {};
     const b = req.body || {};
     for (const k of ['name', 'legalName', 'address', 'website', 'city', 'email', 'phone']) if (typeof b[k] === 'string') set[k] = b[k];
+    // Consumer-facing profile fields.
+    if (typeof b.bio === 'string') set.bio = b.bio.slice(0, 1500);
+    if (typeof b.photoUrl === 'string') set.photoUrl = b.photoUrl.slice(0, 500);
+    if (b.experienceYears != null && Number.isFinite(Number(b.experienceYears))) set.experienceYears = Math.max(0, Math.min(80, Math.round(Number(b.experienceYears))));
+    if (Array.isArray(b.languages)) set.languages = b.languages.filter((/** @type {any} */ x) => typeof x === 'string').slice(0, 12);
     if (b.type && Partner.PARTNER_TYPES.includes(b.type)) set.type = b.type;
     if (b.category && Partner.CATEGORIES.includes(b.category)) set.category = b.category;
     // Nested KYB objects: set only the subfields provided (never wipe the rest).

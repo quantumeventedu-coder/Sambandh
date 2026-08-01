@@ -48,6 +48,11 @@ const PartnerSchema = new mongoose.Schema({
     status: { type: String, enum: PARTNER_VERIFY_STATES, default: 'unverified', index: true },
     reviewedBy: String, reviewedAt: Date, notes: String, evidenceHash: String
   },
+  // ---- consumer-facing profile (shown on the public professional page) ----
+  bio: String,                                    // short professional bio
+  languages: [String],                            // languages spoken
+  experienceYears: { type: Number, default: null },
+  photoUrl: String,                               // profile photo (public bucket URL)
   city: { type: String, index: true },
   location: { lat: Number, lng: Number },   // for local-first ranking (haversine in JS)
   email: { type: String, lowercase: true, trim: true },

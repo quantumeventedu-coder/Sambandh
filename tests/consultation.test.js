@@ -120,6 +120,25 @@ describe('access control', () => {
   });
 });
 
+describe('public professional profile', () => {
+  test('GET /consultants/:id returns bio + rating + offerings with open-slot counts', async () => {
+    const partner = await Partner.create({ name: 'Coach A', category: 'coach', active: true, verified: true, bio: 'I help people.', languages: ['English', 'Hindi'], experienceYears: 8, ratingAvg: 4.5, ratingCount: 12 });
+    const listing = await Listing.create({ partnerId: partner._id, category: 'coach', title: '30-min session', kind: 'booking', priceCHF: 300, billing: 'per_minute', ratePerMinuteCHF: 10, durationMin: 30, active: true });
+    await Slot.create({ partnerId: partner._id, listingId: listing._id, startsAt: new Date(Date.now() + 3600000), durationMin: 30, status: 'open' });
+    const r = await request(app).get('/api/consultation/consultants/' + partner._id).set(auth(await mkUser()));
+    expect(r.status).toBe(200);
+    expect(r.body.partner.bio).toBe('I help people.');
+    expect(r.body.partner.experienceYears).toBe(8);
+    expect(r.body.partner.languages).toContain('Hindi');
+    expect(r.body.offerings.length).toBe(1);
+    expect(r.body.offerings[0].openSlots).toBe(1);
+  });
+  test('a non-consultation partner (e.g. gift shop) is 404 on the consultant profile', async () => {
+    const shop = await Partner.create({ name: 'Gift Shop', category: 'gift', active: true });
+    expect((await request(app).get('/api/consultation/consultants/' + shop._id).set(auth(await mkUser()))).status).toBe(404);
+  });
+});
+
 describe('booking notifications', () => {
   const Notification = require('../src/models/Notification');
   const settle = () => new Promise(r => setTimeout(r, 80));   // best-effort notify is fire-and-forget

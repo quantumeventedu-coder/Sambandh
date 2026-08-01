@@ -47,6 +47,30 @@ router.get('/consultants', requireAuth, async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+// A consultant's PUBLIC profile — bio, credentials-at-a-glance, offerings + open-slot counts.
+router.get('/consultants/:id', requireAuth, async (req, res, next) => {
+  try {
+    const partner = await Partner.findById(req.params.id).lean();
+    if (!partner || partner.active === false || !consult.CONSULT_CATEGORIES.includes(partner.category)) return res.status(404).json({ error: 'Consultant not found' });
+    const listings = await Listing.find({ partnerId: partner._id, active: true }).lean();
+    const now = Date.now();
+    const offerings = [];
+    for (const l of listings) {
+      const slots = await Slot.find({ listingId: l._id, status: 'open' }).lean();
+      offerings.push({ listing: pubListing(l), openSlots: slots.filter((/** @type {any} */ s) => new Date(s.startsAt).getTime() > now).length });
+    }
+    res.json({
+      partner: {
+        id: partner._id, name: partner.name, category: partner.category, city: partner.city,
+        verified: !!partner.verified, ratingAvg: partner.ratingAvg || 0, ratingCount: partner.ratingCount || 0,
+        bio: partner.bio || '', languages: partner.languages || [], experienceYears: partner.experienceYears ?? null,
+        photoUrl: partner.photoUrl || '', website: partner.website || '',
+      },
+      offerings,
+    });
+  } catch (err) { next(err); }
+});
+
 // Open, future slots for a consultation offering.
 router.get('/listings/:id/slots', requireAuth, async (req, res, next) => {
   try {
