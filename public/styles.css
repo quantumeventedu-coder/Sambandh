@@ -372,6 +372,12 @@ h2 { font-size: 17px; color: var(--sindoor-deep); margin: 18px 0 8px; }
 /* ---- Discover as the Nature Dial (one member at a time) ---- */
 .dd { position: relative; color: #f3e9ec; min-height: 100dvh; padding: 16px 18px 116px;
   background: radial-gradient(70% 55% at 50% 34%, #2a1810 0%, #160c0a 46%, #0c0608 100%); }
+/* Discover intent chips (redesign): a visible, interactive strip instead of a buried dropdown. */
+.dd-intents { display: flex; gap: 8px; overflow-x: auto; padding: 0 0 12px; scrollbar-width: none; -ms-overflow-style: none; }
+.dd-intents::-webkit-scrollbar { display: none; }
+.dd-chip { flex: 0 0 auto; border: 1px solid rgba(255,255,255,.28); background: rgba(255,255,255,.08); color: #f3e9ec;
+  border-radius: 999px; padding: 7px 14px; font-size: 13px; font-weight: 600; font-family: var(--sans); cursor: pointer; white-space: nowrap; }
+.dd-chip.on { background: var(--haldi); color: #3a2a0a; border-color: var(--haldi); }
 .dd-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
 .dd-name { font-family: var(--serif); font-size: 25px; color: #fff; }
 .dd-name .likes { font-size: 11px; font-weight: 800; background: var(--haldi); color: var(--sindoor-deep); padding: 3px 9px; border-radius: 8px; vertical-align: middle; margin-left: 6px; }
