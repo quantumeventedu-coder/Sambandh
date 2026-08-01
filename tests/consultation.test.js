@@ -120,6 +120,22 @@ describe('access control', () => {
   });
 });
 
+describe('reschedule', () => {
+  test('moves a scheduled booking to another open slot of the same offering (keeps the payment)', async () => {
+    const { partner, listing, slot } = await seedConsultant();
+    const slot2 = await Slot.create({ partnerId: partner._id, listingId: listing._id, startsAt: new Date(Date.now() + 7200000), durationMin: 30, status: 'open' });
+    const buyer = await mkUser();
+    const bRes = await request(app).post('/api/consultation/book').set(auth(buyer)).send({ slotId: String(slot._id) });
+    const sessionId = bRes.body.session.id, paymentId = bRes.body.order.payment._id;
+    const rs = await request(app).post(`/api/consultation/sessions/${sessionId}/reschedule`).set(auth(buyer)).send({ slotId: String(slot2._id) });
+    expect(rs.status).toBe(200);
+    expect((await Slot.findById(slot._id)).status).toBe('open');       // old slot freed
+    expect((await Slot.findById(slot2._id)).status).toBe('booked');    // new slot booked
+    expect(String((await Session.findById(sessionId)).slotId)).toBe(String(slot2._id));
+    expect((await Payment.findById(paymentId)).status).not.toBe('refunded');   // no re-charge / refund
+  });
+});
+
 describe('booking-scoped chat', () => {
   test('client and consultant can message; a stranger cannot', async () => {
     const proUser = await mkUser();
