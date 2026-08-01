@@ -2205,17 +2205,34 @@ async function loadAstrologers() {
       </div><div id="aslots-${x.listing.id}"></div></div>`).join('');
   } catch (e) { el.innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
 }
+// Availability as a day → time picker (grouped by local day; shows all days, not a flat top-8).
 async function astroSlots(listingId) {
   const box = document.getElementById('aslots-' + listingId); if (!box) return;
-  if (box.innerHTML) { box.innerHTML = ''; return; }
+  if (box.dataset.open === '1') { box.innerHTML = ''; box.dataset.open = ''; return; }
+  box.dataset.open = '1';
   box.innerHTML = '<div class="hint" style="margin-top:8px">Loading availability…</div>';
   try {
     const r = await api('/consultation/listings/' + listingId + '/slots');
-    const slots = r.slots || [];
+    const slots = (r.slots || []).slice().sort((/** @type {any} */ a, /** @type {any} */ b) => new Date(a.startsAt).getTime() - new Date(b.startsAt).getTime());
     if (!slots.length) { box.innerHTML = '<div class="hint" style="margin-top:8px">No open slots right now — check back soon.</div>'; return; }
-    box.innerHTML = '<div class="row" style="gap:6px;flex-wrap:wrap;margin-top:8px">' + slots.slice(0, 8).map(s =>
-      `<button class="btn secondary" style="width:auto;padding:6px 10px" onclick="bookAstro('${s.id}',this)">${new Date(s.startsAt).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })} · ${s.durationMin}m</button>`).join('') + '</div>';
-  } catch (e) { box.innerHTML = `<div class="hint" style="margin-top:8px">${esc(e.message)}</div>`; }
+    /** @type {any} */ const byDay = {};
+    slots.forEach((/** @type {any} */ s) => { const k = new Date(s.startsAt).toISOString().slice(0, 10); (byDay[k] = byDay[k] || []).push(s); });
+    S._slotsByDay = S._slotsByDay || {}; S._slotsByDay[listingId] = byDay;
+    const days = Object.keys(byDay).sort();
+    box.innerHTML = `<div style="margin-top:8px"><div class="hint" style="margin-bottom:4px">Pick a day <span style="opacity:.7">· times in your local time</span></div>
+      <div id="cal-days-${listingId}" class="row" style="gap:6px;flex-wrap:wrap">${days.map((k, i) => `<button class="btn ${i === 0 ? '' : 'secondary'}" style="width:auto;padding:6px 10px" data-day="${k}" onclick="pickDay('${listingId}','${k}')">${new Date(k + 'T00:00:00').toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' })}</button>`).join('')}</div>
+      <div id="cal-times-${listingId}" style="margin-top:8px"></div></div>`;
+    pickDay(listingId, days[0]);
+  } catch (e) { box.innerHTML = `<div class="hint" style="margin-top:8px">${esc(e.message)}</div>`; box.dataset.open = ''; }
+}
+function pickDay(listingId, key) {
+  const byDay = (S._slotsByDay || {})[listingId] || {};
+  const days = document.getElementById('cal-days-' + listingId);
+  if (days) days.querySelectorAll('button').forEach((/** @type {any} */ b) => { b.className = (b.dataset.day === key ? 'btn' : 'btn secondary'); });
+  const t = document.getElementById('cal-times-' + listingId); if (!t) return;
+  const slots = byDay[key] || [];
+  t.innerHTML = '<div class="row" style="gap:6px;flex-wrap:wrap">' + slots.map((/** @type {any} */ s) =>
+    `<button class="btn secondary" style="width:auto;padding:6px 10px" onclick="bookAstro('${s.id}',this)">${new Date(s.startsAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} · ${s.durationMin}m</button>`).join('') + '</div>';
 }
 async function bookAstro(slotId, btn) {
   if (btn) btn.disabled = true;
