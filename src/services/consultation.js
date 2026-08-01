@@ -13,6 +13,12 @@ const Order = require('../models/Order');
 const Session = require('../models/Session');
 const Slot = require('../models/ConsultantSlot');
 
+// In-app notify (best-effort; never blocks a booking transition). Lazy require avoids a cycle.
+const notify = (/** @type {any} */ uid, /** @type {any} */ n) => {
+  try { return /** @type {any} */ (require('../routes-notifications')).deliverNotification(uid, n).catch(() => {}); }
+  catch { return Promise.resolve(); }
+};
+
 /** Partner categories that are bookable consultations. */
 const CONSULT_CATEGORIES = ['coach', 'counselor', 'astrologer', 'lawyer', 'financial_advisor', 'fitness', 'nutritionist'];
 
@@ -54,6 +60,7 @@ async function bookSlot({ userId, listing, partner, slot }) {
       orderId: order._id, slotId: slot._id, partnerId: partner._id, userId,
       status: 'scheduled', createdAt: new Date()
     });
+    notify(userId, { type: 'appointment', severity: 'info', title: 'Appointment booked 🗓️', body: `Your ${listing.title || 'consultation'} with ${partner.name || 'your consultant'} is booked. See it under My appointments.` });
     return { order, session };
   } catch (err) {
     await market.atomicUpdate(Slot, { _id: slot._id }, { $set: { status: 'open' } });   // roll back
@@ -69,6 +76,7 @@ async function startSession(session) {
   if (!order || order.status !== 'paid') throw new Error('Booking is not paid yet');
   await market.transition(order, 'confirmed');
   await Session.findByIdAndUpdate(session._id, { status: 'active', startedAt: new Date() });
+  notify(session.userId, { type: 'appointment', severity: 'info', title: 'Your session is starting 📞', body: 'Your consultant has started the session. Join from My appointments.' });
   return { ...session, status: 'active' };
 }
 
@@ -84,6 +92,7 @@ async function endSession(session) {
     ? Math.max(1, Math.round((endedAt.getTime() - new Date(session.startedAt).getTime()) / 60000))
     : null;
   await Session.findByIdAndUpdate(session._id, { status: 'ended', endedAt, actualMinutes });
+  notify(session.userId, { type: 'appointment', severity: 'info', title: 'Session ended', body: 'Your session has ended. Confirm in My appointments to release the payment to your consultant.' });
   return { ...session, status: 'ended', endedAt, actualMinutes };
 }
 
@@ -99,6 +108,7 @@ async function cancelBooking(session) {
   }
   await market.atomicUpdate(Slot, { _id: session.slotId }, { $set: { status: 'open', orderId: null } });
   await Session.findByIdAndUpdate(session._id, { status: 'cancelled' });
+  notify(session.userId, { type: 'appointment', severity: 'info', title: 'Appointment cancelled', body: 'Your appointment was cancelled and the payment refunded.' });
   return { ...session, status: 'cancelled' };
 }
 
