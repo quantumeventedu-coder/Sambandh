@@ -2331,6 +2331,7 @@ async function renderFindPros() {
     <div class="field"><input id="pro-city" aria-label="City filter" placeholder="Filter by city (optional)" onchange="if(S._proCat)loadPros()"/></div>
     <div id="pro-results"><div class="empty">Pick a category above.</div></div></div>`;
   S._proCat = '';
+  if (S._pendingProCat) { const c = S._pendingProCat; S._pendingProCat = null; proCat(c); }   // arrived from a "Browse by need" tile
 }
 function proCat(c) {
   S._proCat = c;
@@ -3537,9 +3538,20 @@ function svcPrice(l) { if (l.billing === 'per_minute' && l.ratePerMinuteCHF) ret
 async function renderServices() {
   ensureServicesCss();
   screen.innerHTML = `<div class="section-pad">
-    <h1>Your services</h1>
-    <p class="sub">Trust, verification, your private document vault, and things worth your time.</p>
+    <div style="display:inline-flex;align-items:center;gap:10px;color:var(--sindoor);font-size:12px;font-weight:800;letter-spacing:.16em;text-transform:uppercase"><span style="width:28px;height:1px;background:currentColor;opacity:.75"></span>Trust-first marketplace</div>
+    <h1 style="margin:.12em 0 2px">Services</h1>
+    <p class="sub">One verified place for your whole relationship journey — professionals, gifts, verification, and your private vault.</p>
+    <div class="row" style="gap:8px;margin:12px 0 8px"><input aria-label="Search professionals" id="svc-search" placeholder="Search professionals — counsellor, astrologer, lawyer…" style="flex:1" onkeydown="if(event.key==='Enter')nav('#/find')"/><button class="btn" style="width:auto" onclick="nav('#/find')">Search</button></div>
     <div id="svc-trust" class="card"><div class="empty">Loading your Trust Score…</div></div>
+    <h2 class="svc-h">Why book on Sambandh</h2>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:4px">
+      <div class="card" style="margin:0"><b>Verified professionals</b><div class="hint">Gov-ID &amp; licence checked</div></div>
+      <div class="card" style="margin:0"><b>Secure payments</b><div class="hint">UPI, cards &amp; instant refunds</div></div>
+      <div class="card" style="margin:0"><b>Free reschedule</b><div class="hint">Move a session before it starts</div></div>
+      <div class="card" style="margin:0"><b>Lakshan-scored</b><div class="hint">Honesty signal on every pro</div></div>
+    </div>
+    <h2 class="svc-h">Browse by need</h2>
+    <div class="row" style="gap:6px;flex-wrap:wrap;margin-bottom:6px">${CONSULT_CATS.map(([c, l]) => `<button class="btn secondary" style="width:auto;padding:6px 12px" onclick="S._pendingProCat='${c}';nav('#/find')">${l}</button>`).join('')}</div>
     <div class="card" style="cursor:pointer" onclick="nav('#/shop')"><div class="row" style="justify-content:space-between;align-items:center">
       <div><b>Shop &amp; Gifts 🛍️</b><div class="hint">Real products from verified partners — buy for yourself, or gift a match privately.</div></div>
       <span aria-hidden="true" style="font-size:20px">→</span></div></div>
