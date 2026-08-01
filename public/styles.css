@@ -1,30 +1,35 @@
 /* Sambandh web app — brand system from the build reference */
 
 :root {
-  --sindoor: #993556;
-  --sindoor-deep: #4B1528;
-  --rose: #D4537E;
-  --rose-soft: #FBEAF0;
-  --haldi: #FAC775;
-  --haldi-deep: #854F0B;
-  --haldi-soft: #FAEEDA;
-  --forest: #085041;
-  --forest-soft: #E1F5EE;
-  --sand: #F1EFE8;
-  --sand-mid: #D3D1C7;
-  --ink: #2C2C2A;
-  --ink-mid: #5F5E5A;
-  --ink-soft: #6E6D66;   /* darkened to clear WCAG 4.5:1 on --sand/white (C-8) */
+  /* Redesign system (2026-08): warm cream ground, deep-maroon accent, editorial serif.
+     Token NAMES are unchanged so every component re-skins at once; contrast preserved. */
+  --sindoor: #7A1F2B;
+  --sindoor-deep: #5A1420;
+  --rose: #9B4A57;
+  --rose-soft: #F2E5E2;
+  --haldi: #D9B26A;
+  --haldi-deep: #8A6A2A;
+  --haldi-soft: #F5EAD6;
+  --forest: #256B5C;
+  --forest-soft: #DEEDE8;
+  --sand: #F4EFE3;       /* light warm surface (kept light so --ink-soft clears 4.5:1) */
+  --sand-mid: #E3DCCF;   /* deeper cream page ground */
+  --ink: #241A16;
+  --ink-mid: #5F564C;
+  --ink-soft: #6E6D66;   /* darkened to clear WCAG 4.5:1 on --sand/white (C-8) — do not regress */
   --white: #FFFFFF;
   --danger: #A32D2D;
   --anon: #3C3489;
   --anon-soft: #EEEDFE;
+  /* Redesign typography: editorial serif display + humanist sans body. */
+  --serif: 'Cormorant Garamond', serif;
+  --sans: 'Manrope', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
 html, body { height: 100%; }
 body {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-family: var(--sans);
   background: var(--sand-mid);
   color: var(--ink);
   font-size: 15px;
@@ -46,7 +51,7 @@ body {
 #screen { flex: 1; overflow-y: auto; padding-bottom: 76px; }
 #screen.no-tabs { padding-bottom: 0; }
 
-.wordmark { font-family: Georgia, 'Times New Roman', serif; font-weight: 700; color: var(--sindoor-deep); }
+.wordmark { font-family: var(--serif); font-weight: 700; color: var(--sindoor-deep); }
 .wordmark.light { color: var(--rose-soft); }
 
 /* ---- Header ---- */
@@ -83,7 +88,7 @@ body {
 #tabbar button.active { opacity: 1; color: var(--sindoor); }
 
 /* ---- Typography ---- */
-h1 { font-size: 24px; color: var(--sindoor-deep); margin-bottom: 4px; font-family: Georgia, serif; }
+h1 { font-size: 24px; color: var(--sindoor-deep); margin-bottom: 4px; font-family: var(--serif); }
 h2 { font-size: 17px; color: var(--sindoor-deep); margin: 18px 0 8px; }
 .sub { color: var(--ink-soft); font-size: 13px; margin-bottom: 16px; }
 .section-pad { padding: 20px 18px; }
@@ -187,7 +192,7 @@ h2 { font-size: 17px; color: var(--sindoor-deep); margin: 18px 0 8px; }
    fails to load, so a card never shows a broken-image icon. */
 .pcard .pcard-ini {
   position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
-  font-family: Georgia, serif; font-weight: 700; font-size: 128px; line-height: 1;
+  font-family: var(--serif); font-weight: 700; font-size: 128px; line-height: 1;
   color: rgba(255,255,255,0.32); user-select: none;
 }
 /* Initial that replaces a broken avatar <img> (see imgFail in app.js). */
@@ -206,7 +211,7 @@ h2 { font-size: 17px; color: var(--sindoor-deep); margin: 18px 0 8px; }
 /* ---- Stats ---- */
 .stat-row { display: flex; gap: 10px; margin-bottom: 12px; }
 .stat { flex: 1; background: var(--white); border: 1px solid var(--sand-mid); border-radius: 12px; padding: 12px 8px; text-align: center; }
-.stat b { display: block; font-size: 22px; color: var(--sindoor-deep); font-family: Georgia, serif; }
+.stat b { display: block; font-size: 22px; color: var(--sindoor-deep); font-family: var(--serif); }
 .stat span { font-size: 10.5px; color: var(--ink-soft); font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; }
 
 /* ---- Trait bars ---- */
@@ -259,7 +264,7 @@ h2 { font-size: 17px; color: var(--sindoor-deep); margin: 18px 0 8px; }
 .karma-hero.good { background: var(--forest-soft); }
 .karma-hero.warn { background: var(--haldi-soft); }
 .karma-hero.bad { background: #FCEBEB; }
-.karma-hero b { font-size: 46px; font-family: Georgia, serif; color: var(--sindoor-deep); display: block; line-height: 1.1; }
+.karma-hero b { font-size: 46px; font-family: var(--serif); color: var(--sindoor-deep); display: block; line-height: 1.1; }
 .karma-hero span { font-size: 13px; font-weight: 600; }
 .karma-hero.good span { color: var(--forest); }
 .karma-hero.warn span { color: var(--haldi-deep); }
@@ -277,7 +282,7 @@ h2 { font-size: 17px; color: var(--sindoor-deep); margin: 18px 0 8px; }
 
 /* ---- Compatibility ---- */
 .compat-score { text-align: center; padding: 10px 0 14px; }
-.compat-score b { font-size: 46px; font-family: Georgia, serif; display: block; line-height: 1.1; }
+.compat-score b { font-size: 46px; font-family: var(--serif); display: block; line-height: 1.1; }
 .compat-score span { font-size: 13px; font-weight: 600; }
 .kv { display: flex; justify-content: space-between; padding: 8px 2px; border-bottom: 1px solid var(--sand); font-size: 13.5px; }
 .kv:last-child { border-bottom: none; }
@@ -368,7 +373,7 @@ h2 { font-size: 17px; color: var(--sindoor-deep); margin: 18px 0 8px; }
 .dd { position: relative; color: #f3e9ec; min-height: 100dvh; padding: 16px 18px 116px;
   background: radial-gradient(70% 55% at 50% 34%, #2a1810 0%, #160c0a 46%, #0c0608 100%); }
 .dd-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
-.dd-name { font-family: Georgia, serif; font-size: 25px; color: #fff; }
+.dd-name { font-family: var(--serif); font-size: 25px; color: #fff; }
 .dd-name .likes { font-size: 11px; font-weight: 800; background: var(--haldi); color: var(--sindoor-deep); padding: 3px 9px; border-radius: 8px; vertical-align: middle; margin-left: 6px; }
 .dd-sub { color: #cbb4bd; font-size: 13px; margin-top: 3px; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
 .dd-ver { color: #8fe9b4; background: rgba(31,122,77,.22); border: 1px solid rgba(120,240,140,.4); border-radius: 99px; font-size: 11px; font-weight: 700; padding: 3px 10px; }
@@ -378,11 +383,11 @@ h2 { font-size: 17px; color: var(--sindoor-deep); margin: 18px 0 8px; }
 .dd-figure { position: relative; width: min(300px, 82%); aspect-ratio: 3/4; border-radius: 20px; overflow: hidden;
   box-shadow: 0 26px 60px rgba(0,0,0,.6), 0 0 46px rgba(243,193,75,.22); border: 1px solid rgba(243,193,75,.34); order: -1; cursor: pointer; }
 .dd-figure img { width: 100%; height: 100%; object-fit: cover; }
-.dd-figure .ini { position: absolute; inset: 0; display: grid; place-items: center; font-family: Georgia, serif; font-size: 96px; color: rgba(255,255,255,.4); background: linear-gradient(160deg, #3a1830, #1a0f24); }
+.dd-figure .ini { position: absolute; inset: 0; display: grid; place-items: center; font-family: var(--serif); font-size: 96px; color: rgba(255,255,255,.4); background: linear-gradient(160deg, #3a1830, #1a0f24); }
 .dd-facets { display: flex; flex-direction: column; gap: 10px; width: 100%; max-width: 520px; }
 .facet { background: linear-gradient(155deg, rgba(60,34,18,.5), rgba(14,8,6,.6)); border: 1px solid rgba(243,193,75,.32); border-radius: 14px; padding: 12px 15px; }
 .facet .lab { color: var(--haldi); font-size: 9.5px; font-weight: 800; letter-spacing: .14em; text-transform: uppercase; }
-.facet h4 { font-family: Georgia, serif; color: #fff; font-size: 16px; margin: 4px 0 3px; line-height: 1.15; }
+.facet h4 { font-family: var(--serif); color: #fff; font-size: 16px; margin: 4px 0 3px; line-height: 1.15; }
 .facet p { color: #c9b1bb; font-size: 12.5px; line-height: 1.4; margin: 0; }
 .facet.locked { border-style: dashed; text-align: center; }
 .facet.locked .up { display: block; width: 100%; margin-top: 10px; background: linear-gradient(135deg, #ffd97a, var(--haldi)); color: var(--sindoor-deep); font-weight: 800; font-size: 12px; border: none; border-radius: 12px; padding: 9px 12px; cursor: pointer; }
@@ -436,7 +441,7 @@ a { color: var(--sindoor); }
   .welcome-panel { background: rgba(255,255,255,.09); border: 1px solid rgba(255,255,255,.2);
     border-radius: 24px; padding: 36px 32px; backdrop-filter: blur(10px); text-align: center;
     box-shadow: 0 24px 60px rgba(0,0,0,.28); }
-  .welcome-panel .wp-h { display: block; font-family: Georgia, 'Times New Roman', serif;
+  .welcome-panel .wp-h { display: block; font-family: var(--serif);
     font-size: 23px; margin-bottom: 22px; color: #fff; }
   .welcome-panel .btn { width: 100%; justify-content: center; }
 
@@ -456,7 +461,7 @@ a { color: var(--sindoor); }
   body.with-tabs #tabbar::before {
     content: 'sambandh';
     position: absolute; top: 20px; left: 24px;
-    font-family: Georgia, 'Times New Roman', serif; font-weight: 700;
+    font-family: var(--serif); font-weight: 700;
     font-size: 27px; color: var(--sindoor-deep);
   }
   body.with-tabs #tabbar button {
@@ -894,7 +899,7 @@ button:focus:not(:focus-visible) { outline: none; }
    --------------------------------------------------------------------- */
 /* Onboarding pay — the price is the hero */
 .price-hero { background: var(--rose-soft); border-color: var(--rose, #F3C6D5); padding: var(--sp-8) var(--sp-6); }
-.price-big { font-family: Georgia, serif; font-size: 52px; line-height: 1; font-weight: 700; color: var(--sindoor-deep); letter-spacing: -0.5px; }
+.price-big { font-family: var(--serif); font-size: 52px; line-height: 1; font-weight: 700; color: var(--sindoor-deep); letter-spacing: -0.5px; }
 .price-per { margin-top: var(--sp-2); font-size: 13.5px; color: var(--sindoor, #993556); letter-spacing: .2px; }
 .price-approx { margin-top: var(--sp-2); font-size: 12.5px; color: var(--ink-soft); }
 .trust-points { list-style: none; margin: var(--sp-5) 0 0; padding: 0; text-align: left; display: inline-block; }
@@ -914,10 +919,10 @@ button:focus:not(:focus-visible) { outline: none; }
 .plan-card.popular { border-color: rgba(153,53,86,0.28); box-shadow: var(--e-2); }
 .plan-card.current { border-color: var(--forest); border-width: 1.5px; }
 .plan-badge { position: absolute; top: -10px; left: var(--sp-6); background: linear-gradient(135deg, #ffd97a, var(--haldi)); color: var(--sindoor-deep); font-size: 10.5px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; padding: 3px 11px; border-radius: var(--r-pill); }
-.plan-name { font-family: Georgia, serif; font-size: 19px; font-weight: 700; color: var(--sindoor-deep); }
+.plan-name { font-family: var(--serif); font-size: 19px; font-weight: 700; color: var(--sindoor-deep); }
 .plan-tagline { margin-top: 3px; font-size: 12.5px; color: var(--ink-soft); }
 .plan-price { margin: var(--sp-4) 0 var(--sp-2); display: flex; align-items: baseline; gap: 6px; }
-.plan-price .pp-amt { font-family: Georgia, serif; font-size: 34px; font-weight: 700; color: var(--ink); letter-spacing: -0.5px; }
+.plan-price .pp-amt { font-family: var(--serif); font-size: 34px; font-weight: 700; color: var(--ink); letter-spacing: -0.5px; }
 .plan-price .pp-per { font-size: 13px; color: var(--ink-soft); }
 .plan-features { list-style: none; margin: var(--sp-3) 0 var(--sp-5); padding: 0; }
 .plan-features li { position: relative; padding-left: 22px; margin: 7px 0; font-size: 13px; color: var(--ink-mid); line-height: 1.5; }
@@ -932,5 +937,5 @@ button:focus:not(:focus-visible) { outline: none; }
 .co-loading { color: var(--ink-soft); font-size: 13px; text-align: center; }
 .co-row { display: flex; justify-content: space-between; align-items: baseline; gap: var(--sp-4); font-size: 13.5px; color: var(--ink-mid); margin: 6px 0; }
 .co-row.co-muted { color: var(--ink-soft); }
-.co-row.co-total { margin-top: var(--sp-3); padding-top: var(--sp-3); border-top: 1px solid var(--hair); font-family: Georgia, serif; font-size: 18px; font-weight: 700; color: var(--sindoor-deep); }
+.co-row.co-total { margin-top: var(--sp-3); padding-top: var(--sp-3); border-top: 1px solid var(--hair); font-family: var(--serif); font-size: 18px; font-weight: 700; color: var(--sindoor-deep); }
 .co-note { margin-top: var(--sp-2); font-size: 11.5px; color: var(--ink-soft); text-align: center; }
