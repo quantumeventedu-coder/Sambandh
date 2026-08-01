@@ -17,6 +17,7 @@ const Listing = require('./models/Listing');
 const Order = require('./models/Order');
 const Payment = require('./models/Payment');
 const User = require('./models/User');
+const Review = require('./models/Review');
 const market = require('./services/marketplace');
 const { sharesActiveMatch } = require('./services/verification-service');
 
@@ -218,6 +219,19 @@ router.post('/orders/:id/review', requireAuth, async (req, res, next) => {
     const review = await market.addReview({ userId: req.userId, order, rating, text: req.body && req.body.text });
     res.status(201).json({ review: { id: review._id, rating: review.rating, text: review.text } });
   } catch (err) { return res.status(409).json({ error: msg(err) }); }
+});
+
+// Public: read a partner's verified-purchase reviews (newest first).
+router.get('/partners/:id/reviews', requireAuth, async (req, res, next) => {
+  try {
+    const reviews = await Review.find({ partnerId: req.params.id }).sort({ createdAt: -1 }).limit(50).lean();
+    const out = [];
+    for (const rv of reviews) {
+      const u = await User.findById(rv.userId).select('profile.firstName').lean();
+      out.push({ id: rv._id, rating: rv.rating, text: rv.text || '', by: (u && u.profile && u.profile.firstName) || 'Verified buyer', verified: !!rv.verifiedPurchase, at: rv.createdAt });
+    }
+    res.json({ reviews: out, count: out.length });
+  } catch (err) { next(err); }
 });
 
 // ==== Gift recipient: accept (with a PRIVATE address) or decline =============
