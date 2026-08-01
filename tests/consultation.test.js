@@ -120,6 +120,21 @@ describe('access control', () => {
   });
 });
 
+describe('booking notifications', () => {
+  const Notification = require('../src/models/Notification');
+  const settle = () => new Promise(r => setTimeout(r, 80));   // best-effort notify is fire-and-forget
+  test('booking then cancelling both notify the buyer', async () => {
+    const { slot } = await seedConsultant();
+    const buyer = await mkUser();
+    const bRes = await request(app).post('/api/consultation/book').set(auth(buyer)).send({ slotId: String(slot._id) });
+    await settle();
+    expect(await Notification.countDocuments({ userId: buyer._id, type: 'appointment' })).toBeGreaterThanOrEqual(1);
+    await request(app).post(`/api/consultation/sessions/${bRes.body.session.id}/cancel`).set(auth(buyer));
+    await settle();
+    expect(await Notification.countDocuments({ userId: buyer._id, type: 'appointment' })).toBeGreaterThanOrEqual(2);
+  });
+});
+
 describe('my appointments (enriched sessions)', () => {
   test('GET /sessions returns consultant, offering, scheduled time, price + order status', async () => {
     const { slot } = await seedConsultant();
