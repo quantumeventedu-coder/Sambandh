@@ -224,6 +224,12 @@ function connectSocket() {
     toast('Identities revealed');
     if (location.hash === '#/chat/' + chatId) renderChat(chatId);
   });
+  // Consultation booking-scoped chat
+  S.socket.on('session_message', ({ sessionId, text }) => {
+    if (S._sessionId === sessionId && location.hash === '#/session/' + sessionId) {
+      const box = document.getElementById('smsgs'); if (box) { box.insertAdjacentHTML('beforeend', sMsgHtml({ mine: false, text })); box.scrollTop = box.scrollHeight; }
+    } else { toast('New consultation message'); }
+  });
   // Couple live-location sharing
   S.socket.on('location_share_request', ({ shareId }) => { toast('📍 Live location request'); promptLiveShareRequest(shareId); });
   S.socket.on('location_share_active', ({ shareId }) => { if (location.hash === '#/live/' + shareId) refreshPeer(shareId); else toast('📍 Live location is on'); });
@@ -315,6 +321,7 @@ async function route() {
     case 'orders': return renderOrders();
     case 'appointments': return renderAppointments();
     case 'prodash': return renderProDash();
+    case 'session': return renderSessionThread(parts[1]);
     case 'find': return renderFindPros();
     case 'pro': return renderProProfile(parts[1]);
     case 'live': return renderLiveLocation(parts[1]);
@@ -2265,6 +2272,7 @@ async function loadAppointments() {
       const when = s.scheduledFor ? new Date(s.scheduledFor).toLocaleString([], { weekday: 'short', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—';
       const st = s.status === 'active' ? 'in progress' : (s.status === 'ended' && s.orderStatus === 'completed' ? 'completed' : s.status);
       const acts = [];
+      if (['scheduled', 'active', 'ended'].includes(s.status)) acts.push(`<button class="btn secondary" style="width:auto" onclick="nav('#/session/${s.id}')">Message</button>`);
       if (s.status === 'scheduled') acts.push(`<button class="btn secondary" style="width:auto" onclick="apptCancel('${s.id}')">Cancel &amp; refund</button>`);
       if (s.status === 'ended' && s.orderStatus === 'fulfilled') acts.push(`<button class="btn" style="width:auto" onclick="apptComplete('${s.orderId}')">Confirm &amp; release payment</button>`);
       if (s.status === 'ended' && s.orderStatus === 'completed') acts.push(`<button class="btn secondary" style="width:auto" onclick="reviewModal('${s.orderId}', loadAppointments)">Leave a review</button>`);
@@ -2484,6 +2492,7 @@ async function loadProAppts() {
       const acts = [];
       if (a.status === 'scheduled' && a.orderStatus === 'paid') acts.push(`<button class="btn" style="width:auto" onclick="proSession('${a.id}','start')">Start session</button>`);
       if (a.status === 'active') acts.push(`<button class="btn" style="width:auto" onclick="proSession('${a.id}','end')">End session</button>`);
+      if (['scheduled', 'active', 'ended'].includes(a.status)) acts.push(`<button class="btn secondary" style="width:auto" onclick="nav('#/session/${a.id}')">Message</button>`);
       return `<div class="card"><div class="row" style="justify-content:space-between;align-items:flex-start">
         <div><b>${esc(a.client)}</b><div class="hint">${esc(when)} · <b>${esc(a.status)}</b></div></div>
         <div style="text-align:right"><b>CHF ${a.payoutCHF ?? '—'}</b><div class="hint">your payout</div></div></div>
@@ -2499,6 +2508,29 @@ async function proSaveProfile() {
   const langs = _v('pf-langs').split(',').map(s => s.trim()).filter(Boolean);
   try { await api('/pro/me', { method: 'PATCH', body: { bio: _v('pf-bio'), city: _v('pf-city'), experienceYears: Number(_v('pf-exp')) || undefined, languages: langs } }); toast('Profile saved ✓'); }
   catch (e) { toast(e.message); }
+}
+// ===== Booking-scoped consultation chat =====
+function sMsgHtml(m) { return `<div class="bubble ${m.mine ? 'me' : 'them'}">${esc(m.text)}</div>`; }
+async function renderSessionThread(id) {
+  S._sessionId = id;
+  screen.innerHTML = `<div class="chat-screen">
+    <div class="chat-head"><button class="back" onclick="history.back()">←</button><div class="who"><b>Consultation chat</b><small>messages for this booking</small></div></div>
+    <div class="chat-msgs" id="smsgs"></div>
+    <div class="chat-input"><input aria-label="Message" id="smsg-input" placeholder="Type a message…" maxlength="4000" onkeydown="if(event.key==='Enter')sendSessionMsg()"/>
+    <button aria-label="Send message" onclick="sendSessionMsg()" style="display:flex;align-items:center;justify-content:center">${ic('send', 'ic-lg')}</button></div></div>`;
+  try {
+    const r = await api('/consultation/sessions/' + id + '/thread');
+    const box = document.getElementById('smsgs');
+    if (box) { box.innerHTML = (r.messages || []).map(sMsgHtml).join('') || '<div class="bubble sys">Start the conversation.</div>'; box.scrollTop = box.scrollHeight; }
+  } catch (e) { toast(e.message); }
+}
+async function sendSessionMsg() {
+  const inp = document.getElementById('smsg-input'); const text = (inp && inp.value || '').trim(); if (!text) return;
+  if (inp) inp.value = '';
+  try {
+    const r = await api('/consultation/sessions/' + S._sessionId + '/thread', { method: 'POST', body: { text } });
+    const box = document.getElementById('smsgs'); if (box) { box.insertAdjacentHTML('beforeend', sMsgHtml(r.message)); box.scrollTop = box.scrollHeight; }
+  } catch (e) { toast(e.message); }
 }
 async function askAstro() {
   const inp = $('#astro-q'); const q = (inp.value || '').trim(); if (!q) return;
