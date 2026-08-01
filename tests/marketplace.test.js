@@ -199,6 +199,12 @@ describe('routes: full escrow lifecycle end-to-end', () => {
     // second review on same order is rejected
     const rev2 = await request(app).post(`/api/marketplace/orders/${orderId}/review`).set(auth(buyer)).send({ rating: 1 });
     expect(rev2.status).toBe(409);
+    // reviews are publicly readable per partner
+    const rd = await request(app).get(`/api/marketplace/partners/${partnerId}/reviews`).set(auth(buyer));
+    expect(rd.status).toBe(200);
+    expect(rd.body.reviews.length).toBe(1);
+    expect(rd.body.reviews[0].rating).toBe(5);
+    expect(rd.body.reviews[0].verified).toBe(true);
   });
 
   test('another user cannot touch my order; staff endpoints need market:manage', async () => {

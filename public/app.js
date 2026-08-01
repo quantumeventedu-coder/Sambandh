@@ -2248,6 +2248,7 @@ async function loadAppointments() {
       const acts = [];
       if (s.status === 'scheduled') acts.push(`<button class="btn secondary" style="width:auto" onclick="apptCancel('${s.id}')">Cancel &amp; refund</button>`);
       if (s.status === 'ended' && s.orderStatus === 'fulfilled') acts.push(`<button class="btn" style="width:auto" onclick="apptComplete('${s.orderId}')">Confirm &amp; release payment</button>`);
+      if (s.status === 'ended' && s.orderStatus === 'completed') acts.push(`<button class="btn secondary" style="width:auto" onclick="reviewModal('${s.orderId}', loadAppointments)">Leave a review</button>`);
       return `<div class="card"><div class="row" style="justify-content:space-between;align-items:flex-start">
         <div><b>${esc(s.title)}</b> <span class="hint">· ${esc(s.partnerName)}</span>
           <div class="hint">${esc(when)}${s.durationMin ? ' · ' + s.durationMin + 'm' : ''} · <b>${esc(st)}</b></div></div>
@@ -2291,8 +2292,47 @@ async function renderProProfile(id) {
       ${offerings.length ? offerings.map((/** @type {any} */ o) => `<div class="card"><div class="row" style="justify-content:space-between;align-items:flex-start">
         <div><b>${esc(o.listing.title || 'Consultation')}</b><div class="hint">${o.openSlots} open slot${o.openSlots === 1 ? '' : 's'}${o.listing.durationMin ? ' · ' + o.listing.durationMin + 'm' : ''}</div></div>
         <div style="text-align:right"><b>${esc(svcPrice(o.listing))}</b><div><button class="btn" style="width:auto;padding:6px 12px;margin-top:6px" onclick="astroSlots('${o.listing.id}')">Book</button></div></div>
-        </div><div id="aslots-${o.listing.id}"></div></div>`).join('') : '<div class="empty">No offerings available right now.</div>'}`;
+        </div><div id="aslots-${o.listing.id}"></div></div>`).join('') : '<div class="empty">No offerings available right now.</div>'}
+      <div id="pro-reviews" style="margin-top:8px"></div>`;
   } catch (e) { const el = document.getElementById('pro'); if (el) el.innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+  loadProReviews(id);
+}
+async function loadProReviews(id) {
+  const el = document.getElementById('pro-reviews'); if (!el) return;
+  try {
+    const r = await api('/marketplace/partners/' + id + '/reviews');
+    const list = r.reviews || [];
+    if (!list.length) { el.innerHTML = ''; return; }
+    el.innerHTML = `<h2 style="font-size:1.05rem;margin:16px 0 8px">Reviews (${list.length})</h2>` + list.map((/** @type {any} */ v) => `<div class="card">
+      <div class="row" style="justify-content:space-between"><b>${'★'.repeat(v.rating)}<span style="color:#bbb">${'★'.repeat(5 - v.rating)}</span></b>
+      <span class="hint">${esc(v.by)}${v.verified ? ' · verified' : ''}</span></div>
+      ${v.text ? `<div class="hint" style="margin-top:4px">${esc(v.text)}</div>` : ''}</div>`).join('');
+  } catch { /* reviews are non-critical */ }
+}
+// ===== Leave a review (verified purchase, after a completed order) =====
+function reviewModal(orderId, cb) {
+  S._rv = { orderId, stars: 5, cb };
+  openModal(reviewModalHtml());
+}
+function reviewModalHtml() {
+  const s = S._rv.stars;
+  return `<h2 style="margin-top:0">Rate your experience</h2>
+    <div style="font-size:30px;user-select:none">${[1, 2, 3, 4, 5].map(i => `<span onclick="rvSet(${i})" style="cursor:pointer;color:${i <= s ? '#e8b84b' : '#bbb'}">★</span>`).join('')}</div>
+    <div class="field mt"><textarea id="rv-text" aria-label="Review" placeholder="Share a few words (optional)" maxlength="2000" rows="3"></textarea></div>
+    <button class="btn mt" onclick="rvSubmit()">Submit review</button>
+    <button class="btn secondary" onclick="closeModal()">Cancel</button>`;
+}
+function rvSet(n) {
+  const t = document.getElementById('rv-text'); const keep = t ? t.value : '';
+  S._rv.stars = n; openModal(reviewModalHtml());
+  const t2 = document.getElementById('rv-text'); if (t2) t2.value = keep;
+}
+async function rvSubmit() {
+  const t = document.getElementById('rv-text'); const text = t ? t.value : '';
+  try {
+    await api('/marketplace/orders/' + S._rv.orderId + '/review', { method: 'POST', body: { rating: S._rv.stars, text } });
+    closeModal(); toast('Thanks for your review ✓'); if (S._rv.cb) S._rv.cb();
+  } catch (e) { toast(e.message); }
 }
 async function askAstro() {
   const inp = $('#astro-q'); const q = (inp.value || '').trim(); if (!q) return;
@@ -3441,6 +3481,7 @@ async function loadOrders() {
       const gift = o.giftForUserId ? ` · gift (${esc(o.giftStatus)})` : '';
       const acts = [];
       if (o.status === 'fulfilled') acts.push(`<button class="btn" style="width:auto" onclick="orderAction('${o.id}','complete')">Confirm received</button>`);
+      if (o.status === 'completed') acts.push(`<button class="btn secondary" style="width:auto" onclick="reviewModal('${o.id}', loadOrders)">Leave a review</button>`);
       if (['created', 'paid', 'confirmed'].includes(o.status)) acts.push(`<button class="btn secondary" style="width:auto" onclick="orderAction('${o.id}','cancel')">Cancel</button>`);
       return `<div class="card"><div class="row" style="justify-content:space-between;align-items:center">
         <b>${o.kind === 'service' ? 'Service' : 'Product'}</b>${pill(o.status + gift, '#4a4a55')}</div>
