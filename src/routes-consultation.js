@@ -84,10 +84,33 @@ router.post('/book', requireAuth, async (req, res, next) => {
   }
 });
 
-// My sessions.
+// My appointments — enriched with consultant, offering, scheduled time, price, and order status
+// so the client can render a real "My appointments" screen (upcoming / completed / cancelled).
 router.get('/sessions', requireAuth, async (req, res, next) => {
-  try { res.json({ sessions: (await Session.find({ userId: req.userId }).sort({ createdAt: -1 }).limit(100).lean()).map(pubSession) }); }
-  catch (err) { next(err); }
+  try {
+    const sessions = await Session.find({ userId: req.userId }).sort({ createdAt: -1 }).limit(100).lean();
+    const out = [];
+    for (const s of sessions) {
+      const [order, partner, slot] = await Promise.all([
+        Order.findById(s.orderId).lean(),
+        Partner.findById(s.partnerId).select('name category city').lean(),
+        s.slotId ? Slot.findById(s.slotId).lean() : null,
+      ]);
+      const listing = order ? await Listing.findById(order.listingId).select('title').lean() : null;
+      out.push({
+        ...pubSession(s),
+        partnerName: (partner && partner.name) || 'Consultant',
+        category: (partner && partner.category) || null,
+        city: (partner && partner.city) || null,
+        title: (listing && listing.title) || 'Consultation',
+        scheduledFor: (slot && slot.startsAt) || (order && order.scheduledFor) || null,
+        durationMin: (slot && slot.durationMin) || null,
+        amountCHF: order ? order.amountCHF : null,
+        orderStatus: (order && order.status) || null,
+      });
+    }
+    res.json({ sessions: out });
+  } catch (err) { next(err); }
 });
 
 /** Load a session owned by the caller (404 otherwise). @param {any} req @param {any} res */
