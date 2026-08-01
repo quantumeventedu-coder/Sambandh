@@ -2216,10 +2216,15 @@ async function astroSlots(listingId) {
 async function bookAstro(slotId, btn) {
   if (btn) btn.disabled = true;
   try {
-    await api('/consultation/book', { method: 'POST', body: { slotId } });
-    toast('Session booked ✓ — see it under Chats to confirm payment.');
-    loadAstrologers();
-  } catch (e) { toast(e.message); if (btn) btn.disabled = false; }
+    const r = await api('/consultation/book', { method: 'POST', body: { slotId } });
+    // Pay on the real rail, then confirm via the shared marketplace confirm-payment.
+    await payDirectOrder(r.order, 'marketplace_order', r.listingTitle || 'Consultation', async () => {
+      await api('/marketplace/orders/' + r.marketplaceOrderId + '/confirm-payment', { method: 'POST' });
+      toast('Booked & paid ✓');
+      loadAstrologers();
+    });
+  } catch (e) { toast(e.message); }
+  finally { if (btn) btn.disabled = false; }
 }
 async function askAstro() {
   const inp = $('#astro-q'); const q = (inp.value || '').trim(); if (!q) return;

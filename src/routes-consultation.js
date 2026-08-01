@@ -11,7 +11,6 @@ const { requireAuth } = require('./routes-auth');
 const { requireSuperOrScope } = require('./services/dev-auth');
 const Partner = require('./models/Partner');
 const Listing = require('./models/Listing');
-const Payment = require('./models/Payment');
 const Order = require('./models/Order');
 const Slot = require('./models/ConsultantSlot');
 const Session = require('./models/Session');
@@ -70,16 +69,15 @@ router.post('/book', requireAuth, async (req, res, next) => {
     if (!partner || !partner.active) return res.status(404).json({ error: 'Consultant unavailable' });
 
     const { order, session } = await consult.bookSlot({ userId: req.userId, listing, partner, slot });
-    const payment = await Payment.create({
-      userId: req.userId, purpose: 'marketplace_order', amountCHF: order.amountCHF, currency: 'CHF', status: 'created',
-      metadata: { orderId: String(order._id), sessionId: String(session._id), listingId: String(listing._id) }
+    // Payable order on the REAL rail (dev + Razorpay), like marketplace/gift-pass/verification —
+    // returns { devMode, orderId, key, amount, currency, payment, ... } that payDirectOrder drives.
+    // Pay + confirm via the shared /marketplace/orders/:id/confirm-payment (which capture-gates escrow).
+    const quoted = await /** @type {any} */ (require('./routes-payment')).createQuotedOrder({
+      userId: req.userId, purpose: 'marketplace_order', amountCHF: order.amountCHF, label: listing.title,
+      metadata: { orderId: String(order._id), sessionId: String(session._id), listingId: String(listing._id), partnerId: String(partner._id) },
     });
-    await Order.findByIdAndUpdate(order._id, { paymentId: payment._id });
-    res.status(201).json({
-      session: pubSession(session),
-      order: { id: order._id, amountCHF: order.amountCHF, status: order.status },
-      payment: { id: payment._id, amountCHF: payment.amountCHF, status: payment.status }
-    });
+    await Order.findByIdAndUpdate(order._id, { paymentId: quoted.payment._id });
+    res.status(201).json({ session: pubSession(session), order: quoted, marketplaceOrderId: order._id, listingTitle: listing.title });
   } catch (err) {
     if (/available|taken/i.test(msg(err))) return res.status(409).json({ error: msg(err) });
     next(err);

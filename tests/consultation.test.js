@@ -71,8 +71,8 @@ describe('booking → session → payout lifecycle', () => {
     const buyer = await mkUser();
     const bRes = await request(app).post('/api/consultation/book').set(auth(buyer)).send({ slotId: String(slot._id) });
     expect(bRes.status).toBe(201);
-    const { session: { id: sessionId }, order: { id: orderId }, payment: { id: paymentId } } = bRes.body;
-    expect(bRes.body.order.amountCHF).toBe(300);   // 10/min × 30 min
+    const sessionId = bRes.body.session.id, orderId = bRes.body.marketplaceOrderId, paymentId = bRes.body.order.payment._id;
+    expect(bRes.body.order.amountCHF).toBe(300);   // 10/min × 30 min (payable quoted order)
 
     await Payment.findByIdAndUpdate(paymentId, { status: 'captured' });
     const pay = await request(app).post(`/api/marketplace/orders/${orderId}/confirm-payment`).set(auth(buyer));
@@ -95,7 +95,7 @@ describe('booking → session → payout lifecycle', () => {
     const { slot } = await seedConsultant();
     const buyer = await mkUser();
     const bRes = await request(app).post('/api/consultation/book').set(auth(buyer)).send({ slotId: String(slot._id) });
-    const { session: { id: sessionId }, order: { id: orderId }, payment: { id: paymentId } } = bRes.body;
+    const sessionId = bRes.body.session.id, orderId = bRes.body.marketplaceOrderId, paymentId = bRes.body.order.payment._id;
     await Payment.findByIdAndUpdate(paymentId, { status: 'captured' });
     await request(app).post(`/api/marketplace/orders/${orderId}/confirm-payment`).set(auth(buyer));
     const cancel = await request(app).post(`/api/consultation/sessions/${sessionId}/cancel`).set(auth(buyer));
