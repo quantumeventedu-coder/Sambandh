@@ -314,6 +314,7 @@ async function route() {
     case 'product': return renderProduct(parts[1]);
     case 'orders': return renderOrders();
     case 'appointments': return renderAppointments();
+    case 'pro': return renderProProfile(parts[1]);
     case 'live': return renderLiveLocation(parts[1]);
     case 'redeem': S._pendingGiftCode = parts[1] || ''; return nav('#/services');
     case 'compat': return renderCompat(parts[1]);
@@ -2194,9 +2195,10 @@ async function loadAstrologers() {
     const list = r.results || [];
     if (!list.length) { el.innerHTML = '<div class="empty">Verified astrologers are being onboarded — check back soon.</div>'; return; }
     el.innerHTML = list.map(x => `<div class="card" style="margin:8px 0"><div class="row" style="justify-content:space-between;align-items:flex-start">
-      <div><b>${esc(x.partner.name)}</b>${x.partner.verified ? ' <span class="tag forest">verified</span>' : ''}
+      <div><b style="cursor:pointer" onclick="nav('#/pro/${x.partner.id}')">${esc(x.partner.name)}</b>${x.partner.verified ? ' <span class="tag forest">verified</span>' : ''}
         <div class="hint">${esc(x.listing.title || 'Astrology consultation')}${x.partner.city ? ' · ' + esc(x.partner.city) : ''}</div>
-        ${x.partner.ratingCount ? `<div class="hint">★ ${x.partner.ratingAvg} (${x.partner.ratingCount})</div>` : ''}</div>
+        ${x.partner.ratingCount ? `<div class="hint">★ ${x.partner.ratingAvg} (${x.partner.ratingCount})</div>` : ''}
+        <div><a class="hint" style="cursor:pointer;text-decoration:underline" onclick="nav('#/pro/${x.partner.id}')">View profile →</a></div></div>
       <div style="text-align:right"><b>${esc(svcPrice(x.listing))}</b>
         <div><button class="btn" style="width:auto;padding:6px 12px;margin-top:6px" onclick="astroSlots('${x.listing.id}')">Book</button></div></div>
       </div><div id="aslots-${x.listing.id}"></div></div>`).join('');
@@ -2267,6 +2269,30 @@ async function apptCancel(id) {
 async function apptComplete(orderId) {
   try { await api('/marketplace/orders/' + orderId + '/complete', { method: 'POST' }); toast('Confirmed — payment released'); loadAppointments(); }
   catch (e) { toast(e.message); }
+}
+// ===== Consumer professional profile =====
+function prettyCat(c) { return String(c || '').replace(/_/g, ' ').replace(/\b\w/g, (m) => m.toUpperCase()); }
+async function renderProProfile(id) {
+  screen.innerHTML = `<div class="section-pad"><button class="back" onclick="history.back()">← Back</button><div id="pro"><div class="empty">Loading…</div></div></div>`;
+  try {
+    const { partner, offerings } = await api('/consultation/consultants/' + id);
+    const el = document.getElementById('pro'); if (!el) return;
+    const langs = (partner.languages || []).join(', ');
+    el.innerHTML = `
+      <div class="row" style="gap:14px;align-items:center">
+        ${partner.photoUrl ? `<img alt="" src="${esc(partner.photoUrl)}" style="width:72px;height:72px;border-radius:50%;object-fit:cover" onerror="imgFail(this)"/>` : `<div class="avatar" style="width:72px;height:72px;font-size:26px">${esc((partner.name || '?')[0].toUpperCase())}</div>`}
+        <div><h1 style="margin:0">${esc(partner.name)}${partner.verified ? ' <span class="tag forest">verified</span>' : ''}</h1>
+          <div class="hint">${esc(prettyCat(partner.category))}${partner.city ? ' · ' + esc(partner.city) : ''}${partner.experienceYears ? ' · ' + partner.experienceYears + ' yrs exp' : ''}</div>
+          ${partner.ratingCount ? `<div class="hint">★ ${partner.ratingAvg} (${partner.ratingCount} reviews)</div>` : '<div class="hint">No reviews yet</div>'}</div>
+      </div>
+      ${partner.bio ? `<div class="card" style="margin-top:12px"><p class="hint" style="margin:0">${esc(partner.bio)}</p></div>` : ''}
+      ${langs ? `<div class="hint" style="margin-top:8px">Languages: ${esc(langs)}</div>` : ''}
+      <h2 style="font-size:1.05rem;margin:16px 0 8px">Book a session</h2>
+      ${offerings.length ? offerings.map((/** @type {any} */ o) => `<div class="card"><div class="row" style="justify-content:space-between;align-items:flex-start">
+        <div><b>${esc(o.listing.title || 'Consultation')}</b><div class="hint">${o.openSlots} open slot${o.openSlots === 1 ? '' : 's'}${o.listing.durationMin ? ' · ' + o.listing.durationMin + 'm' : ''}</div></div>
+        <div style="text-align:right"><b>${esc(svcPrice(o.listing))}</b><div><button class="btn" style="width:auto;padding:6px 12px;margin-top:6px" onclick="astroSlots('${o.listing.id}')">Book</button></div></div>
+        </div><div id="aslots-${o.listing.id}"></div></div>`).join('') : '<div class="empty">No offerings available right now.</div>'}`;
+  } catch (e) { const el = document.getElementById('pro'); if (el) el.innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
 }
 async function askAstro() {
   const inp = $('#astro-q'); const q = (inp.value || '').trim(); if (!q) return;
