@@ -1906,7 +1906,7 @@ async function sendReport(userId) {
 
 // ---------------- Chats ----------------
 async function renderChats() {
-  screen.innerHTML = `${headerBar()}<div id="chat-list"><div class="empty">Loading chats…</div></div>`;
+  screen.innerHTML = `${headerBar()}<div class="section-pad" style="padding-top:14px;padding-bottom:0">${pageHead('Verified conversations', 'Chats')}</div><div id="chat-list"><div class="empty">Loading chats…</div></div>`;
   loadNotifCount();
   try {
     const r = await api('/chat');
@@ -2168,7 +2168,7 @@ async function renderCompat(userId) {
 
 // ---------------- Astrology ----------------
 async function renderAstro() {
-  screen.innerHTML = `<div class="section-pad"><h1>Astrology</h1><p class="sub">Your full kundali — computed from real astronomy, read through classical Jyotish.</p><div id="astro-body"><div class="empty">Reading the sky…</div></div></div>`;
+  screen.innerHTML = `<div class="section-pad">${pageHead('Classical Jyotish', 'Astrology', 'Your full kundali — computed from real astronomy, read through classical Jyotish.')}<div id="astro-body"><div class="empty">Reading the sky…</div></div></div>`;
   try {
     const [c, pan, tr] = await Promise.all([api('/astro/chart'), api('/astro/panchang').catch(() => null), api('/astro/transits').catch(() => null)]);
     const body = $('#astro-body');
@@ -2645,10 +2645,14 @@ function catLabel(k) { const c = ROOM_CATS.find(x => x.k === k); return c ? c.la
 // A stable, pleasant hue per room nickname, so each speaker is recognisable in a room.
 function handleHue(s) { let h = 0; for (let i = 0; i < (s || '').length; i++) h = (h * 31 + s.charCodeAt(i)) % 360; return h; }
 
+// Editorial page header (redesign): hairline eyebrow + serif title + subhead. Used across tabs.
+function pageHead(eyebrow, title, sub) {
+  return `<div style="display:inline-flex;align-items:center;gap:10px;color:var(--sindoor);font-size:12px;font-weight:800;letter-spacing:.16em;text-transform:uppercase"><span style="width:28px;height:1px;background:currentColor;opacity:.75"></span>${esc(eyebrow)}</div>
+    <h1 style="margin:.12em 0 2px">${esc(title)}</h1>${sub ? `<p class="sub" style="margin:0 0 12px">${esc(sub)}</p>` : ''}`;
+}
 async function renderCommunity() {
   screen.innerHTML = `<div class="section-pad">
-    <h1 style="margin-bottom:2px">Community</h1>
-    <p class="sub" style="margin:0 0 12px">Anonymous rooms — friends, neighbours, professionals. You post under a room nickname; your identity stays private.</p>
+    ${pageHead('Anonymous & private', 'Community', 'Anonymous rooms — friends, neighbours, professionals. You post under a room nickname; your identity stays private.')}
     <div class="row" style="gap:8px;margin-bottom:12px"><button class="btn" style="width:auto" onclick="toggleRoomForm()">+ Create room</button><button class="btn secondary" style="width:auto" onclick="promptJoinCode()">Join by code</button></div>
     <div id="room-form"></div>
     <input id="room-search" aria-label="Search rooms" placeholder="Search rooms…" oninput="filterRooms()" style="width:100%;margin-bottom:10px"/>
@@ -2799,6 +2803,7 @@ async function renderSettings() {
     const p = u.preferences || {};
     const photo = u.profile?.photos?.find(x => x.isPrimary)?.url || u.profile?.photos?.[0]?.url;
     screen.querySelector('.section-pad').innerHTML = `
+      ${pageHead('Your account', 'Me')}
       <div style="display:flex;gap:14px;align-items:center;margin-bottom:16px">
         <div class="avatar" style="width:64px;height:64px;font-size:26px">${photo ? `<img alt="" src="${esc(photo)}" data-i="${esc((u.profile?.firstName || '?')[0])}" onerror="imgFail(this)"/>` : esc((u.profile?.firstName || '?')[0])}</div>
         <div><b style="font-size:18px">${esc(u.profile?.firstName || '')}, ${u.profile?.age || ''}</b>
