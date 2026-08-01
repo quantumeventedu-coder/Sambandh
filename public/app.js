@@ -314,6 +314,7 @@ async function route() {
     case 'product': return renderProduct(parts[1]);
     case 'orders': return renderOrders();
     case 'appointments': return renderAppointments();
+    case 'prodash': return renderProDash();
     case 'find': return renderFindPros();
     case 'pro': return renderProProfile(parts[1]);
     case 'live': return renderLiveLocation(parts[1]);
@@ -2384,6 +2385,121 @@ async function rvSubmit() {
     closeModal(); toast('Thanks for your review ✓'); if (S._rv.cb) S._rv.cb();
   } catch (e) { toast(e.message); }
 }
+// ===== Professional dashboard (self-serve) =====
+const _v = (/** @type {string} */ id) => { const el = document.getElementById(id); return (el && el.value || '').trim(); };
+async function renderProDash() {
+  screen.innerHTML = `<div class="section-pad"><button class="back" onclick="nav('#/services')">← Services</button>
+    <h1 style="margin:.2em 0">Professional</h1><div id="prodash"><div class="empty">Loading…</div></div></div>`;
+  loadProDash();
+}
+async function loadProDash() {
+  const el = document.getElementById('prodash'); if (!el) return;
+  try {
+    const me = await api('/pro/me');
+    if (!me.partner) {
+      el.innerHTML = `<div class="card"><b>Become a professional</b>
+        <p class="hint">List your consultation service. Applications are reviewed before the verified badge is granted.</p>
+        <div class="field mt"><input id="ap-name" aria-label="Professional name" placeholder="Your professional name"/></div>
+        <div class="field"><select id="ap-cat" aria-label="Category">${CONSULT_CATS.map(([c, l]) => `<option value="${c}">${l}</option>`).join('')}</select></div>
+        <div class="field"><input id="ap-city" aria-label="City" placeholder="City"/></div>
+        <div class="field"><textarea id="ap-bio" aria-label="Short bio" placeholder="Short bio — what you offer" rows="3"></textarea></div>
+        <button class="btn mt" onclick="proApply()">Apply</button></div>`;
+      return;
+    }
+    S._proMe = me; const p = me.partner;
+    const vb = p.verified ? '<span class="tag forest">verified</span>' : `<span class="tag" style="background:#8a6a10;color:#fff">${esc(p.verificationStatus)}</span>`;
+    el.innerHTML = `
+      <div class="card"><b style="font-size:16px">${esc(p.name)}</b> ${vb}
+        <div class="hint">${esc(prettyCat(p.category))}${p.city ? ' · ' + esc(p.city) : ''} · ★ ${p.ratingAvg} (${p.ratingCount})</div></div>
+      <div id="pd-earn" class="card"><div class="empty">Loading earnings…</div></div>
+      <h2 style="font-size:1.05rem;margin:14px 0 8px">Appointments</h2><div id="pd-appts"><div class="empty">Loading…</div></div>
+      <h2 style="font-size:1.05rem;margin:14px 0 8px">My offerings</h2><div id="pd-listings"></div>
+      <div class="card"><b>Add an offering</b>
+        <div class="field mt"><input id="of-title" aria-label="Offering title" placeholder="e.g. 45-min counselling session"/></div>
+        <div class="row" style="gap:8px"><input id="of-price" aria-label="Price CHF" type="number" placeholder="Price (CHF)"/><input id="of-dur" aria-label="Duration minutes" type="number" placeholder="Duration (min)"/></div>
+        <button class="btn mt" onclick="proAddListing()">Add offering</button></div>
+      <h2 style="font-size:1.05rem;margin:14px 0 8px">Availability</h2><div id="pd-slots"></div>
+      <div class="card"><b>Add a slot</b>
+        <div class="row" style="gap:8px"><select id="sl-listing" aria-label="Offering">${me.listings.map((/** @type {any} */ l) => `<option value="${l.id}">${esc(l.title)}</option>`).join('') || '<option value="">— add an offering first —</option>'}</select>
+        <input id="sl-when" aria-label="Slot date and time" type="datetime-local"/></div>
+        <button class="btn mt" onclick="proAddSlot()">Publish slot</button></div>
+      <h2 style="font-size:1.05rem;margin:14px 0 8px">Profile</h2>
+      <div class="card">
+        <div class="field"><textarea id="pf-bio" aria-label="Bio" placeholder="Bio" rows="3">${esc(p.bio || '')}</textarea></div>
+        <div class="row" style="gap:8px"><input id="pf-city" aria-label="City" placeholder="City" value="${esc(p.city || '')}"/><input id="pf-exp" aria-label="Years of experience" type="number" placeholder="Years exp" value="${p.experienceYears ?? ''}"/></div>
+        <div class="field"><input id="pf-langs" aria-label="Languages" placeholder="Languages (comma-separated)" value="${esc((p.languages || []).join(', '))}"/></div>
+        <button class="btn mt" onclick="proSaveProfile()">Save profile</button></div>`;
+    renderProListings(me.listings); loadProEarnings(); loadProAppts(); loadProSlots();
+  } catch (e) { el.innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+}
+async function proApply() {
+  if (_v('ap-name').length < 2) return toast('Enter your professional name');
+  try { await api('/pro/apply', { method: 'POST', body: { name: _v('ap-name'), category: _v('ap-cat'), city: _v('ap-city'), bio: _v('ap-bio') } }); toast('Applied ✓'); loadProDash(); }
+  catch (e) { toast(e.message); }
+}
+function renderProListings(listings) {
+  const el = document.getElementById('pd-listings'); if (!el) return;
+  el.innerHTML = (listings || []).length ? listings.map((/** @type {any} */ l) => `<div class="card"><div class="row" style="justify-content:space-between"><b>${esc(l.title)}</b><b>CHF ${l.priceCHF}</b></div><div class="hint">${esc(l.billing)}${l.durationMin ? ' · ' + l.durationMin + 'm' : ''}</div></div>`).join('') : '<div class="empty">No offerings yet.</div>';
+}
+async function proAddListing() {
+  const title = _v('of-title'), price = Number(_v('of-price')), dur = Number(_v('of-dur'));
+  if (title.length < 2 || !(price > 0)) return toast('Enter a title and price');
+  try { await api('/pro/listings', { method: 'POST', body: { title, billing: 'flat', priceCHF: price, durationMin: dur > 0 ? dur : undefined } }); toast('Offering added ✓'); loadProDash(); }
+  catch (e) { toast(e.message); }
+}
+async function proAddSlot() {
+  const listingId = _v('sl-listing'), when = _v('sl-when');
+  if (!listingId || !when) return toast('Pick an offering and a time');
+  try { await api('/pro/listings/' + listingId + '/slots', { method: 'POST', body: { startsAt: new Date(when).toISOString() } }); toast('Slot published ✓'); loadProSlots(); }
+  catch (e) { toast(e.message); }
+}
+async function loadProSlots() {
+  const el = document.getElementById('pd-slots'); if (!el) return;
+  try {
+    const r = await api('/pro/slots'); const slots = r.slots || [];
+    el.innerHTML = slots.length ? slots.map((/** @type {any} */ s) => `<div class="card"><div class="row" style="justify-content:space-between;align-items:center"><span>${esc(new Date(s.startsAt).toLocaleString([], { weekday: 'short', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }))}${s.durationMin ? ' · ' + s.durationMin + 'm' : ''}</span><button class="btn secondary" style="width:auto" onclick="proCloseSlot('${s.id}')">Close</button></div></div>`).join('') : '<div class="empty">No open slots — add availability below.</div>';
+  } catch (e) { el.innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+}
+async function proCloseSlot(id) {
+  try { await api('/pro/slots/' + id + '/close', { method: 'POST' }); toast('Slot closed'); loadProSlots(); }
+  catch (e) { toast(e.message); }
+}
+async function loadProEarnings() {
+  const el = document.getElementById('pd-earn'); if (!el) return;
+  try {
+    const e = await api('/pro/earnings');
+    el.innerHTML = `<div class="row" style="gap:24px;flex-wrap:wrap">
+      <div><div style="font-size:22px;font-weight:800">CHF ${e.released}</div><div class="hint">Released to you</div></div>
+      <div><div style="font-size:22px;font-weight:800">CHF ${e.pending}</div><div class="hint">In escrow (pending)</div></div>
+      <div><div style="font-size:22px;font-weight:800">${e.completedOrders}</div><div class="hint">Completed</div></div></div>`;
+  } catch { el.innerHTML = '<div class="hint">Earnings unavailable.</div>'; }
+}
+async function loadProAppts() {
+  const el = document.getElementById('pd-appts'); if (!el) return;
+  try {
+    const r = await api('/pro/appointments'); const list = r.appointments || [];
+    if (!list.length) { el.innerHTML = '<div class="empty">No appointments yet.</div>'; return; }
+    el.innerHTML = list.map((/** @type {any} */ a) => {
+      const when = a.scheduledFor ? new Date(a.scheduledFor).toLocaleString([], { weekday: 'short', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—';
+      const acts = [];
+      if (a.status === 'scheduled' && a.orderStatus === 'paid') acts.push(`<button class="btn" style="width:auto" onclick="proSession('${a.id}','start')">Start session</button>`);
+      if (a.status === 'active') acts.push(`<button class="btn" style="width:auto" onclick="proSession('${a.id}','end')">End session</button>`);
+      return `<div class="card"><div class="row" style="justify-content:space-between;align-items:flex-start">
+        <div><b>${esc(a.client)}</b><div class="hint">${esc(when)} · <b>${esc(a.status)}</b></div></div>
+        <div style="text-align:right"><b>CHF ${a.payoutCHF ?? '—'}</b><div class="hint">your payout</div></div></div>
+        ${acts.length ? `<div class="row mt" style="gap:8px">${acts.join('')}</div>` : ''}</div>`;
+    }).join('');
+  } catch (e) { el.innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+}
+async function proSession(id, action) {
+  try { await api('/pro/appointments/' + id + '/' + action, { method: 'POST' }); toast(action === 'start' ? 'Session started' : 'Session ended'); loadProAppts(); loadProEarnings(); }
+  catch (e) { toast(e.message); }
+}
+async function proSaveProfile() {
+  const langs = _v('pf-langs').split(',').map(s => s.trim()).filter(Boolean);
+  try { await api('/pro/me', { method: 'PATCH', body: { bio: _v('pf-bio'), city: _v('pf-city'), experienceYears: Number(_v('pf-exp')) || undefined, languages: langs } }); toast('Profile saved ✓'); }
+  catch (e) { toast(e.message); }
+}
 async function askAstro() {
   const inp = $('#astro-q'); const q = (inp.value || '').trim(); if (!q) return;
   const box = $('#astro-chat'); inp.value = '';
@@ -3316,6 +3432,9 @@ async function renderServices() {
       <span aria-hidden="true" style="font-size:20px">→</span></div></div>
     <div class="card" style="cursor:pointer" onclick="nav('#/find')"><div class="row" style="justify-content:space-between;align-items:center">
       <div><b>Find a professional 🔎</b><div class="hint">Astrologers, coaches, counsellors, lawyers, and more — verified, book directly.</div></div>
+      <span aria-hidden="true" style="font-size:20px">→</span></div></div>
+    <div class="card" style="cursor:pointer" onclick="nav('#/prodash')"><div class="row" style="justify-content:space-between;align-items:center">
+      <div><b>Offer a service 💼</b><div class="hint">Become a professional — list consultations, set availability, and earn.</div></div>
       <span aria-hidden="true" style="font-size:20px">→</span></div></div>
     <div class="card" style="cursor:pointer" onclick="nav('#/appointments')"><div class="row" style="justify-content:space-between;align-items:center">
       <div><b>My appointments 🗓️</b><div class="hint">Your booked consultations — upcoming, completed, and cancel/confirm.</div></div>

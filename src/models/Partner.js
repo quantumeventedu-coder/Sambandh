@@ -27,6 +27,9 @@ const PARTNER_DOC_TYPES = ['registration_certificate', 'gst_certificate', 'pan_c
 const PartnerSchema = new mongoose.Schema({
   name: { type: String, required: true },
   category: { type: String, enum: CATEGORIES, required: true, index: true },
+  // The app User who OWNS/operates this partner (self-serve professional dashboard). Set when a
+  // member applies to become a professional; null for staff-onboarded partners. One partner per user.
+  ownerUserId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', index: true, sparse: true },
   // ---- who they are (KYB / authentication) ----
   type: { type: String, enum: PARTNER_TYPES, default: 'individual', index: true },
   legalName: String,                              // registered legal name (may differ from display name)

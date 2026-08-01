@@ -109,6 +109,7 @@ app.use('/api/developer', require('./routes-developer')); // internal STAFF cons
 app.use('/api/marketplace', require('./routes-marketplace')); // native partner/listing/order marketplace (in-house escrow + commission)
 app.use('/api/couple/location', require('./routes-couple-location')); // consented, mutual, revocable live-location sharing between matches
 app.use('/api/consultation', require('./routes-consultation')); // bookable consultations (slots + sessions) on the marketplace core
+app.use('/api/pro', require('./routes-pro')); // self-serve professional dashboard (own listings/slots/appointments/earnings)
 app.use('/api/verification-services', require('./routes-verification-services')); // consent-gated verification product on the AAV Trust Engine
 app.use('/api/vault', require('./routes-vault')); // encrypted-at-rest document vault (AAV-scanned, consent-shareable)
 app.use('/api/court-marriage', require('./routes-court-marriage')); // court-marriage assistant workflow (on the vault)
