@@ -820,6 +820,30 @@ router.post('/storage/ensure', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+// Live capacity / usage — real numbers so "how many can we handle / register" isn't a guess.
+// DB size + per-table rows/bytes (Postgres catalog), Supabase object-storage bytes per bucket,
+// and key row counts. Plan limits are env-configurable (free-tier defaults) so headroom is honest.
+router.get('/capacity', async (req, res, next) => {
+  try {
+    const odm = require('./db/odm');
+    const [users, messages, payments, pings, shares] = await Promise.all([
+      User.countDocuments({}).catch(() => null),
+      require('./models/Message').countDocuments({}).catch(() => null),
+      require('./models/Payment').countDocuments({}).catch(() => null),
+      require('./models/LocationPing').countDocuments({}).catch(() => null),
+      require('./models/LocationShare').countDocuments({}).catch(() => null),
+    ]);
+    let stats = { totalBytes: null, tables: [], storage: null };
+    if (typeof odm.dbStats === 'function') { try { stats = await odm.dbStats(); } catch { /* non-pg */ } }
+    const limits = {
+      dbBytes: Number(process.env.SUPABASE_DB_LIMIT_MB || 500) * 1048576,        // free tier ≈ 500 MB
+      storageBytes: Number(process.env.SUPABASE_STORAGE_LIMIT_GB || 1) * 1073741824,   // free tier ≈ 1 GB
+      photoBytesPerUser: Number(process.env.EST_PHOTO_BYTES_PER_USER || 512000),  // ~500 KB (2–3 photos)
+    };
+    res.json({ counts: { users, messages, payments, locationPings: pings, locationShares: shares }, stats, limits });
+  } catch (err) { next(err); }
+});
+
 // Super-admin oversight of couple live-location shares. This router is requireSuperAdmin-gated,
 // so ordinary admins/moderators can NEVER see these — only the super-admin (owner) can, for
 // safety/abuse oversight. Consent-based sharing between two matched users.

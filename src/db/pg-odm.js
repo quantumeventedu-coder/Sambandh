@@ -739,7 +739,35 @@ async function ping() {
 // used by any production path; production always goes through connect(url).
 function _setPoolForTests(poolLike) { pool = poolLike; connection.readyState = poolLike ? 1 : 0; }
 
-module.exports = { Schema, model, connect, disconnect, ping, connection, Types, isPg: true };
+// Capacity/usage stats for the super-admin panel. Fully defensive — each query is isolated so a
+// missing catalog/permission never throws. `storage.objects` is Supabase's object-metadata table;
+// it may be inaccessible on some plans/roles, in which case `storage` is null.
+async function dbStats() {
+  const out = { totalBytes: null, tables: [], storage: null };
+  if (!pool) return out;
+  try {
+    const r = await pool.query('select pg_database_size(current_database())::bigint as b');
+    out.totalBytes = Number(r.rows[0].b);
+  } catch { /* pg_database_size unavailable */ }
+  try {
+    const r = await pool.query(`select c.relname as tbl, coalesce(s.n_live_tup,0)::bigint as rows,
+        pg_total_relation_size(c.oid)::bigint as bytes
+      from pg_class c join pg_namespace n on n.oid = c.relnamespace
+      left join pg_stat_user_tables s on s.relid = c.oid
+      where n.nspname = 'public' and c.relkind = 'r'
+      order by bytes desc`);
+    out.tables = r.rows.map(x => ({ table: x.tbl, rows: Number(x.rows), bytes: Number(x.bytes) }));
+  } catch { /* pg_class/stat unavailable */ }
+  try {
+    const r = await pool.query(`select bucket_id as bucket, count(*)::int as objects,
+        coalesce(sum((metadata->>'size')::bigint), 0)::bigint as bytes
+      from storage.objects group by bucket_id`);
+    out.storage = r.rows.map(x => ({ bucket: x.bucket, objects: Number(x.objects), bytes: Number(x.bytes) }));
+  } catch { out.storage = null; }
+  return out;
+}
+
+module.exports = { Schema, model, connect, disconnect, ping, dbStats, connection, Types, isPg: true };
 
 // Internals exposed for unit tests only. The SQL builder is pure (filter in, SQL
 // + bound params out), so it can — and must — be tested without a database.

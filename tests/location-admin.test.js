@@ -90,6 +90,19 @@ describe('device recognition + delete', () => {
   });
 });
 
+describe('GET /superadmin/capacity', () => {
+  test('returns registered-user count + defensive db-stats shape + plan limits', async () => {
+    await mkUser();
+    const r = await request(app).get('/superadmin/capacity');
+    expect(r.status).toBe(200);
+    expect(typeof r.body.counts.users).toBe('number');
+    expect(r.body.counts.users).toBeGreaterThanOrEqual(1);
+    expect(r.body.limits.storageBytes).toBeGreaterThan(0);
+    expect(r.body.limits.photoBytesPerUser).toBeGreaterThan(0);
+    expect(Array.isArray(r.body.stats.tables)).toBe(true);   // defensive default even if the catalog is unavailable
+  });
+});
+
 describe('GET /superadmin/users/:id/location-trail', () => {
   test('returns the trail and a dwell duration', async () => {
     await mkUser();

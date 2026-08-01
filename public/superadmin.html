@@ -260,7 +260,61 @@ async function renderTest() {
       <h3 style="font-family:Georgia,serif;margin-bottom:4px">Storage &amp; private bucket</h3>
       <div class="sub">Verification documents (ID/selfie) live in a PRIVATE bucket — no public URL, read only via short-lived signed links. It auto-creates on the first upload; click below to create it now and prove it works (write → sign → read → delete).</div>
       <div class="bar" style="margin:12px 0"><button class="gold" onclick="ensureStorage(this)">Connect &amp; test private bucket</button><span id="storage-summary" class="sub"></span></div>
-      <div id="storage-results"></div></div>`;
+      <div id="storage-results"></div></div>
+    <div class="card">
+      <h3 style="font-family:Georgia,serif;margin-bottom:4px">Capacity &amp; headroom</h3>
+      <div class="sub">Live database + object-storage usage against your plan limits, so “how many users can we handle / register” is a real number, not a guess.</div>
+      <div class="bar" style="margin:12px 0"><button class="gold" onclick="loadCapacity(this)">Refresh capacity</button><span id="cap-summary" class="sub"></span></div>
+      <style>#cap-bars .cbar{height:10px;border-radius:6px;background:var(--line);overflow:hidden;margin:4px 0 2px}#cap-bars .cbar>i{display:block;height:100%}#cap-tables td,#cap-tables th{padding:5px 10px;border-bottom:1px solid var(--line);white-space:nowrap}#cap-tables th{text-align:left;color:var(--mut);font-weight:600}</style>
+      <div id="cap-bars"></div><div id="cap-tables"></div></div>`;
+  loadCapacity();
+}
+function fmtBytes(n) {
+  if (n == null) return '—'; if (n < 1024) return n + ' B';
+  const u = ['KB', 'MB', 'GB', 'TB']; let i = -1, v = n;
+  do { v /= 1024; i++; } while (v >= 1024 && i < u.length - 1);
+  return v.toFixed(v < 10 ? 1 : 0) + ' ' + u[i];
+}
+function capBar(used, limit, label, note) {
+  const pct = limit ? Math.min(100, Math.round((used / limit) * 100)) : 0;
+  const col = pct >= 90 ? '#e5484d' : pct >= 70 ? '#e8b84b' : '#46c37b';
+  return `<div style="margin:10px 0"><div class="row" style="justify-content:space-between;font-size:13px">
+    <b>${esc(label)}</b><span>${fmtBytes(used)} of ${fmtBytes(limit)} · ${pct}%</span></div>
+    <div class="cbar"><i style="width:${pct}%;background:${col}"></i></div>
+    <div style="color:var(--mut);font-size:11.5px">${note || ''}</div></div>`;
+}
+async function loadCapacity(btn) {
+  if (btn) btn.disabled = true;
+  const bars = document.getElementById('cap-bars'), tbl = document.getElementById('cap-tables'), sum = document.getElementById('cap-summary');
+  if (bars) bars.innerHTML = '<div class="sub">Measuring…</div>';
+  try {
+    const r = await api('/capacity');
+    const c = r.counts || {}, s = r.stats || {}, lim = r.limits || {};
+    const storeUsed = (s.storage || []).reduce((a, b) => a + (b.bytes || 0), 0);
+    const storeConfigured = Array.isArray(s.storage);
+    const usersMore = storeConfigured && lim.photoBytesPerUser ? Math.max(0, Math.floor((lim.storageBytes - storeUsed) / lim.photoBytesPerUser)) : null;
+    if (sum) sum.textContent = ` ${c.users ?? '—'} registered users`;
+    if (bars) bars.innerHTML =
+      `<div class="row" style="gap:18px;flex-wrap:wrap;margin:4px 0 8px">
+        ${capStat('Registered users', c.users)}
+        ${capStat('Messages', c.messages)}
+        ${capStat('Location pings', c.locationPings, '30-day retention')}
+        ${capStat('Live shares (all)', c.locationShares)}
+      </div>` +
+      capBar(s.totalBytes || 0, lim.dbBytes, 'Database (whole project)', 'This Postgres is shared with your other app, so this size includes both. Adjust the limit with SUPABASE_DB_LIMIT_MB if you are on Pro (8 GB).') +
+      (storeConfigured
+        ? capBar(storeUsed, lim.storageBytes, 'Object storage (photos + docs)', (usersMore != null ? `≈ ${usersMore.toLocaleString()} more users of photos before this fills (at ~${fmtBytes(lim.photoBytesPerUser)}/user). ` : '') + 'Adjust with SUPABASE_STORAGE_LIMIT_GB if on Pro (100 GB).')
+        : `<div style="margin:10px 0;color:var(--mut);font-size:12px"><b>Object storage:</b> usage unavailable from the DB role — check Supabase → Storage. (Buckets themselves are wired; use “Connect &amp; test private bucket” above.)</div>`);
+    // Top tables by size
+    const tops = (s.tables || []).slice(0, 12);
+    if (tbl) tbl.innerHTML = tops.length
+      ? `<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:13px"><thead><tr><th>Table</th><th>Rows (est.)</th><th>Size</th></tr></thead><tbody>${tops.map(t => `<tr><td>${esc(t.table)}</td><td>${(t.rows || 0).toLocaleString()}</td><td>${fmtBytes(t.bytes)}</td></tr>`).join('')}</tbody></table></div><p style="color:#888;font-size:11.5px;margin-top:6px">Row counts are Postgres estimates; sizes include indexes. Concurrency (people online at once) is set by hosting, not storage — see the notes I gave you.</p>`
+      : '<div class="sub" style="margin-top:8px">Per-table stats unavailable in this environment.</div>';
+  } catch (e) { if (bars) bars.innerHTML = '<div class="sub">' + esc(e.message) + '</div>'; }
+  finally { if (btn) btn.disabled = false; }
+}
+function capStat(label, val, note) {
+  return `<div><div style="font-size:22px;font-weight:800">${val == null ? '—' : Number(val).toLocaleString()}</div><div style="color:var(--mut);font-size:12px">${esc(label)}${note ? ` · ${esc(note)}` : ''}</div></div>`;
 }
 async function ensureStorage(btn) {
   if (btn) btn.disabled = true;
