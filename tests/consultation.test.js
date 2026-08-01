@@ -119,3 +119,23 @@ describe('access control', () => {
     expect(pub.body.slot.status).toBe('open');
   });
 });
+
+describe('my appointments (enriched sessions)', () => {
+  test('GET /sessions returns consultant, offering, scheduled time, price + order status', async () => {
+    const { slot } = await seedConsultant();
+    const buyer = await mkUser();
+    const bRes = await request(app).post('/api/consultation/book').set(auth(buyer)).send({ slotId: String(slot._id) });
+    const orderId = bRes.body.marketplaceOrderId, paymentId = bRes.body.order.payment._id;
+    await Payment.findByIdAndUpdate(paymentId, { status: 'captured' });
+    await request(app).post(`/api/marketplace/orders/${orderId}/confirm-payment`).set(auth(buyer));
+    const r = await request(app).get('/api/consultation/sessions').set(auth(buyer));
+    expect(r.status).toBe(200);
+    expect(r.body.sessions.length).toBe(1);
+    const s = r.body.sessions[0];
+    expect(s.partnerName).toBe('Coach A');
+    expect(s.title).toBe('30-min session');
+    expect(s.amountCHF).toBe(300);
+    expect(s.orderStatus).toBe('paid');
+    expect(s.scheduledFor).toBeTruthy();
+  });
+});

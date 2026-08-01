@@ -313,6 +313,7 @@ async function route() {
     case 'shop': return renderShop();
     case 'product': return renderProduct(parts[1]);
     case 'orders': return renderOrders();
+    case 'appointments': return renderAppointments();
     case 'live': return renderLiveLocation(parts[1]);
     case 'redeem': S._pendingGiftCode = parts[1] || ''; return nav('#/services');
     case 'compat': return renderCompat(parts[1]);
@@ -2221,10 +2222,51 @@ async function bookAstro(slotId, btn) {
     await payDirectOrder(r.order, 'marketplace_order', r.listingTitle || 'Consultation', async () => {
       await api('/marketplace/orders/' + r.marketplaceOrderId + '/confirm-payment', { method: 'POST' });
       toast('Booked & paid ✓');
-      loadAstrologers();
+      nav('#/appointments');
     });
   } catch (e) { toast(e.message); }
   finally { if (btn) btn.disabled = false; }
+}
+// ===== My appointments (booked consultations) =====
+async function renderAppointments() {
+  screen.innerHTML = `<div class="section-pad"><button class="back" onclick="nav('#/services')">← Services</button>
+    <h1 style="margin:.2em 0">My appointments</h1>
+    <div id="appt-list"><div class="empty">Loading…</div></div></div>`;
+  loadAppointments();
+}
+async function loadAppointments() {
+  const el = document.getElementById('appt-list'); if (!el) return;
+  try {
+    const r = await api('/consultation/sessions');
+    const all = r.sessions || [];
+    if (!all.length) { el.innerHTML = '<div class="empty">No appointments yet. Book a consultation from the Astro tab or Services.</div>'; return; }
+    const card = (/** @type {any} */ s) => {
+      const when = s.scheduledFor ? new Date(s.scheduledFor).toLocaleString([], { weekday: 'short', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—';
+      const st = s.status === 'active' ? 'in progress' : (s.status === 'ended' && s.orderStatus === 'completed' ? 'completed' : s.status);
+      const acts = [];
+      if (s.status === 'scheduled') acts.push(`<button class="btn secondary" style="width:auto" onclick="apptCancel('${s.id}')">Cancel &amp; refund</button>`);
+      if (s.status === 'ended' && s.orderStatus === 'fulfilled') acts.push(`<button class="btn" style="width:auto" onclick="apptComplete('${s.orderId}')">Confirm &amp; release payment</button>`);
+      return `<div class="card"><div class="row" style="justify-content:space-between;align-items:flex-start">
+        <div><b>${esc(s.title)}</b> <span class="hint">· ${esc(s.partnerName)}</span>
+          <div class="hint">${esc(when)}${s.durationMin ? ' · ' + s.durationMin + 'm' : ''} · <b>${esc(st)}</b></div></div>
+        <div style="text-align:right"><b>CHF ${s.amountCHF ?? '—'}</b></div></div>
+        ${acts.length ? `<div class="row mt" style="gap:8px">${acts.join('')}</div>` : ''}</div>`;
+    };
+    const sec = (/** @type {string} */ label, /** @type {any[]} */ items) => items.length ? `<h2 style="font-size:1.05rem;margin:14px 0 8px">${label}</h2>${items.map(card).join('')}` : '';
+    el.innerHTML =
+      sec('Upcoming', all.filter((/** @type {any} */ s) => ['scheduled', 'active'].includes(s.status))) +
+      sec('Completed sessions', all.filter((/** @type {any} */ s) => s.status === 'ended')) +
+      sec('Cancelled', all.filter((/** @type {any} */ s) => s.status === 'cancelled'));
+  } catch (e) { el.innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+}
+async function apptCancel(id) {
+  if (!confirm('Cancel this appointment? You will be refunded.')) return;
+  try { await api('/consultation/sessions/' + id + '/cancel', { method: 'POST' }); toast('Cancelled & refunded'); loadAppointments(); }
+  catch (e) { toast(e.message); }
+}
+async function apptComplete(orderId) {
+  try { await api('/marketplace/orders/' + orderId + '/complete', { method: 'POST' }); toast('Confirmed — payment released'); loadAppointments(); }
+  catch (e) { toast(e.message); }
 }
 async function askAstro() {
   const inp = $('#astro-q'); const q = (inp.value || '').trim(); if (!q) return;
@@ -3155,6 +3197,9 @@ async function renderServices() {
     <div id="svc-trust" class="card"><div class="empty">Loading your Trust Score…</div></div>
     <div class="card" style="cursor:pointer" onclick="nav('#/shop')"><div class="row" style="justify-content:space-between;align-items:center">
       <div><b>Shop &amp; Gifts 🛍️</b><div class="hint">Real products from verified partners — buy for yourself, or gift a match privately.</div></div>
+      <span aria-hidden="true" style="font-size:20px">→</span></div></div>
+    <div class="card" style="cursor:pointer" onclick="nav('#/appointments')"><div class="row" style="justify-content:space-between;align-items:center">
+      <div><b>My appointments 🗓️</b><div class="hint">Your booked consultations — upcoming, completed, and cancel/confirm.</div></div>
       <span aria-hidden="true" style="font-size:20px">→</span></div></div>
     <h2 class="svc-h">Recommended for you</h2>
     <div id="svc-commerce"><div class="empty">Finding relevant options…</div></div>
