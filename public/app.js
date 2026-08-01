@@ -251,6 +251,11 @@ function connectSocket() {
 const TAB_ROUTES = ['discover', 'services', 'community', 'astro', 'chats', 'karma', 'settings', 'notifications'];
 
 window.addEventListener('hashchange', route);
+// Offline state (§24): reflect connectivity so the fixed banner shows/hides.
+function updateNet() { document.body.classList.toggle('offline', !navigator.onLine); }
+window.addEventListener('online', updateNet);
+window.addEventListener('offline', updateNet);
+updateNet();
 
 // Pages locked during pre-launch (the dating surface). Settings/notifications stay
 // open so a waitlisted member can still manage their account.
