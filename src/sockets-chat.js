@@ -52,6 +52,25 @@ module.exports = function setupChatSockets(io) {
       } catch { /* ignore malformed ids */ }
     });
 
+    // WebRTC signalling relay for a booked consultation's OWN video room (offer/answer/ICE).
+    // Peer-to-peer media (no third party in the call path); the server only relays the opaque
+    // signal, and ONLY between the two participants of the session (client ↔ owning consultant).
+    socket.on('rtc_signal', async ({ sessionId, signal }) => {
+      try {
+        const Session = require('./models/Session');
+        const Partner = require('./models/Partner');
+        const s = await Session.findById(sessionId);
+        if (!s || !signal) return;
+        const partner = await Partner.findById(s.partnerId).select('ownerUserId').lean();
+        const ownerId = partner && partner.ownerUserId ? String(partner.ownerUserId) : null;
+        let peerId = null;
+        if (String(s.userId) === String(socket.userId)) peerId = ownerId;                  // client → consultant
+        else if (ownerId && ownerId === String(socket.userId)) peerId = String(s.userId);  // consultant → client
+        if (!peerId) return;   // sender is not a participant of this session
+        io.to('user:' + peerId).emit('rtc_signal', { sessionId, from: socket.userId, signal });
+      } catch { /* ignore */ }
+    });
+
     socket.on('send_message', async ({ chatId, text }, ack) => {
       try {
         text = (text || '').trim();

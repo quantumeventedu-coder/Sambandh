@@ -224,6 +224,8 @@ function connectSocket() {
     toast('Identities revealed');
     if (location.hash === '#/chat/' + chatId) renderChat(chatId);
   });
+  // Consultation video signalling (own WebRTC room)
+  S.socket.on('rtc_signal', ({ sessionId, signal }) => { if (S._vid && S._vid.sessionId === sessionId) handleRtcSignal(signal); });
   // Consultation booking-scoped chat
   S.socket.on('session_message', ({ sessionId, text }) => {
     if (S._sessionId === sessionId && location.hash === '#/session/' + sessionId) {
@@ -259,6 +261,7 @@ function isGated() {
 
 async function route() {
   const hash = location.hash || '#/';
+  if (typeof S._vid !== 'undefined' && S._vid && !hash.startsWith('#/video/')) endVideo();   // stop camera when leaving a call
   const parts = hash.slice(2).split('/');
   const page = parts[0] || '';
 
@@ -322,6 +325,7 @@ async function route() {
     case 'appointments': return renderAppointments();
     case 'prodash': return renderProDash();
     case 'session': return renderSessionThread(parts[1]);
+    case 'video': return renderVideo(parts[1]);
     case 'find': return renderFindPros();
     case 'pro': return renderProProfile(parts[1]);
     case 'live': return renderLiveLocation(parts[1]);
@@ -2514,7 +2518,8 @@ function sMsgHtml(m) { return `<div class="bubble ${m.mine ? 'me' : 'them'}">${e
 async function renderSessionThread(id) {
   S._sessionId = id;
   screen.innerHTML = `<div class="chat-screen">
-    <div class="chat-head"><button class="back" onclick="history.back()">←</button><div class="who"><b>Consultation chat</b><small>messages for this booking</small></div></div>
+    <div class="chat-head"><button class="back" onclick="history.back()">←</button><div class="who"><b>Consultation chat</b><small>messages for this booking</small></div>
+      <button class="ic-row" title="Start video" style="background:none;border:1px solid var(--forest,#2f7d4f);color:var(--forest,#2f7d4f);border-radius:8px;padding:5px 9px;font-size:11.5px;font-weight:600;cursor:pointer" onclick="nav('#/video/${id}')">📹 Video</button></div>
     <div class="chat-msgs" id="smsgs"></div>
     <div class="chat-input"><input aria-label="Message" id="smsg-input" placeholder="Type a message…" maxlength="4000" onkeydown="if(event.key==='Enter')sendSessionMsg()"/>
     <button aria-label="Send message" onclick="sendSessionMsg()" style="display:flex;align-items:center;justify-content:center">${ic('send', 'ic-lg')}</button></div></div>`;
@@ -2531,6 +2536,63 @@ async function sendSessionMsg() {
     const r = await api('/consultation/sessions/' + S._sessionId + '/thread', { method: 'POST', body: { text } });
     const box = document.getElementById('smsgs'); if (box) { box.insertAdjacentHTML('beforeend', sMsgHtml(r.message)); box.scrollTop = box.scrollHeight; }
   } catch (e) { toast(e.message); }
+}
+// ===== Own video room (WebRTC, peer-to-peer; signalling over our socket) =====
+const RTC_CONFIG = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };   // STUN only (media stays P2P)
+async function renderVideo(sessionId) {
+  endVideo();
+  S._vid = { sessionId, pc: null, localStream: null };
+  screen.innerHTML = `<div class="section-pad"><button class="back" onclick="nav('#/session/${sessionId}')">← Back</button>
+    <h1 style="margin:.2em 0">Video session</h1>
+    <div id="vid-status" class="hint">Getting your camera…</div>
+    <video id="v-remote" autoplay playsinline style="width:100%;background:#000;border-radius:10px;aspect-ratio:16/9;margin-top:8px"></video>
+    <video id="v-local" autoplay playsinline muted style="width:120px;background:#000;border-radius:8px;position:fixed;bottom:88px;right:16px;z-index:6;border:2px solid #fff"></video>
+    <div class="row mt" style="gap:8px"><button class="btn" onclick="rtcCall()">Call</button>
+      <button class="btn secondary" onclick="rtcToggleMute(this)">Mute</button>
+      <button class="btn secondary" onclick="nav('#/session/${sessionId}')">Hang up</button></div>
+    <p class="hint" style="margin-top:8px">Peer-to-peer video — no third party in the call. Both of you open this from the same appointment; one taps <b>Call</b> (the other answers automatically).</p></div>`;
+  try {
+    await rtcSetup();
+    const st = document.getElementById('vid-status'); if (st) st.textContent = 'Ready — tap Call when the other person is here.';
+  } catch (e) { const st = document.getElementById('vid-status'); if (st) st.textContent = 'Camera/mic unavailable: ' + e.message; }
+}
+async function rtcSetup() {
+  if (!navigator.mediaDevices || !window.RTCPeerConnection) throw new Error('Video not supported here');
+  const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+  if (!S._vid) { stream.getTracks().forEach(t => t.stop()); return; }
+  S._vid.localStream = stream;
+  const lv = document.getElementById('v-local'); if (lv) lv.srcObject = stream;
+  const pc = new RTCPeerConnection(RTC_CONFIG);
+  S._vid.pc = pc;
+  stream.getTracks().forEach(t => pc.addTrack(t, stream));
+  pc.ontrack = (e) => { const rv = document.getElementById('v-remote'); if (rv) rv.srcObject = e.streams[0]; const st = document.getElementById('vid-status'); if (st) st.textContent = 'Connected 🟢'; };
+  pc.onicecandidate = (e) => { if (e.candidate) rtcEmit({ ice: e.candidate }); };
+  pc.onconnectionstatechange = () => { const st = document.getElementById('vid-status'); if (st && pc.connectionState === 'disconnected') st.textContent = 'The other person left.'; };
+}
+function rtcEmit(signal) { if (S.socket && S._vid) S.socket.emit('rtc_signal', { sessionId: S._vid.sessionId, signal }); }
+async function rtcCall() {
+  const pc = S._vid && S._vid.pc; if (!pc) return;
+  const offer = await pc.createOffer(); await pc.setLocalDescription(offer);
+  rtcEmit({ offer }); const st = document.getElementById('vid-status'); if (st) st.textContent = 'Calling…';
+}
+async function handleRtcSignal(signal) {
+  const pc = S._vid && S._vid.pc; if (!pc || !signal) return;
+  try {
+    if (signal.offer) { await pc.setRemoteDescription(signal.offer); const ans = await pc.createAnswer(); await pc.setLocalDescription(ans); rtcEmit({ answer: ans }); }
+    else if (signal.answer) { await pc.setRemoteDescription(signal.answer); }
+    else if (signal.ice) { try { await pc.addIceCandidate(signal.ice); } catch { /* candidate raced */ } }
+  } catch { /* signalling error — ignore */ }
+}
+function rtcToggleMute(btn) {
+  const s = S._vid && S._vid.localStream; if (!s) return;
+  const track = s.getAudioTracks()[0]; if (!track) return;
+  track.enabled = !track.enabled; if (btn) btn.textContent = track.enabled ? 'Mute' : 'Unmute';
+}
+function endVideo() {
+  if (typeof S._vid === 'undefined' || !S._vid) return;
+  try { if (S._vid.pc) S._vid.pc.close(); } catch { /* ignore */ }
+  try { if (S._vid.localStream) S._vid.localStream.getTracks().forEach((/** @type {any} */ t) => t.stop()); } catch { /* ignore */ }
+  S._vid = null;
 }
 async function askAstro() {
   const inp = $('#astro-q'); const q = (inp.value || '').trim(); if (!q) return;
