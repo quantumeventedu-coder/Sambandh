@@ -1465,8 +1465,12 @@ function readingCardsHtml(pairs, { note = 'Your reading — an insight, not a ve
 
 // Discover is the Nature Dial: one verified member at a time, their nature unfolding
 // in facet cards around them; turn the dial (pass/like) to the next.
+const DD_INTENTS = [['all', 'All'], ['marriage', 'Marriage'], ['dating', 'Dating'], ['casual', 'Casual / NSA'], ['friendship', 'Friendship'], ['networking', 'Professional']];
+function pickIntent(v) { S.filters.intent = v; renderDiscover(); }   // recolor + reload the feed for the chosen intent
 async function renderDiscover() {
-  screen.innerHTML = `<div class="dd"><div id="feed"><div class="dd-empty">Loading profiles…</div></div></div>`;
+  screen.innerHTML = `<div class="dd">
+    <div class="dd-intents" id="dd-intents" role="tablist" aria-label="What you're looking for">${DD_INTENTS.map(([v, l]) => `<button class="dd-chip${S.filters.intent === v ? ' on' : ''}" role="tab" aria-selected="${S.filters.intent === v}" data-intent="${v}" onclick="pickIntent('${v}')">${l}</button>`).join('')}</div>
+    <div id="feed"><div class="dd-empty">Loading profiles…</div></div></div>`;
   loadNotifCount();
   startLocationWatch({ prompt: !S._locationGranted });   // ensure the live watch is running (prompt if not yet granted)
   if (!S._pushAsked) { S._pushAsked = true; registerWebPush(); }
