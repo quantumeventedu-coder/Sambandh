@@ -314,6 +314,7 @@ async function route() {
     case 'product': return renderProduct(parts[1]);
     case 'orders': return renderOrders();
     case 'appointments': return renderAppointments();
+    case 'find': return renderFindPros();
     case 'pro': return renderProProfile(parts[1]);
     case 'live': return renderLiveLocation(parts[1]);
     case 'redeem': S._pendingGiftCode = parts[1] || ''; return nav('#/services');
@@ -2271,6 +2272,38 @@ async function apptComplete(orderId) {
   try { await api('/marketplace/orders/' + orderId + '/complete', { method: 'POST' }); toast('Confirmed — payment released'); loadAppointments(); }
   catch (e) { toast(e.message); }
 }
+// ===== Find a professional (services discovery) =====
+const CONSULT_CATS = [['astrologer', '🔮 Astrology'], ['coach', '🎯 Coaching'], ['counselor', '💬 Counselling'], ['lawyer', '⚖️ Legal'], ['financial_advisor', '💰 Financial'], ['fitness', '🏋️ Fitness'], ['nutritionist', '🥗 Nutrition']];
+async function renderFindPros() {
+  screen.innerHTML = `<div class="section-pad"><button class="back" onclick="nav('#/services')">← Services</button>
+    <h1 style="margin:.2em 0">Find a professional</h1>
+    <p class="sub">Verified consultants — pick a category, then book a session directly.</p>
+    <div id="pro-cats" class="row" style="gap:6px;flex-wrap:wrap;margin:8px 0">${CONSULT_CATS.map(([c, l]) => `<button class="btn secondary" style="width:auto;padding:6px 12px" data-cat="${c}" onclick="proCat('${c}')">${l}</button>`).join('')}</div>
+    <div class="field"><input id="pro-city" aria-label="City filter" placeholder="Filter by city (optional)" onchange="if(S._proCat)loadPros()"/></div>
+    <div id="pro-results"><div class="empty">Pick a category above.</div></div></div>`;
+  S._proCat = '';
+}
+function proCat(c) {
+  S._proCat = c;
+  document.querySelectorAll('#pro-cats button').forEach((/** @type {any} */ b) => { b.className = b.dataset.cat === c ? 'btn' : 'btn secondary'; });
+  loadPros();
+}
+async function loadPros() {
+  const el = document.getElementById('pro-results'); if (!el) return;
+  el.innerHTML = '<div class="empty">Finding professionals…</div>';
+  try {
+    const cityEl = document.getElementById('pro-city'); const city = (cityEl && cityEl.value || '').trim();
+    const geo = S._lastLoc ? `&lat=${S._lastLoc.lat}&lng=${S._lastLoc.lng}` : '';
+    const r = await api(`/consultation/consultants?category=${encodeURIComponent(S._proCat)}${city ? '&city=' + encodeURIComponent(city) : ''}${geo}`);
+    const list = r.results || [];
+    if (!list.length) { el.innerHTML = '<div class="empty">No verified professionals in this category yet — check back soon.</div>'; return; }
+    el.innerHTML = list.map((/** @type {any} */ x) => `<div class="card" style="cursor:pointer" onclick="nav('#/pro/${x.partner.id}')"><div class="row" style="justify-content:space-between;align-items:flex-start">
+      <div><b>${esc(x.partner.name)}</b>${x.partner.verified ? ' <span class="tag forest">verified</span>' : ''}
+        <div class="hint">${esc(x.listing.title || 'Consultation')}${x.partner.city ? ' · ' + esc(x.partner.city) : ''}</div>
+        ${x.partner.ratingCount ? `<div class="hint">★ ${x.partner.ratingAvg} (${x.partner.ratingCount})</div>` : '<div class="hint">New</div>'}</div>
+      <div style="text-align:right"><b>${esc(svcPrice(x.listing))}</b><div class="hint">View →</div></div></div></div>`).join('');
+  } catch (e) { el.innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+}
 // ===== Consumer professional profile =====
 function prettyCat(c) { return String(c || '').replace(/_/g, ' ').replace(/\b\w/g, (m) => m.toUpperCase()); }
 async function renderProProfile(id) {
@@ -3263,6 +3296,9 @@ async function renderServices() {
     <div id="svc-trust" class="card"><div class="empty">Loading your Trust Score…</div></div>
     <div class="card" style="cursor:pointer" onclick="nav('#/shop')"><div class="row" style="justify-content:space-between;align-items:center">
       <div><b>Shop &amp; Gifts 🛍️</b><div class="hint">Real products from verified partners — buy for yourself, or gift a match privately.</div></div>
+      <span aria-hidden="true" style="font-size:20px">→</span></div></div>
+    <div class="card" style="cursor:pointer" onclick="nav('#/find')"><div class="row" style="justify-content:space-between;align-items:center">
+      <div><b>Find a professional 🔎</b><div class="hint">Astrologers, coaches, counsellors, lawyers, and more — verified, book directly.</div></div>
       <span aria-hidden="true" style="font-size:20px">→</span></div></div>
     <div class="card" style="cursor:pointer" onclick="nav('#/appointments')"><div class="row" style="justify-content:space-between;align-items:center">
       <div><b>My appointments 🗓️</b><div class="hint">Your booked consultations — upcoming, completed, and cancel/confirm.</div></div>
