@@ -49,7 +49,8 @@
   img{max-width:100%;display:block}
   .wrap{width:100%;max-width:560px;margin:0 auto;padding:0 20px}
   @media(min-width:820px){ .wrap{max-width:1000px;padding:0 32px} }
-  .eyebrow{font-size:var(--t-eyebrow);font-weight:800;letter-spacing:.18em;text-transform:uppercase;color:var(--sindoor)}
+  .eyebrow{font-size:var(--t-eyebrow);font-weight:800;letter-spacing:.18em;text-transform:uppercase;color:var(--sindoor);display:inline-flex;align-items:center;gap:10px}
+  .eyebrow::before{content:"";width:28px;height:1px;background:currentColor;opacity:.75;flex:0 0 28px}
   .lead{font-size:var(--t-lead);color:var(--ink-soft);line-height:1.5}
   :focus-visible{outline:none;box-shadow:0 0 0 3px rgba(153,53,86,.45);border-radius:12px}
 
