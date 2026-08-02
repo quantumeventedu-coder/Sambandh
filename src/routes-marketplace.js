@@ -189,7 +189,8 @@ router.post('/orders/:id/confirm-payment', requireAuth, async (req, res, next) =
     if (order.giftForUserId) {
       const buyer = await User.findById(order.userId).select('profile.firstName').lean();
       const from = (buyer && buyer.profile && buyer.profile.firstName) || 'A match';
-      notify(order.giftForUserId, { type: 'gift_received', severity: 'info', title: 'You’ve received a gift 🎁', body: `${from} sent you a gift. Open Gifts to accept and choose your delivery address.` });
+      const acceptHint = order.kind === 'product' ? 'Open Gifts to accept and choose your delivery address.' : 'Open it to accept.';
+      notify(order.giftForUserId, { type: 'gift_received', severity: 'info', title: 'You’ve received a gift 🎁', body: `${from} sent you a gift. ${acceptHint}` });
     }
     res.json({ order: pubOrder(updated, req.userId) });
   } catch (err) { return res.status(409).json({ error: msg(err) }); }
@@ -258,7 +259,7 @@ async function myGift(req, res) {
 router.get('/orders/gifts', requireAuth, async (req, res, next) => {
   try {
     const pending = await Order.find({ giftForUserId: req.userId, giftStatus: 'pending' }).sort({ createdAt: -1 }).limit(100).lean();
-    const paid = pending.filter((/** @type {any} */ o) => ['paid', 'confirmed', 'fulfilled'].includes(o.status));
+    const paid = pending.filter((/** @type {any} */ o) => o.kind === 'product' && ['paid', 'confirmed', 'fulfilled'].includes(o.status));   // consultation gifts live under /consultation/gifts
     const out = [];
     for (const o of paid) {
       const [listing, buyer] = await Promise.all([
