@@ -19,6 +19,7 @@ const Payment = require('./models/Payment');
 const User = require('./models/User');
 const Review = require('./models/Review');
 const market = require('./services/marketplace');
+const coupons = require('./services/coupons');
 const { sharesActiveMatch } = require('./services/verification-service');
 
 const router = express.Router();
@@ -103,7 +104,8 @@ const orderSchema = z.object({
   scheduledFor: z.string().datetime().optional(),
   notes: z.string().max(1000).optional(),
   shippingAddress: addressSchema,               // required for physical products (enforced in createOrder)
-  giftForUserId: z.string().max(64).optional()  // buying a physical product as a gift for a match
+  giftForUserId: z.string().max(64).optional(), // buying a physical product as a gift for a match
+  couponCode: z.string().max(40).optional()     // discount coupon applied at checkout
 });
 
 router.post('/orders', requireAuth, async (req, res, next) => {
@@ -121,6 +123,8 @@ router.post('/orders', requireAuth, async (req, res, next) => {
       if (String(giftFor) === String(req.userId)) return res.status(400).json({ error: "You can't gift yourself." });
       if (!(await sharesActiveMatch(req.userId, giftFor))) return res.status(403).json({ error: 'You can only send a gift to one of your matches.' });
     }
+    // Validate a coupon (if any) BEFORE reserving stock, so a bad code never strands inventory.
+    if (parsed.data.couponCode) await coupons.validate(parsed.data.couponCode, 'marketplace_order', market.quote(listing, partner).amountCHF, req.userId);
     const order = await market.createOrder({
       userId: req.userId, listing, partner,
       scheduledFor: parsed.data.scheduledFor ? new Date(parsed.data.scheduledFor) : undefined,
@@ -131,13 +135,21 @@ router.post('/orders', requireAuth, async (req, res, next) => {
     // Payable order on the REAL rail (dev + Razorpay), exactly like gift-pass/verification —
     // returns { devMode, orderId, key, amount, currency, payment, ... } that payDirectOrder drives.
     // Escrow still only holds once confirm-payment sees the linked Payment 'captured'.
-    const quoted = await /** @type {any} */ (require('./routes-payment')).createQuotedOrder({
-      userId: req.userId, purpose: 'marketplace_order', amountCHF: order.amountCHF, label: listing.title,
-      metadata: { orderId: String(order._id), listingId: String(listing._id), partnerId: String(partner._id), commissionCHF: order.commissionCHF }
-    });
+    let quoted;
+    try {
+      quoted = await /** @type {any} */ (require('./routes-payment')).createQuotedOrder({
+        userId: req.userId, purpose: 'marketplace_order', amountCHF: order.amountCHF, label: listing.title,
+        couponCode: parsed.data.couponCode, maxDiscountCHF: order.commissionCHF,   // discount is platform-funded, never the partner payout
+        metadata: { orderId: String(order._id), listingId: String(listing._id), partnerId: String(partner._id), commissionCHF: order.commissionCHF }
+      });
+    } catch (e) {
+      await market.transition(order, 'cancelled').catch(() => {});   // roll back the reserved stock/escrow if pricing fails
+      throw e;
+    }
     await Order.findByIdAndUpdate(order._id, { paymentId: quoted.payment._id });
     res.status(201).json({ order: quoted, marketplaceOrderId: order._id, listingTitle: listing.title, isGift: !!giftFor });
   } catch (err) {
+    if (err && /** @type {any} */ (err).coupon) return res.status(400).json({ error: msg(err) });   // invalid/exhausted coupon
     if (/delivery address/i.test(msg(err))) return res.status(400).json({ error: msg(err) });
     if (/stock|unavailable/i.test(msg(err))) return res.status(409).json({ error: msg(err) });
     next(err);

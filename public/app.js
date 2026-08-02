@@ -2258,13 +2258,16 @@ function pickDay(listingId, key) {
 async function bookAstro(slotId, btn) {
   if (btn) btn.disabled = true;
   try {
-    const r = await api('/consultation/book', { method: 'POST', body: { slotId } });
-    // Pay on the real rail, then confirm via the shared marketplace confirm-payment.
-    await payDirectOrder(r.order, 'marketplace_order', r.listingTitle || 'Consultation', async () => {
+    const body = { slotId };
+    const coupon = (document.getElementById('bk-coupon') || {}).value;
+    if (coupon && coupon.trim()) body.couponCode = coupon.trim();
+    const r = await api('/consultation/book', { method: 'POST', body });
+    const done = async () => {
       await api('/marketplace/orders/' + r.marketplaceOrderId + '/confirm-payment', { method: 'POST' });
-      toast('Booked & paid ✓');
-      nav('#/appointments');
-    });
+      toast('Booked ✓'); nav('#/appointments');
+    };
+    if (r.order.free) { await done(); }   // 100%-off coupon — nothing to pay
+    else await payDirectOrder(r.order, 'marketplace_order', r.listingTitle || 'Consultation', done);
   } catch (e) { toast(e.message); }
   finally { if (btn) btn.disabled = false; }
 }
@@ -2377,6 +2380,7 @@ async function renderProProfile(id) {
       ${partner.bio ? `<div class="card" style="margin-top:12px"><p class="hint" style="margin:0">${esc(partner.bio)}</p></div>` : ''}
       ${langs ? `<div class="hint" style="margin-top:8px">Languages: ${esc(langs)}</div>` : ''}
       <h2 style="font-size:1.05rem;margin:16px 0 8px">Book a session</h2>
+      <div class="field"><input id="bk-coupon" aria-label="Coupon code" placeholder="Coupon code (optional)"/></div>
       ${offerings.length ? offerings.map((/** @type {any} */ o) => `<div class="card"><div class="row" style="justify-content:space-between;align-items:flex-start">
         <div><b>${esc(o.listing.title || 'Consultation')}</b><div class="hint">${o.openSlots} open slot${o.openSlots === 1 ? '' : 's'}${o.listing.durationMin ? ' · ' + o.listing.durationMin + 'm' : ''}</div></div>
         <div style="text-align:right"><b>${esc(svcPrice(o.listing))}</b><div><button class="btn" style="width:auto;padding:6px 12px;margin-top:6px" onclick="astroSlots('${o.listing.id}')">Book</button></div></div>
@@ -3682,6 +3686,7 @@ async function renderProduct(id) {
       <div class="hint">${esc((partner && partner.name) || '')}${listing.city ? ' · ' + esc(listing.city) : ''}${partner && partner.verified ? ' · verified ✓' : ''}</div>
       <div class="card" style="margin:10px 0"><b>CHF ${listing.priceCHF}</b>${listing.description ? `<p class="hint" style="margin:.4em 0 0">${esc(listing.description)}</p>` : ''}</div>
       ${isProduct ? `<div id="buy-address">${addressFormHtml('sa')}</div>` : '<div class="hint">This is a service/booking — no delivery address needed.</div>'}
+      <div class="field mt"><input id="sa-coupon" aria-label="Coupon code" placeholder="Coupon code (optional)"/></div>
       <button class="btn mt" onclick="placeOrder('${listing.id}')">Buy for myself</button>
       <button class="btn secondary" onclick="openGiftPicker('${listing.id}')">🎁 Gift to a match</button>
       <p class="hint" style="margin-top:8px">Gifting is private: your match provides their own delivery address — you never see it.</p>`;
@@ -3710,13 +3715,17 @@ async function placeOrder(listingId, giftForUserId) {
       if (!a.name || !a.phone || !a.line1 || !a.city || !a.pincode) return toast('Please fill name, phone, street, city and PIN.');
       body.shippingAddress = a;
     }
+    const coupon = (document.getElementById('sa-coupon') || {}).value;
+    if (coupon && coupon.trim()) body.couponCode = coupon.trim();
     const r = await api('/marketplace/orders', { method: 'POST', body });
-    await payDirectOrder(r.order, 'marketplace_order', r.listingTitle || 'Order', async () => {
+    const done = async () => {
       await api('/marketplace/orders/' + r.marketplaceOrderId + '/confirm-payment', { method: 'POST' });
       closeModal();
       toast(giftForUserId ? 'Gift sent 🎁 — your match will choose delivery.' : 'Order placed ✓');
       nav('#/orders');
-    });
+    };
+    if (r.order.free) { await done(); }   // 100%-off coupon — nothing to pay
+    else await payDirectOrder(r.order, 'marketplace_order', r.listingTitle || 'Order', done);
   } catch (e) { toast(e.message); }
 }
 async function openGiftPicker(listingId) {
