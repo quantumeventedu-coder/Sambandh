@@ -15,6 +15,7 @@ const Order = require('./models/Order');
 const Slot = require('./models/ConsultantSlot');
 const Session = require('./models/Session');
 const market = require('./services/marketplace');
+const coupons = require('./services/coupons');
 const consult = require('./services/consultation');
 
 const router = express.Router();
@@ -83,7 +84,7 @@ router.get('/listings/:id/slots', requireAuth, async (req, res, next) => {
 // ==== Consumer: book a slot =================================================
 router.post('/book', requireAuth, async (req, res, next) => {
   try {
-    const parsed = z.object({ slotId: z.string().min(1) }).safeParse(req.body || {});
+    const parsed = z.object({ slotId: z.string().min(1), couponCode: z.string().max(40).optional() }).safeParse(req.body || {});
     if (!parsed.success) return res.status(400).json({ error: 'slotId required' });
     const slot = await Slot.findById(parsed.data.slotId);
     if (!slot || slot.status !== 'open') return res.status(409).json({ error: 'Slot is not available' });
@@ -92,17 +93,30 @@ router.post('/book', requireAuth, async (req, res, next) => {
     const partner = await Partner.findById(slot.partnerId);
     if (!partner || !partner.active) return res.status(404).json({ error: 'Consultant unavailable' });
 
+    // Validate a coupon (if any) BEFORE reserving the slot, so a bad code never strands it.
+    if (parsed.data.couponCode) await coupons.validate(parsed.data.couponCode, 'marketplace_order', consult.priceForListing(listing), req.userId);
     const { order, session } = await consult.bookSlot({ userId: req.userId, listing, partner, slot });
     // Payable order on the REAL rail (dev + Razorpay), like marketplace/gift-pass/verification —
     // returns { devMode, orderId, key, amount, currency, payment, ... } that payDirectOrder drives.
     // Pay + confirm via the shared /marketplace/orders/:id/confirm-payment (which capture-gates escrow).
-    const quoted = await /** @type {any} */ (require('./routes-payment')).createQuotedOrder({
-      userId: req.userId, purpose: 'marketplace_order', amountCHF: order.amountCHF, label: listing.title,
-      metadata: { orderId: String(order._id), sessionId: String(session._id), listingId: String(listing._id), partnerId: String(partner._id) },
-    });
+    let quoted;
+    try {
+      quoted = await /** @type {any} */ (require('./routes-payment')).createQuotedOrder({
+        userId: req.userId, purpose: 'marketplace_order', amountCHF: order.amountCHF, label: listing.title,
+        couponCode: parsed.data.couponCode, maxDiscountCHF: order.commissionCHF,   // discount is platform-funded, never the consultant payout
+        metadata: { orderId: String(order._id), sessionId: String(session._id), listingId: String(listing._id), partnerId: String(partner._id) },
+      });
+    } catch (e) {
+      // Roll back the slot reservation if pricing fails, so a bad coupon never strands it.
+      await market.atomicUpdate(Slot, { _id: slot._id }, { $set: { status: 'open', orderId: null } }).catch(() => {});
+      await market.transition(order, 'cancelled').catch(() => {});
+      await Session.findByIdAndUpdate(session._id, { status: 'cancelled' }).catch(() => {});
+      throw e;
+    }
     await Order.findByIdAndUpdate(order._id, { paymentId: quoted.payment._id });
     res.status(201).json({ session: pubSession(session), order: quoted, marketplaceOrderId: order._id, listingTitle: listing.title });
   } catch (err) {
+    if (err && /** @type {any} */ (err).coupon) return res.status(400).json({ error: msg(err) });   // invalid/exhausted coupon
     if (/available|taken/i.test(msg(err))) return res.status(409).json({ error: msg(err) });
     next(err);
   }

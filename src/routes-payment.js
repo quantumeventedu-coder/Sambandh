@@ -946,12 +946,24 @@ router.post('/webhook', async (req, res, next) => {
  * canonical CHF base so a later confirm step can pin purpose + amount + ownership.
  * `metadata` (e.g. { giftPassId }/{ caseId }) binds the payment to what it pays for.
  * Dev mode simulates the order id ('order_dev_…', captured by the normal /verify path).
- * @param {{ userId:any, purpose:string, amountCHF:number, category?:string, label?:string, metadata?:Record<string,any> }} args
+ * @param {{ userId:any, purpose:string, amountCHF:number, category?:string, label?:string, metadata?:Record<string,any>, couponCode?:string, maxDiscountCHF?:number }} args
  */
-async function createQuotedOrder({ userId, purpose, amountCHF, category, label, metadata = {} }) {
+async function createQuotedOrder({ userId, purpose, amountCHF, category, label, metadata = {}, couponCode, maxDiscountCHF }) {
   const user = await User.findById(userId);
   if (!user) throw new Error('User not found');
-  const quote = await quoteForAmount(Number(amountCHF), category || categoryForPurpose(purpose), user, label);
+  // Optional coupon: validated here (throws a coupon error on invalid/exhausted), applied as a
+  // CHF discount, and stashed in metadata so the existing capture-time redeemOrderCoupon consumes
+  // it idempotently (order-bound via couponOrderRef) — the same rail membership checkout uses.
+  let discountCHF = 0, coupon = null;
+  if (couponCode) {
+    const v = await coupons.validate(couponCode, purpose, Number(amountCHF), userId);
+    coupon = v.coupon; discountCHF = v.discountCHF;
+    // On a PARTNER order the discount is platform-funded: cap it at Sambandh's commission so the
+    // partner payout is always fully covered by the (reduced) charge and the platform can never
+    // pay a partner from money it didn't collect. This also means a partner order can never be free.
+    if (maxDiscountCHF != null && Number.isFinite(Number(maxDiscountCHF))) discountCHF = Math.min(discountCHF, Math.max(0, Number(maxDiscountCHF)));
+  }
+  const quote = await quoteForAmount(Number(amountCHF), category || categoryForPurpose(purpose), user, label, discountCHF);
   if (!quote) throw new Error('Invalid order amount');
   // Persisted with the order so /verify, receipts and pro-rated refunds read the real
   // charged amounts back from the DB, never from the request body.
@@ -960,16 +972,34 @@ async function createQuotedOrder({ userId, purpose, amountCHF, category, label, 
     taxTotal: quote.taxTotal, taxLines: quote.taxLines,
     gatewayFeePct: quote.gatewayFeePct, gatewayFee: quote.gatewayFee,
     total: quote.total, country: quote.country, category: quote.category,
+    grossBase: quote.grossBase, discountCHF: quote.discountCHF, discountLocal: quote.discountLocal,
   };
+  const couponMeta = coupon ? { couponCode: coupon.code, discountCHF: quote.discountCHF, discountLocal: quote.discountLocal, couponOrderRef: 'oc_' + crypto.randomBytes(8).toString('hex') } : {};
   const clientQuote = {
     amount: quote.minor, amountMajor: quote.total, amountCHF: quote.chf,
-    currency: quote.code, symbol: quote.symbol, breakdown,
+    currency: quote.code, symbol: quote.symbol, breakdown, couponCode: coupon ? coupon.code : null,
   };
+  // FREE order (e.g. a 100%-off tester coupon): there is nothing to charge, so no gateway order.
+  // Create a CAPTURED payment, redeem the coupon now (idempotent), and flag it so the caller
+  // confirms the order directly without opening a checkout.
+  if (quote.total <= 0) {
+    const orderId = 'free_' + crypto.randomBytes(8).toString('hex');
+    // Gate the free grant on an ATOMIC coupon consume FIRST — so N concurrent 100%-off requests
+    // lose the CAS and get a coupon error (→ 400) instead of each minting a free order; a capped or
+    // per-user-limited coupon can therefore never yield more free orders than its cap allows.
+    if (coupon) await coupons.redeem({ coupon, userId, orderRef: /** @type {string} */ (couponMeta.couponOrderRef), paymentId: orderId, purpose, discountCHF: quote.discountCHF, discountLocal: quote.discountLocal, currency: quote.code });
+    const payment = await Payment.create({
+      userId, purpose, amountCHF: quote.chf, currency: quote.code, razorpayOrderId: orderId,
+      status: 'captured', capturedAt: new Date(), createdAt: new Date(),
+      metadata: { ...metadata, free: true, amountLocal: quote.total, ...breakdown, ...couponMeta },
+    });
+    return { free: true, devMode: true, orderId, payment, ...clientQuote };
+  }
   if (DEV_PAYMENTS) {
     const orderId = 'order_dev_' + crypto.randomBytes(8).toString('hex');
     const payment = await Payment.create({
       userId, purpose, amountCHF: quote.chf, currency: quote.code, razorpayOrderId: orderId,
-      status: 'created', createdAt: new Date(), metadata: { ...metadata, dev: true, amountLocal: quote.total, ...breakdown }
+      status: 'created', createdAt: new Date(), metadata: { ...metadata, dev: true, amountLocal: quote.total, ...breakdown, ...couponMeta }
     });
     return { devMode: true, orderId, payment, ...clientQuote };
   }
@@ -981,7 +1011,7 @@ async function createQuotedOrder({ userId, purpose, amountCHF, category, label, 
   });
   const payment = await Payment.create({
     userId, purpose, amountCHF: quote.chf, currency: quote.code, razorpayOrderId: order.id,
-    status: 'created', createdAt: new Date(), metadata: { ...metadata, amountLocal: quote.total, ...breakdown }
+    status: 'created', createdAt: new Date(), metadata: { ...metadata, amountLocal: quote.total, ...breakdown, ...couponMeta }
   });
   return {
     devMode: false, orderId: order.id, key: process.env.RAZORPAY_KEY_ID, payment,

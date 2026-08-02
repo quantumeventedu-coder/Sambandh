@@ -18,6 +18,7 @@ const Listing = require('../src/models/Listing');
 const Order = require('../src/models/Order');
 const Payment = require('../src/models/Payment');
 const Chat = require('../src/models/Chat');
+const Coupon = require('../src/models/Coupon');
 const market = require('../src/services/marketplace');
 
 const app = express();
@@ -302,6 +303,33 @@ describe('hardening: fixes from the adversarial money-review', () => {
     expect(after.stock).toBe(5); expect(after.priceCHF).toBe(100);    // strings ignored
     await request(app).patch(`/api/marketplace/listings/${listing._id}`).set(SK).send({ stock: 2.5 });
     expect((await Listing.findById(listing._id)).stock).toBe(5);      // float stock ignored
+  });
+});
+
+describe('coupons on marketplace checkout', () => {
+  test('a coupon discounts the order but is CAPPED at commission (never eats the partner payout); a bad code is rejected before stock is touched', async () => {
+    const { listing } = await seedPartnerListing();   // Rose box 100 CHF · gift commission 15% = 15
+    const buyer = await mkUser();
+    await Coupon.create({ code: 'HALF', active: true, kind: 'percent', percentOff: 50, appliesTo: ['*'], redeemedCount: 0 });
+    const ok = await request(app).post('/api/marketplace/orders').set(auth(buyer)).send({ listingId: String(listing._id), shippingAddress: ADDR, couponCode: 'HALF' });
+    expect(ok.status).toBe(201);
+    expect(ok.body.order.couponCode).toBe('HALF');
+    const d = (await Payment.findById(ok.body.order.payment._id)).metadata.discountCHF;
+    expect(d).toBeGreaterThan(0);
+    expect(d).toBeLessThanOrEqual(15.01);   // 50% would be 50, but capped at the 15% commission
+    const bad = await request(app).post('/api/marketplace/orders').set(auth(buyer)).send({ listingId: String(listing._id), shippingAddress: ADDR, couponCode: 'NOPE' });
+    expect(bad.status).toBe(400);
+  });
+
+  test('a 100%-off coupon on a PARTNER order is capped at commission — NOT free, so the platform never pays the partner from nothing', async () => {
+    const { listing } = await seedPartnerListing();
+    const buyer = await mkUser();
+    await Coupon.create({ code: 'FREE100', active: true, kind: 'percent', percentOff: 100, appliesTo: ['*'], redeemedCount: 0 });
+    const r = await request(app).post('/api/marketplace/orders').set(auth(buyer)).send({ listingId: String(listing._id), shippingAddress: ADDR, couponCode: 'FREE100' });
+    expect(r.status).toBe(201);
+    expect(r.body.order.free).toBeFalsy();                                   // capped → still a real (reduced) charge
+    expect((await Payment.findById(r.body.order.payment._id)).metadata.discountCHF).toBeLessThanOrEqual(15.01);
+    expect((await Payment.findById(r.body.order.payment._id)).status).toBe('created');   // must go through the gateway
   });
 });
 
