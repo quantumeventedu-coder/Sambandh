@@ -28,6 +28,17 @@
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
 html, body { height: 100%; }
+/* Offline / slow-network state (SHIG §24): a fixed banner while the device is offline. */
+#net-banner { display: none; position: fixed; top: 0; left: 0; right: 0; z-index: 9999;
+  background: var(--danger); color: #fff; text-align: center; font-size: 13px; font-weight: 600;
+  padding: 8px 12px; padding-top: calc(8px + env(safe-area-inset-top, 0px)); }
+body.offline #net-banner { display: block; }
+/* Skeleton placeholder (SHIG §24): a calm shimmer for loading lists. */
+.skel { position: relative; overflow: hidden; background: var(--sand-mid); border-radius: var(--r-md, 12px); }
+.skel::after { content: ""; position: absolute; inset: 0; transform: translateX(-100%);
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,.45), transparent); animation: skel 1.3s infinite; }
+@keyframes skel { 100% { transform: translateX(100%); } }
+@media (prefers-reduced-motion: reduce) { .skel::after { animation: none; } }
 body {
   font-family: var(--sans);
   background: var(--sand-mid);
