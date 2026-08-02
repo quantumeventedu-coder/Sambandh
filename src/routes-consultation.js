@@ -14,9 +14,11 @@ const Listing = require('./models/Listing');
 const Order = require('./models/Order');
 const Slot = require('./models/ConsultantSlot');
 const Session = require('./models/Session');
+const User = require('./models/User');
 const market = require('./services/marketplace');
 const coupons = require('./services/coupons');
 const consult = require('./services/consultation');
+const { sharesActiveMatch } = require('./services/verification-service');
 
 const router = express.Router();
 const staff = requireSuperOrScope('market:manage');
@@ -84,7 +86,7 @@ router.get('/listings/:id/slots', requireAuth, async (req, res, next) => {
 // ==== Consumer: book a slot =================================================
 router.post('/book', requireAuth, async (req, res, next) => {
   try {
-    const parsed = z.object({ slotId: z.string().min(1), couponCode: z.string().max(40).optional() }).safeParse(req.body || {});
+    const parsed = z.object({ slotId: z.string().min(1), couponCode: z.string().max(40).optional(), giftForUserId: z.string().max(64).optional() }).safeParse(req.body || {});
     if (!parsed.success) return res.status(400).json({ error: 'slotId required' });
     const slot = await Slot.findById(parsed.data.slotId);
     if (!slot || slot.status !== 'open') return res.status(409).json({ error: 'Slot is not available' });
@@ -93,9 +95,15 @@ router.post('/book', requireAuth, async (req, res, next) => {
     const partner = await Partner.findById(slot.partnerId);
     if (!partner || !partner.active) return res.status(404).json({ error: 'Consultant unavailable' });
 
+    // Gifting a session is only to a real, mutual match — never a stranger, never yourself.
+    const giftFor = parsed.data.giftForUserId;
+    if (giftFor) {
+      if (String(giftFor) === String(req.userId)) return res.status(400).json({ error: "You can't gift yourself." });
+      if (!(await sharesActiveMatch(req.userId, giftFor))) return res.status(403).json({ error: 'You can only gift a session to one of your matches.' });
+    }
     // Validate a coupon (if any) BEFORE reserving the slot, so a bad code never strands it.
     if (parsed.data.couponCode) await coupons.validate(parsed.data.couponCode, 'marketplace_order', consult.priceForListing(listing), req.userId);
-    const { order, session } = await consult.bookSlot({ userId: req.userId, listing, partner, slot });
+    const { order, session } = await consult.bookSlot({ userId: req.userId, listing, partner, slot, giftForUserId: giftFor });
     // Payable order on the REAL rail (dev + Razorpay), like marketplace/gift-pass/verification —
     // returns { devMode, orderId, key, amount, currency, payment, ... } that payDirectOrder drives.
     // Pay + confirm via the shared /marketplace/orders/:id/confirm-payment (which capture-gates escrow).
@@ -126,7 +134,10 @@ router.post('/book', requireAuth, async (req, res, next) => {
 // so the client can render a real "My appointments" screen (upcoming / completed / cancelled).
 router.get('/sessions', requireAuth, async (req, res, next) => {
   try {
-    const sessions = await Session.find({ userId: req.userId }).sort({ createdAt: -1 }).limit(100).lean();
+    // The attendee's sessions, PLUS any I booked as a gift and have handed off (bookedBy me, attended by someone else).
+    const mine = await Session.find({ userId: req.userId }).limit(100).lean();
+    const sent = (await Session.find({ bookedByUserId: req.userId }).limit(100).lean()).filter((/** @type {any} */ s) => String(s.userId) !== String(req.userId));
+    const sessions = [...mine, ...sent].sort((/** @type {any} */ a, /** @type {any} */ b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
     const out = [];
     for (const s of sessions) {
       const [order, partner, slot] = await Promise.all([
@@ -146,9 +157,81 @@ router.get('/sessions', requireAuth, async (req, res, next) => {
         durationMin: (slot && slot.durationMin) || null,
         amountCHF: order ? order.amountCHF : null,
         orderStatus: (order && order.status) || null,
+        isGiftSent: String(s.bookedByUserId) === String(req.userId) && String(s.userId) !== String(req.userId),   // I gifted this to someone
+        giftStatus: (order && order.giftStatus) || 'none',
       });
     }
     res.json({ sessions: out });
+  } catch (err) { next(err); }
+});
+
+// Consultation GIFTS awaiting me (recipient) — the buyer paid; I accept (attend) or decline (they're refunded).
+router.get('/gifts', requireAuth, async (req, res, next) => {
+  try {
+    const sessions = await Session.find({ giftForUserId: req.userId }).sort({ createdAt: -1 }).limit(100).lean();
+    const out = [];
+    for (const s of sessions) {
+      const order = await Order.findById(s.orderId).lean();
+      if (!order || order.giftStatus !== 'pending' || !['paid', 'confirmed'].includes(order.status)) continue;   // only real, paid, awaiting-acceptance gifts
+      const [partner, slot, buyer, listing] = await Promise.all([
+        Partner.findById(s.partnerId).select('name category').lean(),
+        s.slotId ? Slot.findById(s.slotId).lean() : null,
+        User.findById(s.bookedByUserId).select('profile.firstName').lean(),
+        Listing.findById(order.listingId).select('title').lean(),
+      ]);
+      out.push({
+        id: s._id, title: (listing && listing.title) || 'Consultation',
+        partnerName: (partner && partner.name) || 'Consultant',
+        from: (buyer && buyer.profile && buyer.profile.firstName) || 'A match',
+        scheduledFor: (slot && slot.startsAt) || null, durationMin: (slot && slot.durationMin) || null,
+        amountCHF: order.amountCHF,
+      });
+    }
+    res.json({ gifts: out });
+  } catch (err) { next(err); }
+});
+
+/** A consultation gift owner-check keyed on the RECIPIENT (giftForUserId). @param {any} req @param {any} res */
+async function myConsultGift(req, res) {
+  const session = await Session.findById(req.params.id);
+  if (!session || String(session.giftForUserId) !== String(req.userId)) { res.status(404).json({ error: 'Gift not found' }); return null; }
+  return session;
+}
+
+// Recipient accepts a gifted session → the session ATTENDANCE transfers to them; the order's
+// gift gate opens so the consultant can start. (The buyer stays the payer who completes the order.)
+router.post('/sessions/:id/accept-gift', requireAuth, async (req, res, next) => {
+  try {
+    const session = await myConsultGift(req, res); if (!session) return;
+    const order = await Order.findById(session.orderId);
+    if (!order || order.giftStatus !== 'pending') return res.status(409).json({ error: 'This gift is no longer pending.' });
+    const won = await market.atomicUpdate(Order, { _id: order._id, giftStatus: 'pending' }, { $set: { giftStatus: 'accepted', giftRespondedAt: new Date() } });
+    if (!won) return res.status(409).json({ error: 'This gift is no longer pending.' });
+    await Session.findByIdAndUpdate(session._id, { userId: req.userId });   // recipient is now the attendee
+    res.json({ ok: true, accepted: true });
+  } catch (err) { next(err); }
+});
+
+// Recipient declines → refund the buyer (escrow-safe), free the slot, cancel the session.
+router.post('/sessions/:id/decline-gift', requireAuth, async (req, res, next) => {
+  try {
+    const session = await myConsultGift(req, res); if (!session) return;
+    const order = await Order.findById(session.orderId);
+    if (!order || order.giftStatus !== 'pending') return res.status(409).json({ error: 'This gift is no longer pending.' });
+    // CLAIM the decline atomically FIRST — giftStatus is the single serialization point shared with
+    // accept-gift, so a concurrent accept can't also apply its side effect. Only if we win do we
+    // reverse the money, free the slot and cancel the session.
+    const won = await market.atomicUpdate(Order, { _id: order._id, giftStatus: 'pending' }, { $set: { giftStatus: 'declined', giftRespondedAt: new Date() } });
+    if (!won) return res.status(409).json({ error: 'This gift is no longer pending.' });
+    // Reverse the buyer's money (escrow-safe). If it throws, giftStatus is already 'declined', so the
+    // nightly market.reconcileStrandedOrders sweep reverses the still-captured payment.
+    try {
+      if (order.status === 'created') await market.transition(order, 'cancelled');
+      else if (['paid', 'confirmed', 'disputed'].includes(order.status)) await market.transition(order, 'refunded');
+    } catch { /* declined; reconciliation backstops the refund */ }
+    await market.atomicUpdate(Slot, { _id: session.slotId }, { $set: { status: 'open', orderId: null } });
+    await Session.findByIdAndUpdate(session._id, { status: 'cancelled' });
+    res.json({ ok: true, declined: true });
   } catch (err) { next(err); }
 });
 

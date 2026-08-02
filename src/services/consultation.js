@@ -45,22 +45,28 @@ async function publishSlot({ partner, listing, startsAt, durationMin }) {
 /**
  * Book a slot: ATOMICALLY reserve it (open → booked), then create the order + session.
  * If the order can't be created, the slot reservation is rolled back so it stays open.
- * @param {{ userId:any, listing:any, partner:any, slot:any }} args
+ * @param {{ userId:any, listing:any, partner:any, slot:any, giftForUserId?:any }} args
  */
-async function bookSlot({ userId, listing, partner, slot }) {
+async function bookSlot({ userId, listing, partner, slot, giftForUserId }) {
   if (!slot || slot.status !== 'open') throw new Error('Slot is not available');
   const reserved = await market.atomicUpdate(Slot, { _id: slot._id, status: 'open' }, { $set: { status: 'booked' } });
   if (!reserved) throw new Error('That slot was just taken');
   try {
     const amount = priceForListing(listing);
     const synthetic = { _id: listing._id, kind: 'booking', priceCHF: amount, stock: null, active: listing.active };
-    const order = await market.createOrder({ userId, listing: synthetic, partner, scheduledFor: new Date(slot.startsAt) });
+    const order = await market.createOrder({ userId, listing: synthetic, partner, scheduledFor: new Date(slot.startsAt), giftForUserId });
     await market.atomicUpdate(Slot, { _id: slot._id }, { $set: { orderId: String(order._id) } });
     const session = await Session.create({
-      orderId: order._id, slotId: slot._id, partnerId: partner._id, userId,
+      orderId: order._id, slotId: slot._id, partnerId: partner._id,
+      userId,                                            // attendee (buyer until a gift is accepted)
+      bookedByUserId: userId, giftForUserId: giftForUserId || null,
       status: 'scheduled', createdAt: new Date()
     });
-    notify(userId, { type: 'appointment', severity: 'info', title: 'Appointment booked 🗓️', body: `Your ${listing.title || 'consultation'} with ${partner.name || 'your consultant'} is booked. See it under My appointments.` });
+    // A gift is announced to the recipient only once it's paid (marketplace confirm-payment); the
+    // buyer just gets a "gift booked" note here.
+    notify(userId, giftForUserId
+      ? { type: 'appointment', severity: 'info', title: 'Gift booked 🎁', body: `Your ${listing.title || 'consultation'} gift is booked — your match will be asked to accept it.` }
+      : { type: 'appointment', severity: 'info', title: 'Appointment booked 🗓️', body: `Your ${listing.title || 'consultation'} with ${partner.name || 'your consultant'} is booked. See it under My appointments.` });
     return { order, session };
   } catch (err) {
     await market.atomicUpdate(Slot, { _id: slot._id }, { $set: { status: 'open' } });   // roll back

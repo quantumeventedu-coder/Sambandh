@@ -13,7 +13,9 @@ const SessionSchema = new mongoose.Schema({
   orderId: { type: mongoose.Schema.Types.ObjectId, ref: 'Order', required: true, unique: true, sparse: true },
   slotId: { type: mongoose.Schema.Types.ObjectId, ref: 'ConsultantSlot', required: true },
   partnerId: { type: mongoose.Schema.Types.ObjectId, ref: 'Partner', required: true, index: true },
-  userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
+  userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },   // the ATTENDEE (transfers to the recipient when a gift is accepted)
+  bookedByUserId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', index: true },            // who paid (the gift buyer); = userId for a self-booking
+  giftForUserId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null, index: true }, // recipient, until they accept
   status: { type: String, enum: SESSION_STATES, default: 'scheduled', index: true },
   startedAt: Date,
   endedAt: Date,

@@ -19,6 +19,7 @@ const Payment = require('../src/models/Payment');
 const Order = require('../src/models/Order');
 const Slot = require('../src/models/ConsultantSlot');
 const Session = require('../src/models/Session');
+const Chat = require('../src/models/Chat');
 const consult = require('../src/services/consultation');
 
 const app = express();
@@ -172,6 +173,63 @@ describe('public professional profile', () => {
   test('a non-consultation partner (e.g. gift shop) is 404 on the consultant profile', async () => {
     const shop = await Partner.create({ name: 'Gift Shop', category: 'gift', active: true });
     expect((await request(app).get('/api/consultation/consultants/' + shop._id).set(auth(await mkUser()))).status).toBe(404);
+  });
+});
+
+describe('gift a consultation to a match', () => {
+  const matchThem = (a, b) => Chat.create({ participants: [a._id, b._id], status: 'active' });
+  async function paidGift() {
+    const { slot } = await seedConsultant();
+    const buyer = await mkUser(), recipient = await mkUser();
+    await matchThem(buyer, recipient);
+    const bRes = await request(app).post('/api/consultation/book').set(auth(buyer)).send({ slotId: String(slot._id), giftForUserId: String(recipient._id) });
+    expect(bRes.status).toBe(201);
+    const orderId = bRes.body.marketplaceOrderId, paymentId = bRes.body.order.payment._id, sessionId = bRes.body.session.id;
+    await Payment.findByIdAndUpdate(paymentId, { status: 'captured' });
+    await request(app).post(`/api/marketplace/orders/${orderId}/confirm-payment`).set(auth(buyer));   // → paid, recipient notified
+    return { slot, buyer, recipient, orderId, paymentId, sessionId };
+  }
+
+  test('recipient accepts → attendance transfers; the consultant can only start after acceptance', async () => {
+    const { recipient, sessionId, orderId } = await paidGift();
+    expect((await request(app).get('/api/consultation/gifts').set(auth(recipient))).body.gifts.length).toBe(1);
+    const pre = await request(app).post(`/api/consultation/sessions/${sessionId}/start`).set(SK);
+    expect(pre.status).toBe(409);                                              // gift gate blocks start until accepted
+    const acc = await request(app).post(`/api/consultation/sessions/${sessionId}/accept-gift`).set(auth(recipient));
+    expect(acc.status).toBe(200);
+    expect(String((await Session.findById(sessionId)).userId)).toBe(String(recipient._id));   // attendance transferred
+    expect((await Order.findById(orderId)).giftStatus).toBe('accepted');
+    expect((await request(app).post(`/api/consultation/sessions/${sessionId}/start`).set(SK)).status).toBe(200);
+  });
+
+  test('declining a gifted session refunds the buyer and frees the slot', async () => {
+    const { recipient, sessionId, orderId, paymentId, slot } = await paidGift();
+    expect((await request(app).post(`/api/consultation/sessions/${sessionId}/decline-gift`).set(auth(await mkUser()))).status).toBe(404);   // stranger can't decline
+    const okDec = await request(app).post(`/api/consultation/sessions/${sessionId}/decline-gift`).set(auth(recipient));
+    expect(okDec.status).toBe(200);
+    expect((await Order.findById(orderId)).status).toBe('refunded');
+    expect((await Payment.findById(paymentId)).status).toBe('refunded');
+    expect((await Slot.findById(slot._id)).status).toBe('open');
+    expect((await Session.findById(sessionId)).status).toBe('cancelled');
+  });
+
+  test('accept and decline are serialized by the giftStatus CAS — once accepted, decline is refused (no rogue refund/cancel)', async () => {
+    const { recipient, sessionId, orderId, paymentId } = await paidGift();
+    expect((await request(app).post(`/api/consultation/sessions/${sessionId}/accept-gift`).set(auth(recipient))).status).toBe(200);
+    const dec = await request(app).post(`/api/consultation/sessions/${sessionId}/decline-gift`).set(auth(recipient));
+    expect(dec.status).toBe(409);                                            // already accepted
+    expect((await Session.findById(sessionId)).status).not.toBe('cancelled'); // not cancelled out from under the recipient
+    expect((await Order.findById(orderId)).status).not.toBe('refunded');      // buyer NOT wrongly refunded
+    expect((await Payment.findById(paymentId)).status).toBe('captured');
+  });
+
+  test('gifting is refused for a non-match / self; a stranger cannot accept', async () => {
+    const { sessionId } = await paidGift();
+    expect((await request(app).post(`/api/consultation/sessions/${sessionId}/accept-gift`).set(auth(await mkUser()))).status).toBe(404);
+    const { slot } = await seedConsultant();
+    const buyer = await mkUser(), other = await mkUser();
+    expect((await request(app).post('/api/consultation/book').set(auth(buyer)).send({ slotId: String(slot._id), giftForUserId: String(other._id) })).status).toBe(403);
+    expect((await request(app).post('/api/consultation/book').set(auth(buyer)).send({ slotId: String(slot._id), giftForUserId: String(buyer._id) })).status).toBe(400);
   });
 });
 

@@ -2258,13 +2258,17 @@ function pickDay(listingId, key) {
 async function bookAstro(slotId, btn) {
   if (btn) btn.disabled = true;
   try {
+    /** @type {any} */
     const body = { slotId };
     const coupon = (document.getElementById('bk-coupon') || {}).value;
     if (coupon && coupon.trim()) body.couponCode = coupon.trim();
+    if (S._giftConsult) body.giftForUserId = S._giftConsult;   // gifting this slot to a match
     const r = await api('/consultation/book', { method: 'POST', body });
+    const wasGift = !!body.giftForUserId;
     const done = async () => {
       await api('/marketplace/orders/' + r.marketplaceOrderId + '/confirm-payment', { method: 'POST' });
-      toast('Booked ✓'); nav('#/appointments');
+      S._giftConsult = null;
+      toast(wasGift ? 'Gift sent 🎁 — your match will accept it.' : 'Booked ✓'); nav('#/appointments');
     };
     if (r.order.free) { await done(); }   // 100%-off coupon — nothing to pay
     else await payDirectOrder(r.order, 'marketplace_order', r.listingTitle || 'Consultation', done);
@@ -2275,8 +2279,33 @@ async function bookAstro(slotId, btn) {
 async function renderAppointments() {
   screen.innerHTML = `<div class="section-pad"><button class="back" onclick="nav('#/services')">← Services</button>
     <h1 style="margin:.2em 0">My appointments</h1>
+    <div id="appt-gifts"></div>
     <div id="appt-list"><div class="empty">Loading…</div></div></div>`;
-  loadAppointments();
+  loadConsultGifts(); loadAppointments();
+}
+async function loadConsultGifts() {
+  const el = document.getElementById('appt-gifts'); if (!el) return;
+  try {
+    const r = await api('/consultation/gifts');
+    const gifts = r.gifts || [];
+    if (!gifts.length) { el.innerHTML = ''; return; }
+    el.innerHTML = '<h2 style="font-size:1.05rem;margin:8px 0">Gifts for you 🎁</h2>' + gifts.map((/** @type {any} */ g) => {
+      const when = g.scheduledFor ? new Date(g.scheduledFor).toLocaleString([], { weekday: 'short', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '';
+      return `<div class="card"><b>${esc(g.title)}</b> <span class="hint">· ${esc(g.partnerName)} · from ${esc(g.from)}</span>
+        ${when ? `<div class="hint">${esc(when)}</div>` : ''}
+        <div class="row mt" style="gap:8px"><button class="btn" style="width:auto" onclick="acceptConsultGift('${g.id}')">Accept</button>
+        <button class="btn secondary" style="width:auto" onclick="declineConsultGift('${g.id}')">Decline</button></div></div>`;
+    }).join('');
+  } catch (e) { el.innerHTML = ''; }
+}
+async function acceptConsultGift(id) {
+  try { await api('/consultation/sessions/' + id + '/accept-gift', { method: 'POST' }); toast('Gift accepted 🎁'); loadConsultGifts(); loadAppointments(); }
+  catch (e) { toast(e.message); }
+}
+async function declineConsultGift(id) {
+  if (!confirm('Decline this gift? The sender will be refunded.')) return;
+  try { await api('/consultation/sessions/' + id + '/decline-gift', { method: 'POST' }); toast('Declined'); loadConsultGifts(); }
+  catch (e) { toast(e.message); }
 }
 async function loadAppointments() {
   const el = document.getElementById('appt-list'); if (!el) return;
@@ -2362,6 +2391,20 @@ async function loadPros() {
       <div style="text-align:right"><b>${esc(svcPrice(x.listing))}</b><div class="hint">View →</div></div></div></div>`).join('');
   } catch (e) { el.innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
 }
+// Gift a consultation: pick a match, then pick a slot (books with giftForUserId).
+async function giftConsultPick(listingId) {
+  try {
+    const r = await api('/marketplace/gift-recipients');
+    const recips = r.recipients || [];
+    const rows = recips.length
+      ? recips.map((/** @type {any} */ p) => `<button class="btn secondary" style="justify-content:flex-start" onclick="S._giftConsult='${p.userId}';closeModal();toast('Now pick a slot to gift');astroSlots('${listingId}')">${esc(p.name)}</button>`).join('')
+      : '<div class="empty">You have no revealed matches to gift yet.</div>';
+    openModal(`<h2 style="margin-top:0">Gift a session 🎁</h2>
+      <p class="hint">Pick a match, then choose a slot. They accept and attend — you never see their details, and if they decline you're refunded.</p>
+      <div style="display:flex;flex-direction:column;gap:8px">${rows}</div>
+      <button class="btn secondary mt" onclick="closeModal()">Cancel</button>`);
+  } catch (e) { toast(e.message); }
+}
 // ===== Consumer professional profile =====
 function prettyCat(c) { return String(c || '').replace(/_/g, ' ').replace(/\b\w/g, (m) => m.toUpperCase()); }
 async function renderProProfile(id) {
@@ -2383,7 +2426,7 @@ async function renderProProfile(id) {
       <div class="field"><input id="bk-coupon" aria-label="Coupon code" placeholder="Coupon code (optional)"/></div>
       ${offerings.length ? offerings.map((/** @type {any} */ o) => `<div class="card"><div class="row" style="justify-content:space-between;align-items:flex-start">
         <div><b>${esc(o.listing.title || 'Consultation')}</b><div class="hint">${o.openSlots} open slot${o.openSlots === 1 ? '' : 's'}${o.listing.durationMin ? ' · ' + o.listing.durationMin + 'm' : ''}</div></div>
-        <div style="text-align:right"><b>${esc(svcPrice(o.listing))}</b><div><button class="btn" style="width:auto;padding:6px 12px;margin-top:6px" onclick="astroSlots('${o.listing.id}')">Book</button></div></div>
+        <div style="text-align:right"><b>${esc(svcPrice(o.listing))}</b><div style="display:flex;gap:6px;margin-top:6px"><button class="btn" style="width:auto;padding:6px 12px" onclick="S._giftConsult=null;astroSlots('${o.listing.id}')">Book</button><button class="btn secondary" style="width:auto;padding:6px 10px" onclick="giftConsultPick('${o.listing.id}')">🎁 Gift</button></div></div>
         </div><div id="aslots-${o.listing.id}"></div></div>`).join('') : '<div class="empty">No offerings available right now.</div>'}
       <div id="pro-reviews" style="margin-top:8px"></div>`;
   } catch (e) { const el = document.getElementById('pro'); if (el) el.innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
