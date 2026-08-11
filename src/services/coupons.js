@@ -55,9 +55,11 @@ function discountFor(coupon, chf) {
 /** @param {string} code */
 async function findByCode(code) { return Coupon.findOne({ code: normalizeCode(code) }); }
 
-/** @param {any} couponId @param {any} userId */
+/** How many times this user has ACTIVELY redeemed this coupon. Released reservations (abandoned /
+ * cancelled / refunded checkouts) do NOT count — otherwise abandoning a checkout would lock a user
+ * out of a one-time coupon they never actually used. @param {any} couponId @param {any} userId */
 async function userRedemptionCount(couponId, userId) {
-  return (await CouponRedemption.find({ couponId, userId })).length;
+  return (await CouponRedemption.find({ couponId, userId })).filter((/** @type {any} */ r) => !r.released).length;
 }
 
 /**
@@ -105,8 +107,15 @@ async function redeem({ coupon, userId, orderRef, paymentId, purpose, discountCH
     // over-issue rather than fail a payment that already succeeded (redeemOrderCoupon swallows).
     const won = await atomicUpdate(CouponRedemption, { redemptionKey, released: true }, { $set: { released: false, committed: true, releasedAt: null } });
     if (won) {
-      if (coupon.remaining != null) await atomicUpdate(Coupon, { _id: couponId, remaining: { $gt: 0 } }, { $inc: { remaining: -1, redeemedCount: 1 }, $set: { updatedAt: new Date() } });
-      else await atomicUpdate(Coupon, { _id: couponId }, { $inc: { redeemedCount: 1 }, $set: { updatedAt: new Date() } });
+      if (coupon.remaining != null) {
+        const dec = await atomicUpdate(Coupon, { _id: couponId, remaining: { $gt: 0 } }, { $inc: { remaining: -1, redeemedCount: 1 }, $set: { updatedAt: new Date() } });
+        // Cap already re-filled by others → we can't take a slot, but this IS a real redemption:
+        // still count it (redeemedCount) so reporting + the update() cap-recompute stay truthful.
+        // remaining stays floored at 0 — a single, bounded over-issue on an already-completed pay.
+        if (!dec) await atomicUpdate(Coupon, { _id: couponId }, { $inc: { redeemedCount: 1 }, $set: { updatedAt: new Date() } });
+      } else {
+        await atomicUpdate(Coupon, { _id: couponId }, { $inc: { redeemedCount: 1 }, $set: { updatedAt: new Date() } });
+      }
     }
     return await CouponRedemption.findOne({ redemptionKey });
   }
@@ -157,11 +166,11 @@ async function redeem({ coupon, userId, orderRef, paymentId, purpose, discountCH
  * on the reservation row, so two concurrent releases (e.g. an explicit cancel racing the nightly
  * sweep) can never both restore the counter. The row is left in place (marked released) — if the
  * order's payment later captures anyway, redeem() re-consumes the slot from this same row, so the
- * cap is never double-counted in either direction. NOTE (conservative, safe-direction): a released
- * row still counts toward perUserLimit (userRedemptionCount), so abandoning a checkout on a
- * one-time coupon can lock that user out of it — it never OVER-issues, and a fresh code is the
- * remedy. Pre-deploy rows that predate the `released` field won't match this CAS (no backfill);
- * their slot simply isn't reclaimed on cancel — again the safe (under-issue) direction.
+ * cap is never double-counted in either direction. The per-user slot key is retired to a released-
+ * unique value so it neither counts toward perUserLimit (see userRedemptionCount) nor collides
+ * with the user's next attempt — an abandoned checkout never locks a one-time coupon.
+ * NOTE (safe-direction): pre-deploy rows that predate the `released` field won't match this CAS
+ * (no backfill); their slot simply isn't reclaimed on cancel — the safe (under-issue) direction.
  * @param {{ coupon:any, orderRef:string }} a @returns {Promise<boolean>} whether THIS call released
  */
 async function release({ coupon, orderRef }) {
@@ -169,7 +178,7 @@ async function release({ coupon, orderRef }) {
   const redemptionKey = `${couponId}:${orderRef}`;
   const claimed = await atomicUpdate(CouponRedemption,
     { redemptionKey, released: false },
-    { $set: { released: true, releasedAt: new Date() } });
+    { $set: { released: true, releasedAt: new Date(), userLimitKey: 'rel:' + redemptionKey } });
   if (!claimed) return false;   // no such reservation, or already released — idempotent no-op
   if (coupon.remaining != null) {
     await atomicUpdate(Coupon, { _id: couponId }, { $inc: { remaining: 1, redeemedCount: -1 }, $set: { updatedAt: new Date() } });
@@ -190,6 +199,17 @@ async function commitReservation({ coupon, orderRef }) {
 }
 
 /**
+ * Return a captured reservation to the abandonment-sweep's scope (committed:true→false) — called
+ * when its order is cancelled/refunded, so that even if the immediate release throws, the nightly
+ * sweep still reclaims the slot (the payment is now refunded → releasable). Keyed on the unique
+ * couponOrderRef so the caller needn't resolve the coupon first. Idempotent no-op otherwise.
+ * @param {string} orderRef
+ */
+async function markSweepable(orderRef) {
+  await atomicUpdate(CouponRedemption, { orderRef, committed: true }, { $set: { committed: false } });
+}
+
+/**
  * Nightly backstop: release reservations whose order NEVER became a real charge — an abandoned
  * checkout (payment stuck 'created'/'failed', or gone) still holding a cap slot. A payment that
  * captured is a real use and is left alone (a later cancel/refund releases it via transition()).
@@ -207,9 +227,10 @@ async function releaseStaleReservations(now, ttlMinutes = 120) {
   const LIMIT = 5000;
   // Only reservations still pending (uncommitted), already aged past the checkout window, that
   // have a payment to check (free/membership grants carry none and are never swept).
-  const open = (await CouponRedemption.find({ released: false, committed: false, at: { $lt: cutoff } }).sort({ at: 1 }).limit(LIMIT))
-    .filter((/** @type {any} */ r) => r.paymentId);
-  if (!open.length) return { released: 0, capped: false };
+  const fetched = await CouponRedemption.find({ released: false, committed: false, at: { $lt: cutoff } }).sort({ at: 1 }).limit(LIMIT);
+  const capped = fetched.length >= LIMIT;   // derived from the RAW fetch, before the paymentId filter
+  const open = fetched.filter((/** @type {any} */ r) => r.paymentId);
+  if (!open.length) return { released: 0, capped };
   const uniq = (/** @type {any[]} */ a) => [...new Set(a.map((v) => v && String(v)).filter(Boolean))];
   const [payments, coupons] = await Promise.all([
     Payment.find({ _id: { $in: uniq(open.map((/** @type {any} */ r) => r.paymentId)) } }).lean(),
@@ -227,7 +248,7 @@ async function releaseStaleReservations(now, ttlMinutes = 120) {
     if (!coupon) continue;
     if (await release({ coupon, orderRef: r.orderRef })) released++;
   }
-  return { released, capped: open.length >= LIMIT };
+  return { released, capped };
 }
 
 // ---- super-admin management ------------------------------------------------
@@ -305,4 +326,4 @@ function pub(c) {
   };
 }
 
-module.exports = { validate, redeem, release, commitReservation, releaseStaleReservations, discountFor, findByCode, create, update, list, pub, normalizeCode, categoryOf, applies };
+module.exports = { validate, redeem, release, commitReservation, markSweepable, releaseStaleReservations, discountFor, findByCode, create, update, list, pub, normalizeCode, categoryOf, applies };

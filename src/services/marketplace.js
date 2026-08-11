@@ -169,13 +169,16 @@ async function transition(order, to, opts = {}) {
       await Payment.findByIdAndUpdate(pay._id, { status: 'refunded', refundedAt: new Date() });   // reverse buyer money on the rail
     }
     // Give back any coupon reserved for this order — the charge is being reversed, so the cap slot
-    // should not stay consumed. Idempotent (released:false→true CAS); best-effort — the nightly
-    // sweep reclaims any straggler if this races or errors.
+    // should not stay consumed. markSweepable FIRST puts the (now committed) reservation back into
+    // the nightly sweep's scope, so that even if the immediate release below throws, the sweep
+    // reclaims it (the payment is now refunded/cancelled → releasable). release is idempotent.
     if (pay && pay.metadata && pay.metadata.couponCode && pay.metadata.couponOrderRef) {
+      const orderRef = pay.metadata.couponOrderRef;
+      await coupons.markSweepable(orderRef).catch(() => { });
       try {
         const coupon = await coupons.findByCode(pay.metadata.couponCode);
-        if (coupon) await coupons.release({ coupon, orderRef: pay.metadata.couponOrderRef });
-      } catch { /* best-effort; releaseStaleReservations is the backstop */ }
+        if (coupon) await coupons.release({ coupon, orderRef });
+      } catch { /* best-effort; releaseStaleReservations now genuinely backstops this */ }
     }
   }
   return { ...order, ...set };
