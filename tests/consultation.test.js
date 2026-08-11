@@ -272,4 +272,26 @@ describe('my appointments (enriched sessions)', () => {
     expect(s.orderStatus).toBe('paid');
     expect(s.scheduledFor).toBeTruthy();
   });
+
+  test('GET /sessions batch-enriches many sessions, each keyed to its OWN consultant/offering', async () => {
+    // Two bookings with DIFFERENT consultants: a mis-keyed batch join would give both the same
+    // partner/title. Assert each session resolves to its own — the N+1→batched refactor guard.
+    const a = await seedConsultant({ partner: { name: 'Coach A' }, listing: { title: 'Alpha session', priceCHF: 100, ratePerMinuteCHF: 10, durationMin: 10 } });
+    const b = await seedConsultant({ partner: { name: 'Coach B', category: 'astrologer' }, listing: { title: 'Beta session', priceCHF: 200, ratePerMinuteCHF: 10, durationMin: 20 } });
+    const buyer = await mkUser();
+    for (const slot of [a.slot, b.slot]) {
+      const bRes = await request(app).post('/api/consultation/book').set(auth(buyer)).send({ slotId: String(slot._id) });
+      await Payment.findByIdAndUpdate(bRes.body.order.payment._id, { status: 'captured' });
+      await request(app).post(`/api/marketplace/orders/${bRes.body.marketplaceOrderId}/confirm-payment`).set(auth(buyer));
+    }
+    const r = await request(app).get('/api/consultation/sessions').set(auth(buyer));
+    expect(r.status).toBe(200);
+    const byName = Object.fromEntries(r.body.sessions.map((/** @type {any} */ s) => [s.partnerName, s]));
+    expect(Object.keys(byName).sort()).toEqual(['Coach A', 'Coach B']);
+    expect(byName['Coach A'].title).toBe('Alpha session');
+    expect(byName['Coach A'].amountCHF).toBe(100);
+    expect(byName['Coach B'].title).toBe('Beta session');
+    expect(byName['Coach B'].amountCHF).toBe(200);
+    expect(byName['Coach B'].category).toBe('astrologer');
+  });
 });

@@ -238,11 +238,13 @@ router.post('/orders/:id/review', requireAuth, async (req, res, next) => {
 router.get('/partners/:id/reviews', requireAuth, async (req, res, next) => {
   try {
     const reviews = await Review.find({ partnerId: req.params.id }).sort({ createdAt: -1 }).limit(50).lean();
-    const out = [];
-    for (const rv of reviews) {
-      const u = await User.findById(rv.userId).select('profile.firstName').lean();
-      out.push({ id: rv._id, rating: rv.rating, text: rv.text || '', by: (u && u.profile && u.profile.firstName) || 'Verified buyer', verified: !!rv.verifiedPurchase, at: rv.createdAt });
-    }
+    const userIds = [...new Set(reviews.map((/** @type {any} */ rv) => rv.userId && String(rv.userId)).filter(Boolean))];
+    const users = await User.find({ _id: { $in: userIds } }).select('profile.firstName').lean();
+    const uById = new Map(users.map((/** @type {any} */ u) => [String(u._id), u]));
+    const out = reviews.map((/** @type {any} */ rv) => {
+      const u = uById.get(String(rv.userId));
+      return { id: rv._id, rating: rv.rating, text: rv.text || '', by: (u && u.profile && u.profile.firstName) || 'Verified buyer', verified: !!rv.verifiedPurchase, at: rv.createdAt };
+    });
     res.json({ reviews: out, count: out.length });
   } catch (err) { next(err); }
 });
