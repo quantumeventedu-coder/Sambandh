@@ -2173,6 +2173,7 @@ async function renderCompat(userId) {
 
 // ---------------- Astrology ----------------
 async function renderAstro() {
+  S._giftConsult = null;   // fresh screen — never carry a stale "gift to a match" intent into a normal booking
   screen.innerHTML = `<div class="section-pad">${pageHead('Classical Jyotish', 'Astrology', 'Your full kundali — computed from real astronomy, read through classical Jyotish.')}<div id="astro-body"><div class="empty">Reading the sky…</div></div></div>`;
   try {
     const [c, pan, tr] = await Promise.all([api('/astro/chart'), api('/astro/panchang').catch(() => null), api('/astro/transits').catch(() => null)]);
@@ -2408,6 +2409,7 @@ async function giftConsultPick(listingId) {
 // ===== Consumer professional profile =====
 function prettyCat(c) { return String(c || '').replace(/_/g, ' ').replace(/\b\w/g, (m) => m.toUpperCase()); }
 async function renderProProfile(id) {
+  S._giftConsult = null;   // fresh profile — the gift intent is set only by the 🎁 picker on this screen
   screen.innerHTML = `<div class="section-pad"><button class="back" onclick="history.back()">← Back</button><div id="pro"><div class="empty">Loading…</div></div></div>`;
   try {
     const { partner, offerings } = await api('/consultation/consultants/' + id);

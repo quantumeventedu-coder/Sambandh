@@ -248,10 +248,12 @@ router.get('/partners/:id/reviews', requireAuth, async (req, res, next) => {
 });
 
 // ==== Gift recipient: accept (with a PRIVATE address) or decline =============
-/** Owner-check keyed on the RECIPIENT (giftForUserId), not the buyer. @param {any} req @param {any} res */
+/** Owner-check keyed on the RECIPIENT (giftForUserId), not the buyer. Scoped to PHYSICAL products —
+ * a consultation-booking gift must be accepted/declined via /consultation (which also frees the slot
+ * and transfers the session); routing it through here would corrupt that state. @param {any} req @param {any} res */
 async function myGift(req, res) {
   const order = await Order.findById(req.params.id);
-  if (!order || String(order.giftForUserId) !== String(req.userId)) { res.status(404).json({ error: 'Gift not found' }); return null; }
+  if (!order || String(order.giftForUserId) !== String(req.userId) || order.kind !== 'product') { res.status(404).json({ error: 'Gift not found' }); return null; }
   return order;
 }
 

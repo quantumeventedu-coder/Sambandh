@@ -255,11 +255,16 @@ router.post('/sessions/:id/reschedule', requireAuth, async (req, res, next) => {
     if (!oldSlot || String(newSlot.listingId) !== String(oldSlot.listingId)) return res.status(400).json({ error: 'Pick a slot for the same offering' });
     const reserved = await market.atomicUpdate(Slot, { _id: newSlot._id, status: 'open' }, { $set: { status: 'booked', orderId: String(session.orderId) } });
     if (!reserved) return res.status(409).json({ error: 'That slot was just taken' });
-    await market.atomicUpdate(Slot, { _id: session.slotId }, { $set: { status: 'open', orderId: null } });   // free the old
-    await Order.findByIdAndUpdate(session.orderId, { scheduledFor: new Date(newSlot.startsAt) });
-    await Session.findByIdAndUpdate(session._id, { slotId: newSlot._id });
+    try {
+      await Session.findByIdAndUpdate(session._id, { slotId: newSlot._id });                                   // repoint FIRST (the critical link)
+      await market.atomicUpdate(Slot, { _id: session.slotId }, { $set: { status: 'open', orderId: null } });   // free the old
+      await Order.findByIdAndUpdate(session.orderId, { scheduledFor: new Date(newSlot.startsAt) });
+    } catch (e) {
+      await market.atomicUpdate(Slot, { _id: newSlot._id }, { $set: { status: 'open', orderId: null } }).catch(() => {});   // release the just-reserved slot so it never leaks
+      throw e;
+    }
     res.json({ ok: true, scheduledFor: newSlot.startsAt });
-  } catch (err) { return res.status(409).json({ error: msg(err) }); }
+  } catch (err) { next(err); }   // real errors surface as 500, not a misleading 409 (the genuine conflicts return 409 explicitly above)
 });
 
 // Buyer cancels a booking before it's fulfilled → refund + free the slot.
