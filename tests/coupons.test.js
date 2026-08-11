@@ -319,4 +319,33 @@ describe('release + stale-reservation reclaim (abandoned-checkout safety)', () =
     expect(r.released).toBe(1);                                   // the sweep genuinely backstops the refund now
     expect((await Coupon.findById(c._id)).remaining).toBe(5);
   });
+
+  test('releasing a MIDDLE reservation of a multi-use (perUserLimit>1) coupon frees its slot for reuse — no false PER_USER', async () => {
+    const c = await mkCoupon({ code: 'MULTI', percentOff: 50, maxRedemptions: 10, perUserLimit: 2 });
+    const u = String(TEST_USER_ID);
+    const rA = await coupons.redeem({ coupon: c, userId: TEST_USER_ID, orderRef: 'mA', paymentId: oid(), committed: false });
+    const rB = await coupons.redeem({ coupon: await Coupon.findById(c._id), userId: TEST_USER_ID, orderRef: 'mB', paymentId: oid(), committed: false });
+    expect(rA.userLimitKey).toBe(`${c._id}:${u}:0`);
+    expect(rB.userLimitKey).toBe(`${c._id}:${u}:1`);
+    // At the per-user limit, a third is blocked.
+    await expect(coupons.redeem({ coupon: await Coupon.findById(c._id), userId: TEST_USER_ID, orderRef: 'mC', paymentId: oid(), committed: false })).rejects.toThrow(/already used/);
+    // Release the MIDDLE reservation (slot 0), then a new redemption reuses slot 0 rather than
+    // colliding with the still-active slot 1.
+    await coupons.release({ coupon: await Coupon.findById(c._id), orderRef: 'mA' });
+    const rC = await coupons.redeem({ coupon: await Coupon.findById(c._id), userId: TEST_USER_ID, orderRef: 'mC2', paymentId: oid(), committed: false });
+    expect(rC.userLimitKey).toBe(`${c._id}:${u}:0`);           // freed slot reused, not a collision
+  });
+
+  test('a cancelled/refunded FREE grant (no paymentId) is reclaimed by the sweep once markSweepable runs', async () => {
+    const c = await mkCoupon({ code: 'FREE0', percentOff: 100, maxRedemptions: 3, perUserLimit: 5 });
+    // A free grant reserves with NO paymentId + committed:true (the createQuotedOrder free branch).
+    await coupons.redeem({ coupon: c, userId: TEST_USER_ID, orderRef: 'fr1', purpose: 'marketplace_order' });
+    expect((await Coupon.findById(c._id)).remaining).toBe(2);
+    // Its order is refunded: markSweepable returns it to scope, but the immediate release is lost.
+    await coupons.markSweepable('fr1');
+    await CouponRedemption.updateMany({}, { $set: { at: new Date(Date.now() - 3 * 3600 * 1000) } });
+    const r = await coupons.releaseStaleReservations(new Date(), 120);
+    expect(r.released).toBe(1);                                  // no-paymentId row IS reclaimed now
+    expect((await Coupon.findById(c._id)).remaining).toBe(3);
+  });
 });

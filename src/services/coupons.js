@@ -120,16 +120,20 @@ async function redeem({ coupon, userId, orderRef, paymentId, purpose, discountCH
     return await CouponRedemption.findOne({ redemptionKey });
   }
 
-  // Per-user cap, enforced RACE-SAFELY for EVERY limit value by a SLOT unique key: the Nth
-  // redemption for this (coupon,user) claims slot N-1, so two concurrent attempts at the same
-  // slot collide on the unique index (one wins) — the limit can never be exceeded, and a
-  // concurrent/retried free-path request can't mint a second grant.
+  // Per-user cap, enforced RACE-SAFELY for EVERY limit value by a SLOT unique key: a redemption
+  // claims the LOWEST FREE slot in [0, perUser) not held by an active redemption, so two concurrent
+  // attempts pick the same slot and collide on the unique index (one wins) — the limit can never be
+  // exceeded. Lowest-free (not count-based) so releasing a MIDDLE reservation of a multi-use coupon
+  // frees exactly its slot for reuse, instead of leaving a gap the next redemption would collide on.
   const perUser = coupon.perUserLimit != null ? Number(coupon.perUserLimit) : null;
   let userLimitKey;
   if (perUser != null) {
-    const used = await userRedemptionCount(couponId, userId);
-    if (used >= perUser) throw couponError('You’ve already used this coupon.', 'PER_USER');
-    userLimitKey = `${couponId}:${userId}:${used}`;
+    const active = (await CouponRedemption.find({ couponId, userId })).filter((/** @type {any} */ r) => !r.released);
+    if (active.length >= perUser) throw couponError('You’ve already used this coupon.', 'PER_USER');
+    const taken = new Set(active.map((/** @type {any} */ r) => r.userLimitKey));
+    let slot = 0;
+    while (taken.has(`${couponId}:${userId}:${slot}`)) slot++;
+    userLimitKey = `${couponId}:${userId}:${slot}`;
   }
 
   // TOTAL cap — a single conditional decrement (guard remaining > 0). Skip when unlimited.
@@ -227,23 +231,26 @@ async function releaseStaleReservations(now, ttlMinutes = 120) {
   const LIMIT = 5000;
   // Only reservations still pending (uncommitted), already aged past the checkout window, that
   // have a payment to check (free/membership grants carry none and are never swept).
-  const fetched = await CouponRedemption.find({ released: false, committed: false, at: { $lt: cutoff } }).sort({ at: 1 }).limit(LIMIT);
-  const capped = fetched.length >= LIMIT;   // derived from the RAW fetch, before the paymentId filter
-  const open = fetched.filter((/** @type {any} */ r) => r.paymentId);
+  const open = await CouponRedemption.find({ released: false, committed: false, at: { $lt: cutoff } }).sort({ at: 1 }).limit(LIMIT);
+  const capped = open.length >= LIMIT;
   if (!open.length) return { released: 0, capped };
   const uniq = (/** @type {any[]} */ a) => [...new Set(a.map((v) => v && String(v)).filter(Boolean))];
-  const [payments, coupons] = await Promise.all([
+  const [payments, cpns] = await Promise.all([
     Payment.find({ _id: { $in: uniq(open.map((/** @type {any} */ r) => r.paymentId)) } }).lean(),
     Coupon.find({ _id: { $in: uniq(open.map((/** @type {any} */ r) => r.couponId)) } }),
   ]);
   const payById = new Map(payments.map((/** @type {any} */ p) => [String(p._id), p]));
-  const couponById = new Map(coupons.map((/** @type {any} */ c) => [String(c._id), c]));
+  const couponById = new Map(cpns.map((/** @type {any} */ c) => [String(c._id), c]));
   let released = 0;
   for (const r of open) {
-    const pay = payById.get(String(r.paymentId));
-    // Reclaim only if the charge is NOT live: captured (real use) and refunding (in-flight refund
-    // that transition() owns) are left alone; created/failed/refunded/cancelled/missing → release.
-    if (pay && (pay.status === 'captured' || pay.status === 'refunding')) continue;
+    if (r.paymentId) {
+      const pay = payById.get(String(r.paymentId));
+      // A live paid charge — captured (real use) or refunding (transition() owns it) — is left
+      // alone; created/failed/refunded/cancelled/missing → reclaim.
+      if (pay && (pay.status === 'captured' || pay.status === 'refunding')) continue;
+    }
+    // No paymentId here means a free/membership grant that markSweepable() returned to scope — i.e.
+    // its order was cancelled/refunded and the immediate release was lost — so reclaiming is correct.
     const coupon = couponById.get(String(r.couponId));
     if (!coupon) continue;
     if (await release({ coupon, orderRef: r.orderRef })) released++;
