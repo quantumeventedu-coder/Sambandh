@@ -223,6 +223,12 @@ describe('gift a consultation to a match', () => {
     expect((await Payment.findById(paymentId)).status).toBe('captured');
   });
 
+  test('a consultation gift cannot be accepted/declined via the MARKETPLACE gift routes (would strand the slot/session)', async () => {
+    const { recipient, orderId } = await paidGift();
+    expect((await request(app).post(`/api/marketplace/orders/${orderId}/accept-gift`).set(auth(recipient))).status).toBe(404);
+    expect((await request(app).post(`/api/marketplace/orders/${orderId}/decline-gift`).set(auth(recipient))).status).toBe(404);
+  });
+
   test('gifting is refused for a non-match / self; a stranger cannot accept', async () => {
     const { sessionId } = await paidGift();
     expect((await request(app).post(`/api/consultation/sessions/${sessionId}/accept-gift`).set(auth(await mkUser()))).status).toBe(404);
