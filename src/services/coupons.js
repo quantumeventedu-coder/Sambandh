@@ -259,7 +259,9 @@ async function releaseStaleReservations(now, ttlMinutes = 120) {
     // onlyIfUncommitted re-checks committed:false in the release CAS, so a reservation that captured
     // between the snapshot above and here is NOT released off the stale 'created' read.
     const coupon = couponById.get(String(r.couponId));
-    if (!coupon) continue;
+    // Coupon hard-deleted out from under a live reservation: nothing to release, but commit the row
+    // so it leaves the candidate set instead of re-clogging the oldest-first 5000-row budget forever.
+    if (!coupon) { await commitReservation({ coupon: { _id: r.couponId }, orderRef: r.orderRef }).catch(() => { }); continue; }
     if (await release({ coupon, orderRef: r.orderRef, onlyIfUncommitted: true })) released++;
   }
   return { released, capped };
@@ -334,7 +336,9 @@ async function list() { return Coupon.find({}).sort({ createdAt: -1 }).limit(500
 function pub(c) {
   return {
     id: c._id, code: c.code, kind: c.kind, percentOff: c.percentOff, flatOffCHF: c.flatOffCHF,
-    appliesTo: c.appliesTo, minAmountCHF: c.minAmountCHF, remaining: c.remaining, maxRedemptions: c.maxRedemptions,
+    // Floor the DISPLAYED remaining at 0: the re-consume path can drive the stored counter briefly
+    // negative (honest over-subscription, kept for lockstep), but "-1 left" is confusing to show.
+    appliesTo: c.appliesTo, minAmountCHF: c.minAmountCHF, remaining: (typeof c.remaining === 'number') ? Math.max(0, c.remaining) : c.remaining, maxRedemptions: c.maxRedemptions,
     perUserLimit: c.perUserLimit, redeemedCount: c.redeemedCount, startsAt: c.startsAt, expiresAt: c.expiresAt,
     active: c.active, note: c.note, createdAt: c.createdAt,
   };
