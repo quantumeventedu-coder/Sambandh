@@ -27,6 +27,10 @@ const CouponRedemptionSchema = new mongoose.Schema({
   // cap. The release is a race-safe released:false→true CAS (see coupons.release).
   released: { type: Boolean, default: false, index: true },
   releasedAt: { type: Date },
+  // false ONLY for a paid-order reservation whose charge isn't final yet — the sole rows the
+  // abandonment sweep scans. Flipped true at capture (redeemOrderCoupon); everything final at
+  // create (free / membership / tester grants) is committed:true and never swept.
+  committed: { type: Boolean, default: true, index: true },
   at: { type: Date, default: Date.now },
 });
 

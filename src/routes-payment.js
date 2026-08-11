@@ -628,10 +628,13 @@ async function redeemOrderCoupon(userId, payment) {
     if (!coupon) return;
     // Confirm on the SAME ref reserved at create-order → idempotent (returns the existing
     // redemption, never a second consume). Falls back for older orders without a stored ref.
+    const orderRef = (payment.metadata && payment.metadata.couponOrderRef) || payment.razorpayOrderId || String(payment._id);
     await coupons.redeem({
-      coupon, userId, orderRef: (payment.metadata && payment.metadata.couponOrderRef) || payment.razorpayOrderId || String(payment._id), paymentId: payment._id,
+      coupon, userId, orderRef, paymentId: payment._id,
       purpose: payment.purpose, discountCHF: payment.metadata.discountCHF, discountLocal: payment.metadata.discountLocal, currency: payment.currency,
     });
+    // The charge is now final — take this reservation out of the abandonment sweep's scope.
+    await coupons.commitReservation({ coupon, orderRef });
   } catch (e) {
     try {
       await require('./models/AuditLog').create({
@@ -990,7 +993,9 @@ async function createQuotedOrder({ userId, purpose, amountCHF, category, label, 
   const reserveCouponFor = async (payment) => {
     if (!coupon) return;
     try {
-      await coupons.redeem({ coupon, userId, orderRef: /** @type {string} */ (couponMeta.couponOrderRef), paymentId: payment._id, purpose, discountCHF: quote.discountCHF, discountLocal: quote.discountLocal, currency: quote.code });
+      // committed:false — this is a not-yet-final paid reservation, the only kind the nightly
+      // abandonment sweep looks at; redeemOrderCoupon flips it committed at capture.
+      await coupons.redeem({ coupon, userId, orderRef: /** @type {string} */ (couponMeta.couponOrderRef), paymentId: payment._id, purpose, discountCHF: quote.discountCHF, discountLocal: quote.discountLocal, currency: quote.code, committed: false });
     } catch (e) {
       await Payment.deleteOne({ _id: payment._id }).catch(() => { });   // undo the un-reserved payment; caller cancels the order
       throw e;

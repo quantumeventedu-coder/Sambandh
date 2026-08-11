@@ -216,27 +216,57 @@ describe('release + stale-reservation reclaim (abandoned-checkout safety)', () =
     expect((await Coupon.findById(c._id)).remaining).toBe(5);
   });
 
-  test('releaseStaleReservations reclaims an abandoned (unpaid, aged) reservation but leaves a captured one', async () => {
+  test('releaseStaleReservations reclaims an abandoned (uncommitted, aged) reservation but leaves a committed one', async () => {
     const c = await mkCoupon({ code: 'SWEEP', percentOff: 50, maxRedemptions: 5, perUserLimit: 5 });
     const u2 = oid();
+    // Abandoned: reserved at create (committed:false), payment never captured.
     const payA = await Payment.create({ userId: TEST_USER_ID, purpose: 'marketplace_order', amountCHF: 5, currency: 'INR', razorpayOrderId: 'oA', status: 'created', createdAt: new Date() });
-    await coupons.redeem({ coupon: c, userId: TEST_USER_ID, orderRef: 'oA', paymentId: payA._id });
+    await coupons.redeem({ coupon: c, userId: TEST_USER_ID, orderRef: 'oA', paymentId: payA._id, committed: false });
+    // Real use: reserved then CAPTURED → committed (out of the sweep's scope entirely).
     const payB = await Payment.create({ userId: u2, purpose: 'marketplace_order', amountCHF: 5, currency: 'INR', razorpayOrderId: 'oB', status: 'captured', createdAt: new Date() });
-    await coupons.redeem({ coupon: await Coupon.findById(c._id), userId: u2, orderRef: 'oB', paymentId: payB._id });
+    await coupons.redeem({ coupon: await Coupon.findById(c._id), userId: u2, orderRef: 'oB', paymentId: payB._id, committed: false });
+    await coupons.commitReservation({ coupon: await Coupon.findById(c._id), orderRef: 'oB' });
     expect((await Coupon.findById(c._id)).remaining).toBe(3);              // both reserved
-    // Age both reservations past the checkout window.
-    await CouponRedemption.updateMany({}, { $set: { at: new Date(Date.now() - 3 * 3600 * 1000) } });
+    await CouponRedemption.updateMany({}, { $set: { at: new Date(Date.now() - 3 * 3600 * 1000) } });   // age both
     const r = await coupons.releaseStaleReservations(new Date(), 120);
-    expect(r.released).toBe(1);                                            // only the abandoned (unpaid) one
-    expect((await Coupon.findById(c._id)).remaining).toBe(4);              // A returned, B (captured) kept
+    expect(r.released).toBe(1);                                            // only the abandoned (uncommitted) one
+    expect((await Coupon.findById(c._id)).remaining).toBe(4);              // A returned, B (committed) kept
   });
 
-  test('a reservation still inside the checkout window is NOT swept', async () => {
+  test('a committed (captured) reservation never enters the sweep candidate set — no starvation as volume grows', async () => {
+    const c = await mkCoupon({ code: 'CMT', percentOff: 50, maxRedemptions: 5, perUserLimit: 5 });
+    const pay = await Payment.create({ userId: TEST_USER_ID, purpose: 'marketplace_order', amountCHF: 5, currency: 'INR', razorpayOrderId: 'oC', status: 'captured', createdAt: new Date() });
+    await coupons.redeem({ coupon: c, userId: TEST_USER_ID, orderRef: 'oC', paymentId: pay._id, committed: false });
+    await coupons.commitReservation({ coupon: await Coupon.findById(c._id), orderRef: 'oC' });
+    await CouponRedemption.updateMany({}, { $set: { at: new Date(Date.now() - 3 * 3600 * 1000) } });   // aged, but committed
+    const r = await coupons.releaseStaleReservations(new Date(), 120);
+    expect(r.released).toBe(0);
+    expect((await Coupon.findById(c._id)).remaining).toBe(4);              // real use retained
+  });
+
+  test('an uncommitted reservation still inside the checkout window is NOT swept', async () => {
     const c = await mkCoupon({ code: 'FRESH', percentOff: 50, maxRedemptions: 5 });
     const pay = await Payment.create({ userId: TEST_USER_ID, purpose: 'marketplace_order', amountCHF: 5, currency: 'INR', razorpayOrderId: 'oF', status: 'created', createdAt: new Date() });
-    await coupons.redeem({ coupon: c, userId: TEST_USER_ID, orderRef: 'oF', paymentId: pay._id });
+    await coupons.redeem({ coupon: c, userId: TEST_USER_ID, orderRef: 'oF', paymentId: pay._id, committed: false });
     const r = await coupons.releaseStaleReservations(new Date(), 120);     // reservation is brand-new
     expect(r.released).toBe(0);
     expect((await Coupon.findById(c._id)).remaining).toBe(4);
+  });
+
+  test('a LATE capture on an already-swept reservation RE-CONSUMES the slot — never over-issues past the cap', async () => {
+    const c = await mkCoupon({ code: 'LATE', percentOff: 50, maxRedemptions: 1, perUserLimit: 5 });
+    const pay = await Payment.create({ userId: TEST_USER_ID, purpose: 'marketplace_order', amountCHF: 5, currency: 'INR', razorpayOrderId: 'oL', status: 'created', createdAt: new Date() });
+    await coupons.redeem({ coupon: c, userId: TEST_USER_ID, orderRef: 'oL', paymentId: pay._id, committed: false });
+    expect((await Coupon.findById(c._id)).remaining).toBe(0);              // last unit reserved
+    await CouponRedemption.updateMany({}, { $set: { at: new Date(Date.now() - 3 * 3600 * 1000) } });
+    expect((await coupons.releaseStaleReservations(new Date(), 120)).released).toBe(1);
+    expect((await Coupon.findById(c._id)).remaining).toBe(1);              // slot returned by the sweep
+    // Payment captures LATE (async UPI/webhook). redeemOrderCoupon → redeem() on the SAME ref must
+    // re-consume the slot, not hand out a discount past the cap.
+    await coupons.redeem({ coupon: await Coupon.findById(c._id), userId: TEST_USER_ID, orderRef: 'oL', paymentId: pay._id });
+    expect((await Coupon.findById(c._id)).remaining).toBe(0);              // re-consumed — cap respected
+    const row = await CouponRedemption.findOne({ redemptionKey: String(c._id) + ':oL' });
+    expect(row.released).toBe(false);
+    expect(row.committed).toBe(true);
   });
 });

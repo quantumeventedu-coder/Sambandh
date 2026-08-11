@@ -163,6 +163,7 @@ async function nightlyBatch() {
   try {
     const r = await require('./services/coupons').releaseStaleReservations(new Date());
     if (r && r.released) console.log('[CRON] coupon reservation sweep:', r.released, 'reclaimed');
+    if (r && r.capped) console.warn('[CRON] coupon reservation sweep hit the 5000-row cap — pending reservations may exceed one run');
   } catch (e) { console.error('[CRON] coupon reservation sweep:', e.message); }
 
   console.log('[CRON] Nightly batch complete');
