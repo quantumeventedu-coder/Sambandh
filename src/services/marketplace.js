@@ -12,6 +12,7 @@ const Listing = require('../models/Listing');
 const Partner = require('../models/Partner');
 const Review = require('../models/Review');
 const Payment = require('../models/Payment');
+const coupons = require('./coupons');
 
 /** Atomic conditional update across both ODM backends: pg-odm exposes our atomic
  * SQL primitive; Mongoose's native findOneAndUpdate applies the filter at write
@@ -166,6 +167,15 @@ async function transition(order, to, opts = {}) {
     const pay = await Payment.findById(order.paymentId);
     if (pay && pay.status === 'captured') {
       await Payment.findByIdAndUpdate(pay._id, { status: 'refunded', refundedAt: new Date() });   // reverse buyer money on the rail
+    }
+    // Give back any coupon reserved for this order — the charge is being reversed, so the cap slot
+    // should not stay consumed. Idempotent (released:false→true CAS); best-effort — the nightly
+    // sweep reclaims any straggler if this races or errors.
+    if (pay && pay.metadata && pay.metadata.couponCode && pay.metadata.couponOrderRef) {
+      try {
+        const coupon = await coupons.findByCode(pay.metadata.couponCode);
+        if (coupon) await coupons.release({ coupon, orderRef: pay.metadata.couponOrderRef });
+      } catch { /* best-effort; releaseStaleReservations is the backstop */ }
     }
   }
   return { ...order, ...set };

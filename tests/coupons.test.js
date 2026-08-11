@@ -198,3 +198,45 @@ describe('review fixes — cap reserved up front, per-user race-safe, numeric gu
     await expect(mkCoupon({ maxRedemptions: '20 seats' })).rejects.toThrow(/must be a number/);
   });
 });
+
+describe('release + stale-reservation reclaim (abandoned-checkout safety)', () => {
+  const Payment = require('../src/models/Payment');
+  const CouponRedemption = require('../src/models/CouponRedemption');
+  const oid = () => new (require('../src/db/odm').Types.ObjectId)();
+
+  test('release() gives the cap slot back exactly once (idempotent, no double-restore)', async () => {
+    const c = await mkCoupon({ code: 'REL', percentOff: 50, maxRedemptions: 5, perUserLimit: 5 });
+    await coupons.redeem({ coupon: c, userId: TEST_USER_ID, orderRef: 'r1', paymentId: oid() });
+    expect((await Coupon.findById(c._id)).remaining).toBe(4);
+    expect(await coupons.release({ coupon: await Coupon.findById(c._id), orderRef: 'r1' })).toBe(true);
+    expect((await Coupon.findById(c._id)).remaining).toBe(5);              // restored
+    expect((await Coupon.findById(c._id)).redeemedCount).toBe(0);
+    // A second release is a no-op — the counter can never be inflated past its cap.
+    expect(await coupons.release({ coupon: await Coupon.findById(c._id), orderRef: 'r1' })).toBe(false);
+    expect((await Coupon.findById(c._id)).remaining).toBe(5);
+  });
+
+  test('releaseStaleReservations reclaims an abandoned (unpaid, aged) reservation but leaves a captured one', async () => {
+    const c = await mkCoupon({ code: 'SWEEP', percentOff: 50, maxRedemptions: 5, perUserLimit: 5 });
+    const u2 = oid();
+    const payA = await Payment.create({ userId: TEST_USER_ID, purpose: 'marketplace_order', amountCHF: 5, currency: 'INR', razorpayOrderId: 'oA', status: 'created', createdAt: new Date() });
+    await coupons.redeem({ coupon: c, userId: TEST_USER_ID, orderRef: 'oA', paymentId: payA._id });
+    const payB = await Payment.create({ userId: u2, purpose: 'marketplace_order', amountCHF: 5, currency: 'INR', razorpayOrderId: 'oB', status: 'captured', createdAt: new Date() });
+    await coupons.redeem({ coupon: await Coupon.findById(c._id), userId: u2, orderRef: 'oB', paymentId: payB._id });
+    expect((await Coupon.findById(c._id)).remaining).toBe(3);              // both reserved
+    // Age both reservations past the checkout window.
+    await CouponRedemption.updateMany({}, { $set: { at: new Date(Date.now() - 3 * 3600 * 1000) } });
+    const r = await coupons.releaseStaleReservations(new Date(), 120);
+    expect(r.released).toBe(1);                                            // only the abandoned (unpaid) one
+    expect((await Coupon.findById(c._id)).remaining).toBe(4);              // A returned, B (captured) kept
+  });
+
+  test('a reservation still inside the checkout window is NOT swept', async () => {
+    const c = await mkCoupon({ code: 'FRESH', percentOff: 50, maxRedemptions: 5 });
+    const pay = await Payment.create({ userId: TEST_USER_ID, purpose: 'marketplace_order', amountCHF: 5, currency: 'INR', razorpayOrderId: 'oF', status: 'created', createdAt: new Date() });
+    await coupons.redeem({ coupon: c, userId: TEST_USER_ID, orderRef: 'oF', paymentId: pay._id });
+    const r = await coupons.releaseStaleReservations(new Date(), 120);     // reservation is brand-new
+    expect(r.released).toBe(0);
+    expect((await Coupon.findById(c._id)).remaining).toBe(4);
+  });
+});

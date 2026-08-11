@@ -331,6 +331,25 @@ describe('coupons on marketplace checkout', () => {
     expect((await Payment.findById(r.body.order.payment._id)).metadata.discountCHF).toBeLessThanOrEqual(15.01);
     expect((await Payment.findById(r.body.order.payment._id)).status).toBe('created');   // must go through the gateway
   });
+
+  test('a capped coupon is RESERVED at create-order: the last unit refuses a second buyer, and cancelling gives the slot back', async () => {
+    const { listing } = await seedPartnerListing();
+    const b1 = await mkUser(), b2 = await mkUser();
+    await Coupon.create({ code: 'ONE', active: true, kind: 'percent', percentOff: 50, appliesTo: ['*'], maxRedemptions: 1, remaining: 1, perUserLimit: 5, redeemedCount: 0 });
+    const o1 = await request(app).post('/api/marketplace/orders').set(auth(b1)).send({ listingId: String(listing._id), shippingAddress: ADDR, couponCode: 'ONE' });
+    expect(o1.status).toBe(201);
+    expect((await Coupon.findOne({ code: 'ONE' })).remaining).toBe(0);        // reserved up front, not deferred to capture
+    // Second buyer on the already-reserved last unit is refused AT CREATE — never a silent discounted over-sale.
+    const o2 = await request(app).post('/api/marketplace/orders').set(auth(b2)).send({ listingId: String(listing._id), shippingAddress: ADDR, couponCode: 'ONE' });
+    expect(o2.status).toBe(400);
+    // Cancelling the first order releases the reservation → the slot is usable again.
+    const cancel = await request(app).post(`/api/marketplace/orders/${o1.body.marketplaceOrderId}/cancel`).set(auth(b1));
+    expect(cancel.status).toBe(200);
+    expect((await Coupon.findOne({ code: 'ONE' })).remaining).toBe(1);        // released on cancel
+    expect((await Coupon.findOne({ code: 'ONE' })).redeemedCount).toBe(0);
+    const o3 = await request(app).post('/api/marketplace/orders').set(auth(b2)).send({ listingId: String(listing._id), shippingAddress: ADDR, couponCode: 'ONE' });
+    expect(o3.status).toBe(201);                                              // the freed slot can be taken again
+  });
 });
 
 describe('gift to a match: private (blind) delivery', () => {

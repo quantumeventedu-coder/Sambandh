@@ -979,6 +979,23 @@ async function createQuotedOrder({ userId, purpose, amountCHF, category, label, 
     amount: quote.minor, amountMajor: quote.total, amountCHF: quote.chf,
     currency: quote.code, symbol: quote.symbol, breakdown, couponCode: coupon ? coupon.code : null,
   };
+  // RESERVE the coupon against a CHARGED payment at CREATE — so the TOTAL/per-user cap is
+  // authoritative BEFORE the buyer is charged. Without this the discount is committed at create
+  // but the cap only decrements at capture, so N buyers racing the last unit each pay discounted
+  // while `remaining` drops once (a bounded over-issue). Reserving here makes the loser's redeem()
+  // lose the atomic decrement → EXHAUSTED → the just-created payment is rolled back and the caller
+  // cancels the order. Reserved on the payment's _id so the nightly sweep can tell a real capture
+  // from an abandoned checkout; released on cancel/refund (transition) or abandonment (sweep).
+  /** @param {any} payment */
+  const reserveCouponFor = async (payment) => {
+    if (!coupon) return;
+    try {
+      await coupons.redeem({ coupon, userId, orderRef: /** @type {string} */ (couponMeta.couponOrderRef), paymentId: payment._id, purpose, discountCHF: quote.discountCHF, discountLocal: quote.discountLocal, currency: quote.code });
+    } catch (e) {
+      await Payment.deleteOne({ _id: payment._id }).catch(() => { });   // undo the un-reserved payment; caller cancels the order
+      throw e;
+    }
+  };
   // FREE order (e.g. a 100%-off tester coupon): there is nothing to charge, so no gateway order.
   // Create a CAPTURED payment, redeem the coupon now (idempotent), and flag it so the caller
   // confirms the order directly without opening a checkout.
@@ -987,7 +1004,8 @@ async function createQuotedOrder({ userId, purpose, amountCHF, category, label, 
     // Gate the free grant on an ATOMIC coupon consume FIRST — so N concurrent 100%-off requests
     // lose the CAS and get a coupon error (→ 400) instead of each minting a free order; a capped or
     // per-user-limited coupon can therefore never yield more free orders than its cap allows.
-    if (coupon) await coupons.redeem({ coupon, userId, orderRef: /** @type {string} */ (couponMeta.couponOrderRef), paymentId: orderId, purpose, discountCHF: quote.discountCHF, discountLocal: quote.discountLocal, currency: quote.code });
+    // No paymentId: a free order captures instantly (never abandoned), so the sweep must skip it.
+    if (coupon) await coupons.redeem({ coupon, userId, orderRef: /** @type {string} */ (couponMeta.couponOrderRef), purpose, discountCHF: quote.discountCHF, discountLocal: quote.discountLocal, currency: quote.code });
     const payment = await Payment.create({
       userId, purpose, amountCHF: quote.chf, currency: quote.code, razorpayOrderId: orderId,
       status: 'captured', capturedAt: new Date(), createdAt: new Date(),
@@ -1001,6 +1019,7 @@ async function createQuotedOrder({ userId, purpose, amountCHF, category, label, 
       userId, purpose, amountCHF: quote.chf, currency: quote.code, razorpayOrderId: orderId,
       status: 'created', createdAt: new Date(), metadata: { ...metadata, dev: true, amountLocal: quote.total, ...breakdown, ...couponMeta }
     });
+    await reserveCouponFor(payment);
     return { devMode: true, orderId, payment, ...clientQuote };
   }
   if (!razorpay) throw new Error('Payments are not configured');
@@ -1013,6 +1032,7 @@ async function createQuotedOrder({ userId, purpose, amountCHF, category, label, 
     userId, purpose, amountCHF: quote.chf, currency: quote.code, razorpayOrderId: order.id,
     status: 'created', createdAt: new Date(), metadata: { ...metadata, amountLocal: quote.total, ...breakdown, ...couponMeta }
   });
+  await reserveCouponFor(payment);
   return {
     devMode: false, orderId: order.id, key: process.env.RAZORPAY_KEY_ID, payment,
     prefill: { name: user.profile && user.profile.firstName, contact: user.phone }, ...clientQuote

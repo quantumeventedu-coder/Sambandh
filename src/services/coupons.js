@@ -119,7 +119,7 @@ async function redeem({ coupon, userId, orderRef, paymentId, purpose, discountCH
   try {
     return await CouponRedemption.create({
       couponId, code: coupon.code, userId, orderRef, paymentId, purpose,
-      discountCHF, discountLocal, currency, redemptionKey, userLimitKey, at: new Date(),
+      discountCHF, discountLocal, currency, redemptionKey, userLimitKey, released: false, at: new Date(),
     });
   } catch (e) {
     // The unique key fired: roll the cap decrement back, then resolve idempotently.
@@ -132,6 +132,55 @@ async function redeem({ coupon, userId, orderRef, paymentId, purpose, discountCH
     }
     throw e;
   }
+}
+
+/**
+ * RELEASE a reservation made by redeem() — give the cap slot back. Used when the order the
+ * coupon was reserved for never becomes a real charge (cancelled / refunded / abandoned).
+ * Idempotent and concurrency-safe: the release is CLAIMED by an atomic released:false→true CAS
+ * on the reservation row, so two concurrent releases (e.g. an explicit cancel racing the nightly
+ * sweep) can never both restore the counter. A released row is left in place (marked) so a late
+ * capture on the same ref resolves idempotently to it and does NOT re-consume — erring, as the
+ * rest of the coupon rail does, in the safe (never over-charge, never double-count) direction.
+ * @param {{ coupon:any, orderRef:string }} a @returns {Promise<boolean>} whether THIS call released
+ */
+async function release({ coupon, orderRef }) {
+  const couponId = coupon._id;
+  const redemptionKey = `${couponId}:${orderRef}`;
+  const claimed = await atomicUpdate(CouponRedemption,
+    { redemptionKey, released: false },
+    { $set: { released: true, releasedAt: new Date() } });
+  if (!claimed) return false;   // no such reservation, or already released — idempotent no-op
+  if (coupon.remaining != null) {
+    await atomicUpdate(Coupon, { _id: couponId }, { $inc: { remaining: 1, redeemedCount: -1 }, $set: { updatedAt: new Date() } });
+  } else {
+    await atomicUpdate(Coupon, { _id: couponId }, { $inc: { redeemedCount: -1 }, $set: { updatedAt: new Date() } });
+  }
+  return true;
+}
+
+/**
+ * Nightly backstop: release reservations whose order NEVER became a real charge — an abandoned
+ * checkout (payment stuck 'created'/'failed', or gone) still holding a cap slot. A payment that
+ * captured is a real use and is left alone (a later cancel/refund releases it via transition()).
+ * Only touches reservations older than `ttlMinutes` so a live checkout is never reclaimed.
+ * @param {Date} now @param {number} [ttlMinutes]
+ */
+async function releaseStaleReservations(now, ttlMinutes = 120) {
+  const Payment = require('../models/Payment');
+  const cutoffMs = now.getTime() - ttlMinutes * 60000;
+  const open = await CouponRedemption.find({ released: false }).limit(5000);
+  let released = 0;
+  for (const r of open) {
+    if (!r.paymentId) continue;                                   // free/legacy reservation — never swept
+    if (new Date(r.at).getTime() > cutoffMs) continue;            // still inside the checkout window
+    const pay = await Payment.findById(r.paymentId);
+    if (pay && pay.status !== 'created' && pay.status !== 'failed') continue;   // real/captured use — leave it
+    const coupon = await Coupon.findById(r.couponId);
+    if (!coupon) continue;
+    if (await release({ coupon, orderRef: r.orderRef })) released++;
+  }
+  return { released };
 }
 
 // ---- super-admin management ------------------------------------------------
@@ -209,4 +258,4 @@ function pub(c) {
   };
 }
 
-module.exports = { validate, redeem, discountFor, findByCode, create, update, list, pub, normalizeCode, categoryOf, applies };
+module.exports = { validate, redeem, release, releaseStaleReservations, discountFor, findByCode, create, update, list, pub, normalizeCode, categoryOf, applies };
