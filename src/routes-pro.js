@@ -132,20 +132,25 @@ router.get('/appointments', requireAuth, async (req, res, next) => {
   try {
     const p = await myPartner(req.userId); if (!p) return res.json({ appointments: [] });
     const sessions = await Session.find({ partnerId: p._id }).sort({ createdAt: -1 }).limit(100).lean();
-    const out = [];
-    for (const s of sessions) {
-      const [order, slot, u] = await Promise.all([
-        Order.findById(s.orderId).lean(),
-        s.slotId ? Slot.findById(s.slotId).lean() : null,
-        User.findById(s.userId).select('profile.firstName').lean(),
-      ]);
-      out.push({
+    const uniq = (/** @type {any[]} */ arr) => [...new Set(arr.map((v) => v && String(v)).filter(Boolean))];
+    const [orders, slots, users] = await Promise.all([
+      Order.find({ _id: { $in: uniq(sessions.map((/** @type {any} */ s) => s.orderId)) } }).lean(),
+      Slot.find({ _id: { $in: uniq(sessions.map((/** @type {any} */ s) => s.slotId)) } }).lean(),
+      User.find({ _id: { $in: uniq(sessions.map((/** @type {any} */ s) => s.userId)) } }).select('profile.firstName').lean(),
+    ]);
+    const byId = (/** @type {any[]} */ rows) => new Map(rows.map((/** @type {any} */ r) => [String(r._id), r]));
+    const oById = byId(orders), sById = byId(slots), uById = byId(users);
+    const out = sessions.map((/** @type {any} */ s) => {
+      const order = oById.get(String(s.orderId));
+      const slot = s.slotId ? sById.get(String(s.slotId)) : null;
+      const u = uById.get(String(s.userId));
+      return {
         id: s._id, status: s.status, orderStatus: (order && order.status) || null,
         client: (u && u.profile && u.profile.firstName) || 'Client',
         scheduledFor: (slot && slot.startsAt) || (order && order.scheduledFor) || null,
         amountCHF: order ? order.amountCHF : null, payoutCHF: order ? order.partnerPayoutCHF : null,
-      });
-    }
+      };
+    });
     res.json({ appointments: out });
   } catch (err) { next(err); }
 });

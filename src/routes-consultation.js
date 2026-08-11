@@ -130,6 +130,27 @@ router.post('/book', requireAuth, async (req, res, next) => {
   }
 });
 
+/**
+ * Batch-load the Order / Partner / Slot / Listing rows referenced by a set of sessions
+ * in a fixed number of queries (no per-session round-trips). Returns id→doc maps.
+ * @param {any[]} sessions
+ */
+async function loadSessionRefs(sessions) {
+  const uniq = (/** @type {any[]} */ arr) => [...new Set(arr.map((v) => v && String(v)).filter(Boolean))];
+  const orderIds = uniq(sessions.map((s) => s.orderId));
+  const partnerIds = uniq(sessions.map((s) => s.partnerId));
+  const slotIds = uniq(sessions.map((s) => s.slotId));
+  const [orders, partners, slots] = await Promise.all([
+    orderIds.length ? Order.find({ _id: { $in: orderIds } }).lean() : [],
+    partnerIds.length ? Partner.find({ _id: { $in: partnerIds } }).select('name category city').lean() : [],
+    slotIds.length ? Slot.find({ _id: { $in: slotIds } }).lean() : [],
+  ]);
+  const listingIds = uniq(orders.map((/** @type {any} */ o) => o.listingId));
+  const listings = listingIds.length ? await Listing.find({ _id: { $in: listingIds } }).select('title').lean() : [];
+  const byId = (/** @type {any[]} */ rows) => new Map(rows.map((/** @type {any} */ r) => [String(r._id), r]));
+  return { orders: byId(orders), partners: byId(partners), slots: byId(slots), listings: byId(listings) };
+}
+
 // My appointments — enriched with consultant, offering, scheduled time, price, and order status
 // so the client can render a real "My appointments" screen (upcoming / completed / cancelled).
 router.get('/sessions', requireAuth, async (req, res, next) => {
@@ -138,15 +159,13 @@ router.get('/sessions', requireAuth, async (req, res, next) => {
     const mine = await Session.find({ userId: req.userId }).limit(100).lean();
     const sent = (await Session.find({ bookedByUserId: req.userId }).limit(100).lean()).filter((/** @type {any} */ s) => String(s.userId) !== String(req.userId));
     const sessions = [...mine, ...sent].sort((/** @type {any} */ a, /** @type {any} */ b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-    const out = [];
-    for (const s of sessions) {
-      const [order, partner, slot] = await Promise.all([
-        Order.findById(s.orderId).lean(),
-        Partner.findById(s.partnerId).select('name category city').lean(),
-        s.slotId ? Slot.findById(s.slotId).lean() : null,
-      ]);
-      const listing = order ? await Listing.findById(order.listingId).select('title').lean() : null;
-      out.push({
+    const refs = await loadSessionRefs(sessions);
+    const out = sessions.map((/** @type {any} */ s) => {
+      const order = refs.orders.get(String(s.orderId));
+      const partner = refs.partners.get(String(s.partnerId));
+      const slot = s.slotId ? refs.slots.get(String(s.slotId)) : null;
+      const listing = order ? refs.listings.get(String(order.listingId)) : null;
+      return {
         ...pubSession(s),
         partnerName: (partner && partner.name) || 'Consultant',
         category: (partner && partner.category) || null,
@@ -159,8 +178,8 @@ router.get('/sessions', requireAuth, async (req, res, next) => {
         orderStatus: (order && order.status) || null,
         isGiftSent: String(s.bookedByUserId) === String(req.userId) && String(s.userId) !== String(req.userId),   // I gifted this to someone
         giftStatus: (order && order.giftStatus) || 'none',
-      });
-    }
+      };
+    });
     res.json({ sessions: out });
   } catch (err) { next(err); }
 });
@@ -169,24 +188,29 @@ router.get('/sessions', requireAuth, async (req, res, next) => {
 router.get('/gifts', requireAuth, async (req, res, next) => {
   try {
     const sessions = await Session.find({ giftForUserId: req.userId }).sort({ createdAt: -1 }).limit(100).lean();
-    const out = [];
-    for (const s of sessions) {
-      const order = await Order.findById(s.orderId).lean();
-      if (!order || order.giftStatus !== 'pending' || !['paid', 'confirmed'].includes(order.status)) continue;   // only real, paid, awaiting-acceptance gifts
-      const [partner, slot, buyer, listing] = await Promise.all([
-        Partner.findById(s.partnerId).select('name category').lean(),
-        s.slotId ? Slot.findById(s.slotId).lean() : null,
-        User.findById(s.bookedByUserId).select('profile.firstName').lean(),
-        Listing.findById(order.listingId).select('title').lean(),
-      ]);
-      out.push({
+    const refs = await loadSessionRefs(sessions);
+    // only real, paid, awaiting-acceptance gifts
+    const pending = sessions.filter((/** @type {any} */ s) => {
+      const order = refs.orders.get(String(s.orderId));
+      return order && order.giftStatus === 'pending' && ['paid', 'confirmed'].includes(order.status);
+    });
+    const buyerIds = [...new Set(pending.map((/** @type {any} */ s) => s.bookedByUserId && String(s.bookedByUserId)).filter(Boolean))];
+    const buyers = buyerIds.length ? await User.find({ _id: { $in: buyerIds } }).select('profile.firstName').lean() : [];
+    const buyerById = new Map(buyers.map((/** @type {any} */ b) => [String(b._id), b]));
+    const out = pending.map((/** @type {any} */ s) => {
+      const order = refs.orders.get(String(s.orderId));
+      const partner = refs.partners.get(String(s.partnerId));
+      const slot = s.slotId ? refs.slots.get(String(s.slotId)) : null;
+      const listing = refs.listings.get(String(order.listingId));
+      const buyer = buyerById.get(String(s.bookedByUserId));
+      return {
         id: s._id, title: (listing && listing.title) || 'Consultation',
         partnerName: (partner && partner.name) || 'Consultant',
         from: (buyer && buyer.profile && buyer.profile.firstName) || 'A match',
         scheduledFor: (slot && slot.startsAt) || null, durationMin: (slot && slot.durationMin) || null,
         amountCHF: order.amountCHF,
-      });
-    }
+      };
+    });
     res.json({ gifts: out });
   } catch (err) { next(err); }
 });
