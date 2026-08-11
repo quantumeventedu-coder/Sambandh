@@ -21,6 +21,16 @@ const CouponRedemptionSchema = new mongoose.Schema({
   currency: String,
   redemptionKey: { type: String, unique: true },  // `${couponId}:${orderRef}`
   userLimitKey: { type: String, unique: true },    // `${couponId}:${userId}` when perUserLimit===1
+  // A reservation made at order-CREATE (cap authoritative before any charge) that is later given
+  // back — the order was cancelled/refunded or the checkout abandoned. released:true rows keep the
+  // slot key (conservative: the user still counts as having taken it) but no longer hold the TOTAL
+  // cap. The release is a race-safe released:false→true CAS (see coupons.release).
+  released: { type: Boolean, default: false, index: true },
+  releasedAt: { type: Date },
+  // false ONLY for a paid-order reservation whose charge isn't final yet — the sole rows the
+  // abandonment sweep scans. Flipped true at capture (redeemOrderCoupon); everything final at
+  // create (free / membership / tester grants) is committed:true and never swept.
+  committed: { type: Boolean, default: true, index: true },
   at: { type: Date, default: Date.now },
 });
 

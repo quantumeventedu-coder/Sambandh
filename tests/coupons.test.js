@@ -198,3 +198,200 @@ describe('review fixes — cap reserved up front, per-user race-safe, numeric gu
     await expect(mkCoupon({ maxRedemptions: '20 seats' })).rejects.toThrow(/must be a number/);
   });
 });
+
+describe('release + stale-reservation reclaim (abandoned-checkout safety)', () => {
+  const Payment = require('../src/models/Payment');
+  const CouponRedemption = require('../src/models/CouponRedemption');
+  const oid = () => new (require('../src/db/odm').Types.ObjectId)();
+
+  test('release() gives the cap slot back exactly once (idempotent, no double-restore)', async () => {
+    const c = await mkCoupon({ code: 'REL', percentOff: 50, maxRedemptions: 5, perUserLimit: 5 });
+    await coupons.redeem({ coupon: c, userId: TEST_USER_ID, orderRef: 'r1', paymentId: oid() });
+    expect((await Coupon.findById(c._id)).remaining).toBe(4);
+    expect(await coupons.release({ coupon: await Coupon.findById(c._id), orderRef: 'r1' })).toBe(true);
+    expect((await Coupon.findById(c._id)).remaining).toBe(5);              // restored
+    expect((await Coupon.findById(c._id)).redeemedCount).toBe(0);
+    // A second release is a no-op — the counter can never be inflated past its cap.
+    expect(await coupons.release({ coupon: await Coupon.findById(c._id), orderRef: 'r1' })).toBe(false);
+    expect((await Coupon.findById(c._id)).remaining).toBe(5);
+  });
+
+  test('releaseStaleReservations reclaims an abandoned (uncommitted, aged) reservation but leaves a committed one', async () => {
+    const c = await mkCoupon({ code: 'SWEEP', percentOff: 50, maxRedemptions: 5, perUserLimit: 5 });
+    const u2 = oid();
+    // Abandoned: reserved at create (committed:false), payment never captured.
+    const payA = await Payment.create({ userId: TEST_USER_ID, purpose: 'marketplace_order', amountCHF: 5, currency: 'INR', razorpayOrderId: 'oA', status: 'created', createdAt: new Date() });
+    await coupons.redeem({ coupon: c, userId: TEST_USER_ID, orderRef: 'oA', paymentId: payA._id, committed: false });
+    // Real use: reserved then CAPTURED → committed (out of the sweep's scope entirely).
+    const payB = await Payment.create({ userId: u2, purpose: 'marketplace_order', amountCHF: 5, currency: 'INR', razorpayOrderId: 'oB', status: 'captured', createdAt: new Date() });
+    await coupons.redeem({ coupon: await Coupon.findById(c._id), userId: u2, orderRef: 'oB', paymentId: payB._id, committed: false });
+    await coupons.commitReservation({ coupon: await Coupon.findById(c._id), orderRef: 'oB' });
+    expect((await Coupon.findById(c._id)).remaining).toBe(3);              // both reserved
+    await CouponRedemption.updateMany({}, { $set: { at: new Date(Date.now() - 3 * 3600 * 1000) } });   // age both
+    const r = await coupons.releaseStaleReservations(new Date(), 120);
+    expect(r.released).toBe(1);                                            // only the abandoned (uncommitted) one
+    expect((await Coupon.findById(c._id)).remaining).toBe(4);              // A returned, B (committed) kept
+  });
+
+  test('a committed (captured) reservation never enters the sweep candidate set — no starvation as volume grows', async () => {
+    const c = await mkCoupon({ code: 'CMT', percentOff: 50, maxRedemptions: 5, perUserLimit: 5 });
+    const pay = await Payment.create({ userId: TEST_USER_ID, purpose: 'marketplace_order', amountCHF: 5, currency: 'INR', razorpayOrderId: 'oC', status: 'captured', createdAt: new Date() });
+    await coupons.redeem({ coupon: c, userId: TEST_USER_ID, orderRef: 'oC', paymentId: pay._id, committed: false });
+    await coupons.commitReservation({ coupon: await Coupon.findById(c._id), orderRef: 'oC' });
+    await CouponRedemption.updateMany({}, { $set: { at: new Date(Date.now() - 3 * 3600 * 1000) } });   // aged, but committed
+    const r = await coupons.releaseStaleReservations(new Date(), 120);
+    expect(r.released).toBe(0);
+    expect((await Coupon.findById(c._id)).remaining).toBe(4);              // real use retained
+  });
+
+  test('an uncommitted reservation still inside the checkout window is NOT swept', async () => {
+    const c = await mkCoupon({ code: 'FRESH', percentOff: 50, maxRedemptions: 5 });
+    const pay = await Payment.create({ userId: TEST_USER_ID, purpose: 'marketplace_order', amountCHF: 5, currency: 'INR', razorpayOrderId: 'oF', status: 'created', createdAt: new Date() });
+    await coupons.redeem({ coupon: c, userId: TEST_USER_ID, orderRef: 'oF', paymentId: pay._id, committed: false });
+    const r = await coupons.releaseStaleReservations(new Date(), 120);     // reservation is brand-new
+    expect(r.released).toBe(0);
+    expect((await Coupon.findById(c._id)).remaining).toBe(4);
+  });
+
+  test('a LATE capture on an already-swept reservation RE-CONSUMES the slot — never over-issues past the cap', async () => {
+    const c = await mkCoupon({ code: 'LATE', percentOff: 50, maxRedemptions: 1, perUserLimit: 5 });
+    const pay = await Payment.create({ userId: TEST_USER_ID, purpose: 'marketplace_order', amountCHF: 5, currency: 'INR', razorpayOrderId: 'oL', status: 'created', createdAt: new Date() });
+    await coupons.redeem({ coupon: c, userId: TEST_USER_ID, orderRef: 'oL', paymentId: pay._id, committed: false });
+    expect((await Coupon.findById(c._id)).remaining).toBe(0);              // last unit reserved
+    await CouponRedemption.updateMany({}, { $set: { at: new Date(Date.now() - 3 * 3600 * 1000) } });
+    expect((await coupons.releaseStaleReservations(new Date(), 120)).released).toBe(1);
+    expect((await Coupon.findById(c._id)).remaining).toBe(1);              // slot returned by the sweep
+    // Payment captures LATE (async UPI/webhook). redeemOrderCoupon → redeem() on the SAME ref must
+    // re-consume the slot, not hand out a discount past the cap.
+    await coupons.redeem({ coupon: await Coupon.findById(c._id), userId: TEST_USER_ID, orderRef: 'oL', paymentId: pay._id });
+    expect((await Coupon.findById(c._id)).remaining).toBe(0);              // re-consumed — cap respected
+    const row = await CouponRedemption.findOne({ redemptionKey: String(c._id) + ':oL' });
+    expect(row.released).toBe(false);
+    expect(row.committed).toBe(true);
+  });
+
+  test('an abandoned checkout does NOT lock a user out of a one-time (perUserLimit) coupon', async () => {
+    const c = await mkCoupon({ code: 'ONCE1', percentOff: 50, maxRedemptions: 5, perUserLimit: 1 });
+    const pay = await Payment.create({ userId: TEST_USER_ID, purpose: 'marketplace_order', amountCHF: 5, currency: 'INR', razorpayOrderId: 'oX', status: 'created', createdAt: new Date() });
+    await coupons.redeem({ coupon: c, userId: TEST_USER_ID, orderRef: 'oX', paymentId: pay._id, committed: false });
+    // With an ACTIVE reservation, a second attempt is correctly PER_USER-blocked.
+    await expect(coupons.validate('ONCE1', 'marketplace_order', 5, TEST_USER_ID)).rejects.toThrow(/already used/);
+    // Abandon → sweep releases the slot.
+    await CouponRedemption.updateMany({}, { $set: { at: new Date(Date.now() - 3 * 3600 * 1000) } });
+    await coupons.releaseStaleReservations(new Date(), 120);
+    // The user is NO LONGER locked out — validate passes and a fresh redemption succeeds (no slot collision).
+    const v = await coupons.validate('ONCE1', 'marketplace_order', 5, TEST_USER_ID);
+    expect(v.coupon).toBeTruthy();
+    const again = await coupons.redeem({ coupon: await Coupon.findById(c._id), userId: TEST_USER_ID, orderRef: 'oY', paymentId: oid(), committed: false });
+    expect(again._id).toBeTruthy();
+    expect((await Coupon.findById(c._id)).remaining).toBe(4);
+  });
+
+  test('re-consume past a re-filled cap keeps lockstep (remaining/redeemedCount), so a later refund reverses cleanly — no over-issue', async () => {
+    const c = await mkCoupon({ code: 'DRIFT', percentOff: 50, maxRedemptions: 1, perUserLimit: 5 });
+    const payA = await Payment.create({ userId: TEST_USER_ID, purpose: 'marketplace_order', amountCHF: 5, currency: 'INR', razorpayOrderId: 'dA', status: 'created', createdAt: new Date() });
+    await coupons.redeem({ coupon: c, userId: TEST_USER_ID, orderRef: 'dA', paymentId: payA._id, committed: false });   // remaining 1→0, count 1
+    await CouponRedemption.updateMany({ orderRef: 'dA' }, { $set: { at: new Date(Date.now() - 3 * 3600 * 1000) } });
+    await coupons.releaseStaleReservations(new Date(), 120);                                                            // release A: remaining 0→1, count 1→0
+    const u2 = oid();
+    const payB = await Payment.create({ userId: u2, purpose: 'marketplace_order', amountCHF: 5, currency: 'INR', razorpayOrderId: 'dB', status: 'captured', createdAt: new Date() });
+    await coupons.redeem({ coupon: await Coupon.findById(c._id), userId: u2, orderRef: 'dB', paymentId: payB._id, committed: false });   // B takes freed slot: remaining 1→0, count 0→1
+    await coupons.commitReservation({ coupon: await Coupon.findById(c._id), orderRef: 'dB' });
+    expect((await Coupon.findById(c._id)).redeemedCount).toBe(1);
+    // A's payment captures LATE → re-consume. The cap is full, so remaining goes NEGATIVE (honest
+    // over-subscription) while the redemption is counted — remaining + redeemedCount stays == maxRedemptions.
+    await coupons.redeem({ coupon: await Coupon.findById(c._id), userId: TEST_USER_ID, orderRef: 'dA', paymentId: payA._id });
+    const mid = await Coupon.findById(c._id);
+    expect(mid.remaining).toBe(-1);             // over-subscribed, not floored (keeps lockstep)
+    expect(mid.redeemedCount).toBe(2);          // both real redemptions counted
+    // A is later refunded → release reverses A cleanly: remaining −1→0, count 2→1. B still holds the
+    // one real use, so remaining stays 0 → a third buyer is EXHAUSTED (no over-issue past the cap).
+    await coupons.release({ coupon: mid, orderRef: 'dA' });
+    const after = await Coupon.findById(c._id);
+    expect(after.remaining).toBe(0);
+    expect(after.redeemedCount).toBe(1);
+    await expect(coupons.validate('DRIFT', 'marketplace_order', 5, oid())).rejects.toThrow(/fully redeemed/);
+  });
+
+  test('a refund whose immediate release is lost is still reclaimed by the sweep (markSweepable backstop)', async () => {
+    const c = await mkCoupon({ code: 'RFND', percentOff: 50, maxRedemptions: 5, perUserLimit: 5 });
+    const pay = await Payment.create({ userId: TEST_USER_ID, purpose: 'marketplace_order', amountCHF: 5, currency: 'INR', razorpayOrderId: 'rR', status: 'captured', createdAt: new Date() });
+    await coupons.redeem({ coupon: c, userId: TEST_USER_ID, orderRef: 'rR', paymentId: pay._id, committed: false });
+    await coupons.commitReservation({ coupon: await Coupon.findById(c._id), orderRef: 'rR' });   // captured → committed (out of sweep scope)
+    expect((await Coupon.findById(c._id)).remaining).toBe(4);
+    // Order refunded: payment→refunded + markSweepable ran, but the immediate release was LOST (simulated).
+    await Payment.findByIdAndUpdate(pay._id, { status: 'refunded' });
+    await coupons.markSweepable('rR');
+    await CouponRedemption.updateMany({}, { $set: { at: new Date(Date.now() - 3 * 3600 * 1000) } });
+    const r = await coupons.releaseStaleReservations(new Date(), 120);
+    expect(r.released).toBe(1);                                   // the sweep genuinely backstops the refund now
+    expect((await Coupon.findById(c._id)).remaining).toBe(5);
+  });
+
+  test('releasing a MIDDLE reservation of a multi-use (perUserLimit>1) coupon frees its slot for reuse — no false PER_USER', async () => {
+    const c = await mkCoupon({ code: 'MULTI', percentOff: 50, maxRedemptions: 10, perUserLimit: 2 });
+    const u = String(TEST_USER_ID);
+    const rA = await coupons.redeem({ coupon: c, userId: TEST_USER_ID, orderRef: 'mA', paymentId: oid(), committed: false });
+    const rB = await coupons.redeem({ coupon: await Coupon.findById(c._id), userId: TEST_USER_ID, orderRef: 'mB', paymentId: oid(), committed: false });
+    expect(rA.userLimitKey).toBe(`${c._id}:${u}:0`);
+    expect(rB.userLimitKey).toBe(`${c._id}:${u}:1`);
+    // At the per-user limit, a third is blocked.
+    await expect(coupons.redeem({ coupon: await Coupon.findById(c._id), userId: TEST_USER_ID, orderRef: 'mC', paymentId: oid(), committed: false })).rejects.toThrow(/already used/);
+    // Release the MIDDLE reservation (slot 0), then a new redemption reuses slot 0 rather than
+    // colliding with the still-active slot 1.
+    await coupons.release({ coupon: await Coupon.findById(c._id), orderRef: 'mA' });
+    const rC = await coupons.redeem({ coupon: await Coupon.findById(c._id), userId: TEST_USER_ID, orderRef: 'mC2', paymentId: oid(), committed: false });
+    expect(rC.userLimitKey).toBe(`${c._id}:${u}:0`);           // freed slot reused, not a collision
+  });
+
+  test('a cancelled/refunded FREE grant (no paymentId) is reclaimed by the sweep once markSweepable runs', async () => {
+    const c = await mkCoupon({ code: 'FREE0', percentOff: 100, maxRedemptions: 3, perUserLimit: 5 });
+    // A free grant reserves with NO paymentId + committed:true (the createQuotedOrder free branch).
+    await coupons.redeem({ coupon: c, userId: TEST_USER_ID, orderRef: 'fr1', purpose: 'marketplace_order' });
+    expect((await Coupon.findById(c._id)).remaining).toBe(2);
+    // Its order is refunded: markSweepable returns it to scope, but the immediate release is lost.
+    await coupons.markSweepable('fr1');
+    await CouponRedemption.updateMany({}, { $set: { at: new Date(Date.now() - 3 * 3600 * 1000) } });
+    const r = await coupons.releaseStaleReservations(new Date(), 120);
+    expect(r.released).toBe(1);                                  // no-paymentId row IS reclaimed now
+    expect((await Coupon.findById(c._id)).remaining).toBe(3);
+  });
+
+  test('a guarded (sweep) release refuses a reservation that committed under it — no over-issue off a stale snapshot', async () => {
+    const c = await mkCoupon({ code: 'RACE', percentOff: 50, maxRedemptions: 5, perUserLimit: 5 });
+    const pay = await Payment.create({ userId: TEST_USER_ID, purpose: 'marketplace_order', amountCHF: 5, currency: 'INR', razorpayOrderId: 'rc', status: 'created', createdAt: new Date() });
+    await coupons.redeem({ coupon: c, userId: TEST_USER_ID, orderRef: 'rc', paymentId: pay._id, committed: false });
+    // The payment captured + committed AFTER the sweep would have snapshotted it as 'created'.
+    await coupons.commitReservation({ coupon: await Coupon.findById(c._id), orderRef: 'rc' });
+    const did = await coupons.release({ coupon: await Coupon.findById(c._id), orderRef: 'rc', onlyIfUncommitted: true });
+    expect(did).toBe(false);                                    // guarded release refuses the committed row
+    expect((await Coupon.findById(c._id)).remaining).toBe(4);   // real captured use NOT wrongly reclaimed
+  });
+
+  test('reconcileStrandedOrders releases the coupon a late capture re-consumed on a dead order', async () => {
+    const market = require('../src/services/marketplace');
+    const Order = require('../src/models/Order');
+    const c = await mkCoupon({ code: 'STRND', percentOff: 50, maxRedemptions: 5, perUserLimit: 5 });
+    // The captured payment carries the coupon refs; the reservation is in the re-consumed state
+    // (active + committed) a late capture would leave after the order was already cancelled.
+    const pay = await Payment.create({ userId: TEST_USER_ID, purpose: 'marketplace_order', amountCHF: 5, currency: 'INR', razorpayOrderId: 'st1', status: 'captured', createdAt: new Date(), metadata: { couponCode: 'STRND', couponOrderRef: 'st1' } });
+    await coupons.redeem({ coupon: c, userId: TEST_USER_ID, orderRef: 'st1', paymentId: pay._id, committed: true });
+    expect((await Coupon.findById(c._id)).remaining).toBe(4);
+    await Order.create({ userId: TEST_USER_ID, listingId: oid(), partnerId: oid(), amountCHF: 5, status: 'cancelled', paymentId: pay._id });   // dead order, stranded capture
+    const r = await market.reconcileStrandedOrders();
+    expect(r.reclaimed).toBe(1);
+    expect((await Payment.findById(pay._id)).status).toBe('refunded');
+    expect((await Coupon.findById(c._id)).remaining).toBe(5);   // the re-consumed slot is given back, not leaked
+  });
+
+  test('the sweep self-heals a captured reservation whose commit was lost (committed:false + captured)', async () => {
+    const c = await mkCoupon({ code: 'HEAL', percentOff: 50, maxRedemptions: 5, perUserLimit: 5 });
+    const pay = await Payment.create({ userId: TEST_USER_ID, purpose: 'marketplace_order', amountCHF: 5, currency: 'INR', razorpayOrderId: 'hl', status: 'captured', createdAt: new Date() });
+    await coupons.redeem({ coupon: c, userId: TEST_USER_ID, orderRef: 'hl', paymentId: pay._id, committed: false });   // commit "lost" → stays committed:false
+    await CouponRedemption.updateMany({}, { $set: { at: new Date(Date.now() - 3 * 3600 * 1000) } });
+    const r = await coupons.releaseStaleReservations(new Date(), 120);
+    expect(r.released).toBe(0);                                  // captured → never released
+    expect((await Coupon.findById(c._id)).remaining).toBe(4);    // slot retained
+    expect((await CouponRedemption.findOne({ redemptionKey: String(c._id) + ':hl' })).committed).toBe(true);   // healed out of the candidate set
+  });
+});

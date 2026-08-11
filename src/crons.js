@@ -157,6 +157,15 @@ async function nightlyBatch() {
     if (r && r.expired) console.log('[CRON] location-share sweep:', r.expired, 'expired');
   } catch (e) { console.error('[CRON] location-share sweep:', e.message); }
 
+  // 10d. Coupon reservation reclaim: release cap slots held by abandoned checkouts (a coupon is
+  // reserved at order-create; a captured order keeps it, a cancelled/refunded one releases via
+  // transition — this reclaims the ones that were never paid and never cancelled).
+  try {
+    const r = await require('./services/coupons').releaseStaleReservations(new Date());
+    if (r && r.released) console.log('[CRON] coupon reservation sweep:', r.released, 'reclaimed');
+    if (r && r.capped) console.warn('[CRON] coupon reservation sweep hit the 5000-row cap — pending reservations may exceed one run');
+  } catch (e) { console.error('[CRON] coupon reservation sweep:', e.message); }
+
   console.log('[CRON] Nightly batch complete');
 }
 

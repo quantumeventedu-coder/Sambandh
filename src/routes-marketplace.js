@@ -181,7 +181,8 @@ router.post('/orders/:id/confirm-payment', requireAuth, async (req, res, next) =
     // async UPI/webhook) capture landed — reverse the charge instead of stranding the buyer's
     // money in a dead-end 409. (A nightly sweep, market.reconcileStrandedOrders, is the backstop.)
     if (['cancelled', 'refunded'].includes(order.status) || order.giftStatus === 'declined') {
-      await market.atomicUpdate(Payment, { _id: payment._id, status: 'captured' }, { $set: { status: 'refunded', refundedAt: new Date() } });
+      const refunded = await market.atomicUpdate(Payment, { _id: payment._id, status: 'captured' }, { $set: { status: 'refunded', refundedAt: new Date() } });
+      if (refunded) await market.releaseStrandedCoupon(refunded);   // give back any coupon the late capture re-consumed
       return res.status(409).json({ error: 'This order is no longer active; the payment has been refunded.' });
     }
     const updated = await market.transition(order, 'paid', { paymentId: payment._id });
