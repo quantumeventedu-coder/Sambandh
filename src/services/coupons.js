@@ -103,23 +103,16 @@ async function redeem({ coupon, userId, orderRef, paymentId, purpose, discountCH
   if (prior && prior.released) {
     // A LATE redemption on a reservation the abandonment sweep already released (its payment
     // captured after the TTL). RE-CONSUME the cap so the genuinely-paid order holds a slot again —
-    // only the CAS winner re-decrements. If the TOTAL cap (or the per-user slot, when another order
-    // took the freed slot in the meantime) has since filled, we accept ONE bounded over-issue on
-    // that captured order rather than fail a payment that already succeeded (redeemOrderCoupon
-    // swallows). The over-issue stays VISIBLE (the row counts toward userRedemptionCount) and
-    // CONTAINED (the next attempt is blocked), and only arises from this narrow sweep-then-late-
-    // capture race — never from normal reserve→capture.
+    // only the CAS winner re-decrements. remaining/redeemedCount move in LOCKSTEP (−1/+1) exactly as
+    // a normal consume, WITHOUT the remaining>0 guard: if another order took the freed slot first,
+    // remaining goes negative — an honest, bounded over-subscription that (a) blocks further redeems
+    // (validate treats remaining<=0 as exhausted) and (b) reverses cleanly when this order is later
+    // released (+1/−1) instead of over-restoring the cap. Only ever arises from the narrow sweep-
+    // then-late-capture race, never from normal reserve→capture.
     const won = await atomicUpdate(CouponRedemption, { redemptionKey, released: true }, { $set: { released: false, committed: true, releasedAt: null } });
     if (won) {
-      if (coupon.remaining != null) {
-        const dec = await atomicUpdate(Coupon, { _id: couponId, remaining: { $gt: 0 } }, { $inc: { remaining: -1, redeemedCount: 1 }, $set: { updatedAt: new Date() } });
-        // Cap already re-filled by others → we can't take a slot, but this IS a real redemption:
-        // still count it (redeemedCount) so reporting + the update() cap-recompute stay truthful.
-        // remaining stays floored at 0 — a single, bounded over-issue on an already-completed pay.
-        if (!dec) await atomicUpdate(Coupon, { _id: couponId }, { $inc: { redeemedCount: 1 }, $set: { updatedAt: new Date() } });
-      } else {
-        await atomicUpdate(Coupon, { _id: couponId }, { $inc: { redeemedCount: 1 }, $set: { updatedAt: new Date() } });
-      }
+      if (coupon.remaining != null) await atomicUpdate(Coupon, { _id: couponId }, { $inc: { remaining: -1, redeemedCount: 1 }, $set: { updatedAt: new Date() } });
+      else await atomicUpdate(Coupon, { _id: couponId }, { $inc: { redeemedCount: 1 }, $set: { updatedAt: new Date() } });
     }
     return await CouponRedemption.findOne({ redemptionKey });
   }

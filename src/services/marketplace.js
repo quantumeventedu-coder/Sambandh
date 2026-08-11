@@ -190,6 +190,22 @@ async function transition(order, to, opts = {}) {
  * razorpayOrderId and never references order state. Reverse any such stranded capture so the
  * buyer is never charged for a dead order. Idempotent CAS; mirrors verification-service.sweepStaleCases.
  */
+/**
+ * When a STRANDED capture is reversed (money refunded on an already-dead order), give back any
+ * coupon that capture re-consumed — these reversal paths refund the Payment directly and never go
+ * through transition(), so without this the re-consumed cap slot leaks. Idempotent + safe: if the
+ * coupon was never re-consumed (still released from the original cancel) release() is a no-op.
+ * @param {any} pay the refunded Payment doc
+ */
+async function releaseStrandedCoupon(pay) {
+  if (!(pay && pay.metadata && pay.metadata.couponCode && pay.metadata.couponOrderRef)) return;
+  try {
+    await coupons.markSweepable(pay.metadata.couponOrderRef);
+    const coupon = await coupons.findByCode(pay.metadata.couponCode);
+    if (coupon) await coupons.release({ coupon, orderRef: pay.metadata.couponOrderRef });
+  } catch { /* best-effort; releaseStaleReservations backstops */ }
+}
+
 async function reconcileStrandedOrders() {
   let reclaimed = 0;
   const buckets = await Promise.all([
@@ -203,7 +219,7 @@ async function reconcileStrandedOrders() {
       if (!o.paymentId || seen.has(String(o._id))) continue;
       seen.add(String(o._id));
       const won = await atomicUpdate(Payment, { _id: o.paymentId, status: 'captured' }, { $set: { status: 'refunded', refundedAt: new Date() } });
-      if (won) reclaimed++;
+      if (won) { reclaimed++; await releaseStrandedCoupon(won); }   // won is the refunded Payment doc
     }
   }
   return { reclaimed };
@@ -283,5 +299,5 @@ async function addReview({ userId, order, rating, text }) {
 
 module.exports = {
   DEFAULT_COMMISSION, FALLBACK_COMMISSION, TRANSITIONS,
-  quote, createOrder, transition, rank, distanceKm, addReview, round2, atomicUpdate, normalizeAddress, reconcileStrandedOrders
+  quote, createOrder, transition, rank, distanceKm, addReview, round2, atomicUpdate, normalizeAddress, reconcileStrandedOrders, releaseStrandedCoupon
 };
