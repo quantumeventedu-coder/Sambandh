@@ -348,4 +348,26 @@ describe('release + stale-reservation reclaim (abandoned-checkout safety)', () =
     expect(r.released).toBe(1);                                  // no-paymentId row IS reclaimed now
     expect((await Coupon.findById(c._id)).remaining).toBe(3);
   });
+
+  test('a guarded (sweep) release refuses a reservation that committed under it — no over-issue off a stale snapshot', async () => {
+    const c = await mkCoupon({ code: 'RACE', percentOff: 50, maxRedemptions: 5, perUserLimit: 5 });
+    const pay = await Payment.create({ userId: TEST_USER_ID, purpose: 'marketplace_order', amountCHF: 5, currency: 'INR', razorpayOrderId: 'rc', status: 'created', createdAt: new Date() });
+    await coupons.redeem({ coupon: c, userId: TEST_USER_ID, orderRef: 'rc', paymentId: pay._id, committed: false });
+    // The payment captured + committed AFTER the sweep would have snapshotted it as 'created'.
+    await coupons.commitReservation({ coupon: await Coupon.findById(c._id), orderRef: 'rc' });
+    const did = await coupons.release({ coupon: await Coupon.findById(c._id), orderRef: 'rc', onlyIfUncommitted: true });
+    expect(did).toBe(false);                                    // guarded release refuses the committed row
+    expect((await Coupon.findById(c._id)).remaining).toBe(4);   // real captured use NOT wrongly reclaimed
+  });
+
+  test('the sweep self-heals a captured reservation whose commit was lost (committed:false + captured)', async () => {
+    const c = await mkCoupon({ code: 'HEAL', percentOff: 50, maxRedemptions: 5, perUserLimit: 5 });
+    const pay = await Payment.create({ userId: TEST_USER_ID, purpose: 'marketplace_order', amountCHF: 5, currency: 'INR', razorpayOrderId: 'hl', status: 'captured', createdAt: new Date() });
+    await coupons.redeem({ coupon: c, userId: TEST_USER_ID, orderRef: 'hl', paymentId: pay._id, committed: false });   // commit "lost" → stays committed:false
+    await CouponRedemption.updateMany({}, { $set: { at: new Date(Date.now() - 3 * 3600 * 1000) } });
+    const r = await coupons.releaseStaleReservations(new Date(), 120);
+    expect(r.released).toBe(0);                                  // captured → never released
+    expect((await Coupon.findById(c._id)).remaining).toBe(4);    // slot retained
+    expect((await CouponRedemption.findOne({ redemptionKey: String(c._id) + ':hl' })).committed).toBe(true);   // healed out of the candidate set
+  });
 });

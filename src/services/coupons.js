@@ -103,8 +103,12 @@ async function redeem({ coupon, userId, orderRef, paymentId, purpose, discountCH
   if (prior && prior.released) {
     // A LATE redemption on a reservation the abandonment sweep already released (its payment
     // captured after the TTL). RE-CONSUME the cap so the genuinely-paid order holds a slot again —
-    // only the CAS winner re-decrements. If the cap has since filled we accept ONE bounded
-    // over-issue rather than fail a payment that already succeeded (redeemOrderCoupon swallows).
+    // only the CAS winner re-decrements. If the TOTAL cap (or the per-user slot, when another order
+    // took the freed slot in the meantime) has since filled, we accept ONE bounded over-issue on
+    // that captured order rather than fail a payment that already succeeded (redeemOrderCoupon
+    // swallows). The over-issue stays VISIBLE (the row counts toward userRedemptionCount) and
+    // CONTAINED (the next attempt is blocked), and only arises from this narrow sweep-then-late-
+    // capture race — never from normal reserve→capture.
     const won = await atomicUpdate(CouponRedemption, { redemptionKey, released: true }, { $set: { released: false, committed: true, releasedAt: null } });
     if (won) {
       if (coupon.remaining != null) {
@@ -175,15 +179,19 @@ async function redeem({ coupon, userId, orderRef, paymentId, purpose, discountCH
  * with the user's next attempt — an abandoned checkout never locks a one-time coupon.
  * NOTE (safe-direction): pre-deploy rows that predate the `released` field won't match this CAS
  * (no backfill); their slot simply isn't reclaimed on cancel — the safe (under-issue) direction.
- * @param {{ coupon:any, orderRef:string }} a @returns {Promise<boolean>} whether THIS call released
+ * `onlyIfUncommitted` (used by the sweep) additionally guards committed:false in the SAME CAS, so a
+ * reservation that captures + commits DURING a sweep run can't be released off a stale snapshot.
+ * @param {{ coupon:any, orderRef:string, onlyIfUncommitted?:boolean }} a @returns {Promise<boolean>} whether THIS call released
  */
-async function release({ coupon, orderRef }) {
+async function release({ coupon, orderRef, onlyIfUncommitted = false }) {
   const couponId = coupon._id;
   const redemptionKey = `${couponId}:${orderRef}`;
-  const claimed = await atomicUpdate(CouponRedemption,
-    { redemptionKey, released: false },
+  const filter = onlyIfUncommitted
+    ? { redemptionKey, released: false, committed: false }
+    : { redemptionKey, released: false };
+  const claimed = await atomicUpdate(CouponRedemption, filter,
     { $set: { released: true, releasedAt: new Date(), userLimitKey: 'rel:' + redemptionKey } });
-  if (!claimed) return false;   // no such reservation, or already released — idempotent no-op
+  if (!claimed) return false;   // no such reservation, already released, or committed under us — idempotent no-op
   if (coupon.remaining != null) {
     await atomicUpdate(Coupon, { _id: couponId }, { $inc: { remaining: 1, redeemedCount: -1 }, $set: { updatedAt: new Date() } });
   } else {
@@ -245,15 +253,21 @@ async function releaseStaleReservations(now, ttlMinutes = 120) {
   for (const r of open) {
     if (r.paymentId) {
       const pay = payById.get(String(r.paymentId));
-      // A live paid charge — captured (real use) or refunding (transition() owns it) — is left
-      // alone; created/failed/refunded/cancelled/missing → reclaim.
-      if (pay && (pay.status === 'captured' || pay.status === 'refunding')) continue;
+      if (pay && pay.status === 'refunding') continue;                 // in-flight refund — transition() owns it
+      if (pay && pay.status === 'captured') {
+        // Real use whose commit was lost (commitReservation threw) — self-heal so it leaves the
+        // candidate set next run instead of re-scanning forever, and never gets released.
+        await commitReservation({ coupon: { _id: r.couponId }, orderRef: r.orderRef }).catch(() => { });
+        continue;
+      }
     }
     // No paymentId here means a free/membership grant that markSweepable() returned to scope — i.e.
     // its order was cancelled/refunded and the immediate release was lost — so reclaiming is correct.
+    // onlyIfUncommitted re-checks committed:false in the release CAS, so a reservation that captured
+    // between the snapshot above and here is NOT released off the stale 'created' read.
     const coupon = couponById.get(String(r.couponId));
     if (!coupon) continue;
-    if (await release({ coupon, orderRef: r.orderRef })) released++;
+    if (await release({ coupon, orderRef: r.orderRef, onlyIfUncommitted: true })) released++;
   }
   return { released, capped };
 }

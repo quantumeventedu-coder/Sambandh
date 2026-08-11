@@ -1011,11 +1011,19 @@ async function createQuotedOrder({ userId, purpose, amountCHF, category, label, 
     // per-user-limited coupon can therefore never yield more free orders than its cap allows.
     // No paymentId: a free order captures instantly (never abandoned), so the sweep must skip it.
     if (coupon) await coupons.redeem({ coupon, userId, orderRef: /** @type {string} */ (couponMeta.couponOrderRef), purpose, discountCHF: quote.discountCHF, discountLocal: quote.discountLocal, currency: quote.code });
-    const payment = await Payment.create({
-      userId, purpose, amountCHF: quote.chf, currency: quote.code, razorpayOrderId: orderId,
-      status: 'captured', capturedAt: new Date(), createdAt: new Date(),
-      metadata: { ...metadata, free: true, amountLocal: quote.total, ...breakdown, ...couponMeta },
-    });
+    let payment;
+    try {
+      payment = await Payment.create({
+        userId, purpose, amountCHF: quote.chf, currency: quote.code, razorpayOrderId: orderId,
+        status: 'captured', capturedAt: new Date(), createdAt: new Date(),
+        metadata: { ...metadata, free: true, amountLocal: quote.total, ...breakdown, ...couponMeta },
+      });
+    } catch (e) {
+      // The grant was consumed above but the (committed, paymentId-less) payment never landed, so
+      // the sweep can't reclaim it — release the reservation now rather than leak the cap slot.
+      if (coupon) await coupons.release({ coupon, orderRef: /** @type {string} */ (couponMeta.couponOrderRef) }).catch(() => { });
+      throw e;
+    }
     return { free: true, devMode: true, orderId, payment, ...clientQuote };
   }
   if (DEV_PAYMENTS) {
