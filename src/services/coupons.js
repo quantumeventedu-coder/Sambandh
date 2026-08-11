@@ -215,6 +215,16 @@ async function markSweepable(orderRef) {
 }
 
 /**
+ * Backfill the paymentId on a reservation that was created BEFORE its payment existed (the
+ * membership /create-order path reserves the coupon, then creates the Payment), so the abandonment
+ * sweep can check that payment's status — telling a real capture from an abandoned checkout —
+ * exactly as it does for the order path. Idempotent. @param {string} orderRef @param {any} paymentId
+ */
+async function attachReservationPayment(orderRef, paymentId) {
+  await atomicUpdate(CouponRedemption, { orderRef }, { $set: { paymentId } });
+}
+
+/**
  * Nightly backstop: release reservations whose order NEVER became a real charge — an abandoned
  * checkout (payment stuck 'created'/'failed', or gone) still holding a cap slot. A payment that
  * captured is a real use and is left alone (a later cancel/refund releases it via transition()).
@@ -344,4 +354,4 @@ function pub(c) {
   };
 }
 
-module.exports = { validate, redeem, release, commitReservation, markSweepable, releaseStaleReservations, discountFor, findByCode, create, update, list, pub, normalizeCode, categoryOf, applies };
+module.exports = { validate, redeem, release, commitReservation, markSweepable, attachReservationPayment, releaseStaleReservations, discountFor, findByCode, create, update, list, pub, normalizeCode, categoryOf, applies };

@@ -155,6 +155,63 @@ describe('checkout integration', () => {
     expect(v.body.ok).toBe(true);
     expect((await Coupon.findById(c._id)).redeemedCount).toBe(1);   // /verify is an idempotent confirm — NOT a second consume
   });
+
+  const CouponRedemption = require('../src/models/CouponRedemption');
+  const age = () => CouponRedemption.updateMany({}, { $set: { at: new Date(Date.now() - 3 * 3600 * 1000) } });
+
+  test('an ABANDONED paid membership checkout is reclaimed by the sweep (committed:false + backfilled paymentId)', async () => {
+    await mkUser();
+    const c = await mkCoupon({ code: 'MEMAB', percentOff: 50, maxRedemptions: 5 });
+    const order = await request(app).post('/payment/create-order').send({ purpose: 'base_subscription', couponCode: 'MEMAB' });
+    expect(order.body.free).toBeFalsy();
+    expect((await Coupon.findById(c._id)).remaining).toBe(4);        // reserved at create
+    const row = await CouponRedemption.findOne({ orderRef: order.body.breakdown.couponOrderRef });
+    expect(row.committed).toBe(false);                              // paid → sweepable
+    expect(row.paymentId).toBeTruthy();                            // backfilled so the sweep can check status
+    // Never verify (abandon) → the sweep reclaims the held slot.
+    await age();
+    const r = await coupons.releaseStaleReservations(new Date(), 120);
+    expect(r.released).toBe(1);
+    expect((await Coupon.findById(c._id)).remaining).toBe(5);
+  });
+
+  test('a VERIFIED paid membership commits the reservation, so the sweep never touches it', async () => {
+    await mkUser();
+    const c = await mkCoupon({ code: 'MEMOK', percentOff: 50, maxRedemptions: 5 });
+    const order = await request(app).post('/payment/create-order').send({ purpose: 'base_subscription', couponCode: 'MEMOK' });
+    const oid = order.body.orderId, pid = 'pay_live_ok';
+    const sign = crypto.createHmac('sha256', process.env.RAZORPAY_KEY_SECRET).update(oid + '|' + pid).digest('hex');
+    await request(app).post('/payment/verify').send({ razorpay_order_id: oid, razorpay_payment_id: pid, razorpay_signature: sign });
+    await age();
+    const r = await coupons.releaseStaleReservations(new Date(), 120);
+    expect(r.released).toBe(0);                                     // committed at /verify → excluded
+    expect((await Coupon.findById(c._id)).remaining).toBe(4);       // real use retained
+  });
+
+  test('a free (100%-off) membership grant is committed:true and never swept', async () => {
+    await mkUser();
+    const c = await mkCoupon({ code: 'MEMFREE', kind: 'percent', percentOff: 100, maxRedemptions: 3, perUserLimit: 1 });
+    const r0 = await request(app).post('/payment/create-order').send({ purpose: 'base_subscription', couponCode: 'MEMFREE' });
+    expect(r0.body.free).toBe(true);
+    expect((await Coupon.findById(c._id)).remaining).toBe(2);
+    await age();
+    const r = await coupons.releaseStaleReservations(new Date(), 120);
+    expect(r.released).toBe(0);                                     // committed:true → excluded
+    expect((await Coupon.findById(c._id)).remaining).toBe(2);       // free grant retained
+  });
+
+  test('cancelling a coupon membership releases the coupon on refund', async () => {
+    await mkUser();
+    const c = await mkCoupon({ code: 'MEMREF', percentOff: 50, maxRedemptions: 5 });
+    const order = await request(app).post('/payment/create-order').send({ purpose: 'base_subscription', couponCode: 'MEMREF' });
+    const oid = order.body.orderId, pid = 'pay_live_ref';
+    const sign = crypto.createHmac('sha256', process.env.RAZORPAY_KEY_SECRET).update(oid + '|' + pid).digest('hex');
+    await request(app).post('/payment/verify').send({ razorpay_order_id: oid, razorpay_payment_id: pid, razorpay_signature: sign });
+    expect((await Coupon.findById(c._id)).remaining).toBe(4);       // committed use
+    const cancel = await request(app).post('/payment/cancel-subscription').send({});
+    expect(cancel.status).toBe(200);
+    expect((await Coupon.findById(c._id)).remaining).toBe(5);       // released on refund
+  });
 });
 
 describe('review fixes — cap reserved up front, per-user race-safe, numeric guards', () => {

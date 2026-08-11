@@ -236,7 +236,10 @@ router.post('/create-order', requireAuth, async (req, res, next) => {
     const couponRef = coupon ? 'cpn_' + crypto.randomBytes(8).toString('hex') : null;
     if (coupon) {
       try {
-        await coupons.redeem({ coupon, userId: req.userId, orderRef: /** @type {string} */ (couponRef), purpose: purpose.replace('_high', ''), discountCHF: couponDiscountCHF, discountLocal: quote.discountLocal, currency: quote.code });
+        // committed:false for a PAID membership (the sweep reclaims it if the checkout is abandoned;
+        // /verify's redeemOrderCoupon commits it on capture). A FREE (100%-off) grant fulfils inline
+        // and never reaches /verify, so it is committed at once and never swept.
+        await coupons.redeem({ coupon, userId: req.userId, orderRef: /** @type {string} */ (couponRef), purpose: purpose.replace('_high', ''), discountCHF: couponDiscountCHF, discountLocal: quote.discountLocal, currency: quote.code, committed: quote.total <= 0 });
       } catch (e) {
         return res.status(409).json({ error: (e && /** @type {any} */ (e).message) || 'This coupon could not be applied.', couponError: (e && /** @type {any} */ (e).code) || 'EXHAUSTED' });
       }
@@ -260,18 +263,26 @@ router.post('/create-order', requireAuth, async (req, res, next) => {
     // Fully discounted (e.g. a 100%-off tester coupon) → NO gateway charge. The coupon is
     // already reserved above; record a captured 'coupon' Payment and fulfill (grant the tier).
     if (quote.total <= 0) {
-      const payment = await Payment.create({
-        userId: req.userId, purpose: purpose.replace('_high', ''), amountCHF: quote.chf, currency: quote.code,
-        razorpayOrderId: couponRef || ('free_' + crypto.randomBytes(8).toString('hex')), status: 'captured', method: 'coupon', capturedAt: new Date(), createdAt: new Date(),
-        metadata: { free: true, gender: user.profile.gender, amountLocal: 0, ...breakdown },
-      });
+      let payment;
+      try {
+        payment = await Payment.create({
+          userId: req.userId, purpose: purpose.replace('_high', ''), amountCHF: quote.chf, currency: quote.code,
+          razorpayOrderId: couponRef || ('free_' + crypto.randomBytes(8).toString('hex')), status: 'captured', method: 'coupon', capturedAt: new Date(), createdAt: new Date(),
+          metadata: { free: true, gender: user.profile.gender, amountLocal: 0, ...breakdown },
+        });
+      } catch (e) {
+        // The grant was consumed (committed:true, no paymentId → the sweep can't reclaim it), so
+        // release now rather than leak the cap slot on a membership that was never granted.
+        if (coupon) await coupons.release({ coupon, orderRef: /** @type {string} */ (couponRef) }).catch(() => { });
+        throw e;
+      }
       await fulfillCaptured(req.userId, payment);
       return res.json({ ...clientQuote, free: true, ok: true, activated: true, purpose: payment.purpose, paymentId: payment._id });
     }
 
     if (DEV_PAYMENTS) {
       const orderId = 'order_dev_' + crypto.randomBytes(8).toString('hex');
-      await Payment.create({
+      const payment = await Payment.create({
         userId: req.userId,
         purpose: purpose.replace('_high', ''),
         amountCHF: quote.chf, currency: quote.code,
@@ -280,6 +291,9 @@ router.post('/create-order', requireAuth, async (req, res, next) => {
         createdAt: new Date(),
         metadata: { dev: true, gender: user.profile.gender, amountLocal: quote.total, ...breakdown }
       });
+      // Give the (committed:false) reservation the paymentId the sweep needs to distinguish an
+      // abandoned checkout from a real late capture.
+      if (coupon) await coupons.attachReservationPayment(/** @type {string} */ (couponRef), payment._id);
       return res.json({ devMode: true, orderId, ...clientQuote });
     }
 
@@ -299,7 +313,7 @@ router.post('/create-order', requireAuth, async (req, res, next) => {
     // row there is nothing authoritative to check a payment against, and since the
     // Razorpay signature covers only order_id|payment_id, a caller could pay for
     // base_subscription and then claim max_subscription at verify time.
-    await Payment.create({
+    const paidPayment = await Payment.create({
       userId: req.userId,
       purpose: purpose.replace('_high', ''),
       amountCHF: quote.chf, currency: quote.code,
@@ -308,6 +322,8 @@ router.post('/create-order', requireAuth, async (req, res, next) => {
       createdAt: new Date(),
       metadata: { gender: user.profile.gender, amountLocal: quote.total, ...breakdown }
     });
+    // Give the (committed:false) reservation the paymentId the sweep needs (abandonment vs capture).
+    if (coupon) await coupons.attachReservationPayment(/** @type {string} */ (couponRef), paidPayment._id);
 
     res.json({
       orderId: order.id, ...clientQuote,
@@ -443,6 +459,15 @@ router.post('/cancel-subscription', requireAuth, async (req, res, next) => {
       // 'captured' — a retry would re-dispatch the gateway refund (notes.idempotency is not a
       // real gateway idempotency key). Leave it 'refunding' for an idempotent operator replay.
       await claimPayment({ _id: claimed._id, status: 'refunding' }, { status: 'refunded', refundedAt: new Date() });
+      // The membership charge is reversed → give back any coupon it consumed. markSweepable first so
+      // the nightly sweep backstops a lost release (the payment is now refunded); idempotent.
+      if (claimed.metadata && claimed.metadata.couponCode && claimed.metadata.couponOrderRef) {
+        await coupons.markSweepable(claimed.metadata.couponOrderRef).catch(() => { });
+        try {
+          const usedCoupon = await coupons.findByCode(claimed.metadata.couponCode);
+          if (usedCoupon) await coupons.release({ coupon: usedCoupon, orderRef: claimed.metadata.couponOrderRef });
+        } catch { /* best-effort; releaseStaleReservations backstops */ }
+      }
     }
 
     await User.findByIdAndUpdate(userId, {
