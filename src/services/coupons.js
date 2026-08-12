@@ -195,12 +195,40 @@ async function release({ coupon, orderRef, onlyIfUncommitted = false }) {
 
 /**
  * Mark a reservation's charge as FINAL (its payment captured) so the abandonment sweep never
- * considers it again — called at capture-confirm. Idempotent (committed:false→true CAS); a no-op
- * for grants that were already committed at create.
+ * considers it again — called at capture-confirm. Idempotent; a no-op for grants already committed.
+ *
+ * CRITICAL RACE it closes (the capture→commit gap): redeem() at capture may read the reservation as
+ * released:false and return WITHOUT committing, and only THEN does the concurrent nightly sweep
+ * release it off a stale 'created' payment snapshot (release guards committed:false, which still
+ * holds). If we merely committed here, the row would end committed:true + released:true — a real
+ * captured, granted purchase whose cap slot was handed back → a coupon honored past its cap. So:
+ * commit an active reservation; but if it was RELEASED under us, RE-CONSUME the slot instead
+ * (lockstep remaining−1/redeemedCount+1) — BUT ONLY when the payment genuinely CAPTURED. If a
+ * REFUND/cancel released it (payment now refunded/refunding), we must NOT reclaim: that would hold
+ * the cap slot on a reversed charge (a safe-direction leak, but wrong). Distinguishing the two by
+ * live payment status is what keeps this from regressing the refund path. Only the CAS winner acts.
  * @param {{ coupon:any, orderRef:string }} a
  */
 async function commitReservation({ coupon, orderRef }) {
-  await atomicUpdate(CouponRedemption, { redemptionKey: `${coupon._id}:${orderRef}`, committed: false }, { $set: { committed: true } });
+  const couponId = coupon._id;
+  const redemptionKey = `${couponId}:${orderRef}`;
+  const committed = await atomicUpdate(CouponRedemption, { redemptionKey, released: false, committed: false }, { $set: { committed: true } });
+  if (committed) return;
+  // Not committable as active → already committed (no-op) or RELEASED under us. Reclaim ONLY the
+  // capture→commit-gap case: a released row whose payment truly CAPTURED. A refund-released row has
+  // a refunded/refunding payment → leave it released.
+  const row = await CouponRedemption.findOne({ redemptionKey });
+  if (!row || row.committed || !row.released) return;
+  const Payment = require('../models/Payment');
+  const pay = row.paymentId
+    ? await Payment.findById(row.paymentId)
+    : await Payment.findOne({ 'metadata.couponOrderRef': orderRef });   // membership whose backfill was lost
+  if (!pay || pay.status !== 'captured') return;                         // reversed / abandoned → don't reclaim
+  const reclaimed = await atomicUpdate(CouponRedemption, { redemptionKey, released: true, committed: false }, { $set: { released: false, committed: true, releasedAt: null } });
+  if (!reclaimed) return;
+  const full = (coupon.remaining !== undefined) ? coupon : await Coupon.findById(couponId);   // self-heal may pass a bare {_id}
+  if (full && full.remaining != null) await atomicUpdate(Coupon, { _id: couponId }, { $inc: { remaining: -1, redeemedCount: 1 }, $set: { updatedAt: new Date() } });
+  else await atomicUpdate(Coupon, { _id: couponId }, { $inc: { redeemedCount: 1 }, $set: { updatedAt: new Date() } });
 }
 
 /**
@@ -212,6 +240,16 @@ async function commitReservation({ coupon, orderRef }) {
  */
 async function markSweepable(orderRef) {
   await atomicUpdate(CouponRedemption, { orderRef, committed: true }, { $set: { committed: false } });
+}
+
+/**
+ * Backfill the paymentId on a reservation that was created BEFORE its payment existed (the
+ * membership /create-order path reserves the coupon, then creates the Payment), so the abandonment
+ * sweep can check that payment's status — telling a real capture from an abandoned checkout —
+ * exactly as it does for the order path. Idempotent. @param {string} orderRef @param {any} paymentId
+ */
+async function attachReservationPayment(orderRef, paymentId) {
+  await atomicUpdate(CouponRedemption, { orderRef }, { $set: { paymentId } });
 }
 
 /**
@@ -236,33 +274,37 @@ async function releaseStaleReservations(now, ttlMinutes = 120) {
   const capped = open.length >= LIMIT;
   if (!open.length) return { released: 0, capped };
   const uniq = (/** @type {any[]} */ a) => [...new Set(a.map((v) => v && String(v)).filter(Boolean))];
-  const [payments, cpns] = await Promise.all([
+  // Every row's payment must be status-checked. Order rows + backfilled membership rows carry a
+  // paymentId (fast _id lookup); a membership/free row whose backfill was lost carries none, so its
+  // payment is found by the couponOrderRef stamped in its metadata. Both go through the SAME status
+  // logic below, so a captured payment is never released regardless of how its row is keyed.
+  const refs = uniq(open.filter((/** @type {any} */ r) => !r.paymentId).map((/** @type {any} */ r) => r.orderRef));
+  const [payments, refPayments, cpns] = await Promise.all([
     Payment.find({ _id: { $in: uniq(open.map((/** @type {any} */ r) => r.paymentId)) } }).lean(),
+    refs.length ? Payment.find({ 'metadata.couponOrderRef': { $in: refs } }).lean() : [],
     Coupon.find({ _id: { $in: uniq(open.map((/** @type {any} */ r) => r.couponId)) } }),
   ]);
   const payById = new Map(payments.map((/** @type {any} */ p) => [String(p._id), p]));
+  const payByRef = new Map(refPayments.map((/** @type {any} */ p) => [String(p.metadata && p.metadata.couponOrderRef), p]));
   const couponById = new Map(cpns.map((/** @type {any} */ c) => [String(c._id), c]));
   let released = 0;
   for (const r of open) {
-    if (r.paymentId) {
-      const pay = payById.get(String(r.paymentId));
-      if (pay && pay.status === 'refunding') continue;                 // in-flight refund — transition() owns it
-      if (pay && pay.status === 'captured') {
-        // Real use whose commit was lost (commitReservation threw) — self-heal so it leaves the
-        // candidate set next run instead of re-scanning forever, and never gets released.
-        await commitReservation({ coupon: { _id: r.couponId }, orderRef: r.orderRef }).catch(() => { });
-        continue;
-      }
+    const rowCoupon = couponById.get(String(r.couponId));
+    const pay = r.paymentId ? payById.get(String(r.paymentId)) : payByRef.get(String(r.orderRef));
+    if (pay && pay.status === 'refunding') continue;                   // in-flight refund — transition() owns it
+    if (pay && pay.status === 'captured') {
+      // Real use whose commit was lost (commitReservation threw) — self-heal so it leaves the
+      // candidate set next run instead of re-scanning forever, and never gets released. Pass the
+      // FULL coupon so if the row was also released, the re-consume stays lockstep.
+      await commitReservation({ coupon: rowCoupon || { _id: r.couponId }, orderRef: r.orderRef }).catch(() => { });
+      continue;
     }
-    // No paymentId here means a free/membership grant that markSweepable() returned to scope — i.e.
-    // its order was cancelled/refunded and the immediate release was lost — so reclaiming is correct.
-    // onlyIfUncommitted re-checks committed:false in the release CAS, so a reservation that captured
-    // between the snapshot above and here is NOT released off the stale 'created' read.
-    const coupon = couponById.get(String(r.couponId));
+    // pay is created / failed / refunded / absent → the charge is NOT a live capture, so reclaim.
+    // (release's onlyIfUncommitted re-checks committed:false, so a row that commits under us is safe.)
     // Coupon hard-deleted out from under a live reservation: nothing to release, but commit the row
     // so it leaves the candidate set instead of re-clogging the oldest-first 5000-row budget forever.
-    if (!coupon) { await commitReservation({ coupon: { _id: r.couponId }, orderRef: r.orderRef }).catch(() => { }); continue; }
-    if (await release({ coupon, orderRef: r.orderRef, onlyIfUncommitted: true })) released++;
+    if (!rowCoupon) { await commitReservation({ coupon: { _id: r.couponId }, orderRef: r.orderRef }).catch(() => { }); continue; }
+    if (await release({ coupon: rowCoupon, orderRef: r.orderRef, onlyIfUncommitted: true })) released++;
   }
   return { released, capped };
 }
@@ -344,4 +386,4 @@ function pub(c) {
   };
 }
 
-module.exports = { validate, redeem, release, commitReservation, markSweepable, releaseStaleReservations, discountFor, findByCode, create, update, list, pub, normalizeCode, categoryOf, applies };
+module.exports = { validate, redeem, release, commitReservation, markSweepable, attachReservationPayment, releaseStaleReservations, discountFor, findByCode, create, update, list, pub, normalizeCode, categoryOf, applies };
