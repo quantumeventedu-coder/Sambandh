@@ -90,10 +90,10 @@ async function assignInvoice(payment) {
 function describe(purpose) {
   /** @type {Record<string, string>} */
   const map = {
-    base_subscription: 'Sambandh membership — Essential (30 days)',
+    base_subscription: 'Sambandh membership — Basic (30 days)',
     pro_subscription: 'Sambandh membership — Plus (30 days)',
     max_subscription: 'Sambandh membership — Signature (30 days)',
-    base_annual: 'Sambandh membership — Essential (annual)',
+    base_annual: 'Sambandh membership — Basic (annual)',
     pro_annual: 'Sambandh membership — Plus (annual)',
     max_annual: 'Sambandh membership — Signature (annual)',
     verification_service: 'Verification service',

@@ -76,7 +76,7 @@ const UserSchema = new mongoose.Schema({
     joinFeeAmountUSD: Number, joinFeeAmountINR: Number, // legacy, unused
     joinFeePaymentId: mongoose.Schema.Types.ObjectId, paidAt: Date,
     // 'free' = no active membership (cannot use the app). Everything is paid. Display
-    // names → keys: Essential=base CHF 5 · Plus=pro CHF 12 · Signature=max CHF 25 /mo
+    // names → keys: Basic=base CHF 5 · Plus=pro CHF 12 · Signature=max CHF 25 /mo
     // (annual 48/120/240). Flat base price for everyone; keys stay base/pro/max.
     tier: { type: String, enum: ['free', 'base', 'pro', 'max'], default: 'free' },
     tierExpiresAt: Date,

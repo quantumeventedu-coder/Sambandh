@@ -481,7 +481,7 @@ function renderFeatures() {
 
     <div class="card mt" style="text-align:center">
       <div style="font-weight:700;font-size:16px">Membership at a glance</div>
-      <div class="kv" style="margin-top:10px"><span>Sambandh Essential</span><b>CHF 5 / month</b></div>
+      <div class="kv" style="margin-top:10px"><span>Sambandh Basic</span><b>CHF 5 / month</b></div>
       <div class="kv"><span>Sambandh Plus</span><b>CHF 12 / month</b></div>
       <div class="kv"><span>Sambandh Signature</span><b>CHF 25 / month</b></div>
       <div class="kv"><span>Lakshan evidence reveal</span><b>CHF 0.50–1</b></div>
@@ -1338,7 +1338,7 @@ async function obPayNow() {
     await ensureRazorpay();
     const rzp = new Razorpay({
       key: order.key, amount: order.amount, currency: order.currency, name: 'Sambandh',
-      description: 'Sambandh Essential membership (monthly)', order_id: order.orderId, prefill: order.prefill,
+      description: 'Sambandh Basic membership (monthly)', order_id: order.orderId, prefill: order.prefill,
       handler: async resp => {
         await api('/payment/verify', { method: 'POST', body: { ...resp, purpose: 'base_subscription' } });
         toast('Payment successful ✓');
@@ -3265,7 +3265,7 @@ async function passkeyLogin() {
 
 function setBilling(mode) { S._billing = mode; renderSettings(); }
 
-// Membership plans (CHF, nothing is free): Essential (base) 5 · Plus (pro) 12 ·
+// Membership plans (CHF, nothing is free): Basic (base) 5 · Plus (pro) 12 ·
 // Signature (max) 25 per month; annual 48 · 120 · 240. One flat base price for everyone.
 function tierCards(u) {
   const tier = u.membership?.tier || 'free';
@@ -3296,7 +3296,7 @@ function tierCards(u) {
       <button type="button" class="${annual ? 'on' : ''}" onclick="setBilling('annual')">Annual <span class="save">save ~20%</span></button>
     </div>
     <div class="plan-grid">`
-    + card('base', 'Sambandh Essential', 'Everything you need to meet honestly.', [
+    + card('base', 'Sambandh Basic', 'Everything you need to meet honestly.', [
         'Full verification & a photo-verified community',
         'The Lakshan Book & real-time safety alerts',
         'Astrology & compatibility insights',
@@ -3305,7 +3305,7 @@ function tierCards(u) {
     + card('pro', 'Sambandh Plus', 'For members who want to reach further.', [
         'Communicate without daily limits',
         'Greater visibility among compatible, verified members',
-        'Everything in Essential'
+        'Everything in Basic'
       ], true)
     + card('max', 'Sambandh Signature', 'A higher level of service — not just more features.', [
         'Enhanced compatibility insights',
@@ -3334,7 +3334,7 @@ async function cancelMembership() {
 async function buyTier(purpose) {
   const annual = purpose.endsWith('_annual');
   const stem = purpose.replace(/_(subscription|annual)$/, '');
-  const label = stem === 'max' ? 'Sambandh Signature' : stem === 'pro' ? 'Sambandh Plus' : 'Sambandh Essential';
+  const label = stem === 'max' ? 'Sambandh Signature' : stem === 'pro' ? 'Sambandh Plus' : 'Sambandh Basic';
   const per = annual ? 'year' : 'month';
   const name = label;
   // Show the real itemized total (base + tax + gateway fee) before charging.
