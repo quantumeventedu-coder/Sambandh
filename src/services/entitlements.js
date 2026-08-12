@@ -63,26 +63,40 @@ function weekKey(d) {
   return `${t.getUTCFullYear()}-W${String(week).padStart(2, '0')}`;
 }
 
+/** Atomic update across both ODM backends (pg-odm exposes the static; Mongoose needs findOneAndUpdate).
+ * @param {any} Model @param {any} filter @param {any} update */
+function atomicUpdate(Model, filter, update) {
+  return typeof Model.atomicUpdate === 'function' ? Model.atomicUpdate(filter, update) : Model.findOneAndUpdate(filter, update, { new: true });
+}
+
 /**
- * Try to spend one weekly swipe. Returns { ok, reason?, used?, limit? }.
- *  - unlimited tier (limit null) → always ok, no write.
+ * READ-ONLY: may this user spend a swipe? Returns { ok, unlimited?, reason?, used?, limit? }. No write.
+ * The caller checks this ONLY for a genuinely new action (see recordSwipe) and, on ok, writes first
+ * then records — so a failed write never spends the budget.
+ *  - unlimited tier (limit null) → { ok:true, unlimited:true }.
  *  - no tier (limit 0)           → { ok:false, reason:'locked' } (must subscribe).
- *  - capped tier                 → ok until `used >= limit`, then { ok:false, reason:'limit' }.
- * @param {any} userId @param {Date} [now]
+ *  - capped tier                 → ok until used >= limit, then { ok:false, reason:'limit' }.
+ * @param {any} user @param {Date} [now]
  */
-async function consumeSwipe(userId, now = new Date()) {
-  const user = await User.findById(userId);
-  if (!user) return { ok: false, reason: 'locked' };
+function swipeAllowance(user, now = new Date()) {
   const limit = swipeLimitPerWeek(user);
-  if (limit == null) return { ok: true };                                  // unlimited (Plus/Signature)
-  if (limit <= 0) return { ok: false, reason: 'locked', limit: 0 };        // no tier
-  const wk = weekKey(now);
-  const sameWeek = user.swipeWeek === wk;
-  const used = sameWeek ? (Number(user.swipeUsed) || 0) : 0;
+  if (limit == null) return { ok: true, unlimited: true };
+  if (limit <= 0) return { ok: false, reason: 'locked', limit: 0 };
+  const used = user && user.swipeWeek === weekKey(now) ? (Number(user.swipeUsed) || 0) : 0;
   if (used >= limit) return { ok: false, reason: 'limit', used, limit };
-  if (sameWeek) await User.atomicUpdate({ _id: userId }, { $inc: { swipeUsed: 1 } });
-  else await User.atomicUpdate({ _id: userId }, { $set: { swipeWeek: wk, swipeUsed: 1 } });
-  return { ok: true, used: used + 1, limit };
+  return { ok: true, used, limit };
+}
+
+/** Charge one weekly swipe — call ONLY after a new like/pass write succeeded. No-op for unlimited/
+ * locked tiers. Best-effort (a lost increment under-charges, the safe direction). @param {any} userId @param {Date} [now] */
+async function recordSwipe(userId, now = new Date()) {
+  const user = await User.findById(userId);
+  if (!user) return;
+  const limit = swipeLimitPerWeek(user);
+  if (limit == null || limit <= 0) return;                                  // unlimited or locked → nothing to meter
+  const wk = weekKey(now);
+  if (user.swipeWeek === wk) await atomicUpdate(User, { _id: userId }, { $inc: { swipeUsed: 1 } });
+  else await atomicUpdate(User, { _id: userId }, { $set: { swipeWeek: wk, swipeUsed: 1 } });
 }
 
 /** Read-only meter snapshot for display (no spend). @param {any} user @param {Date} [now] */
@@ -103,6 +117,7 @@ function requireEntitlement(feature) {
   return async (/** @type {any} */ req, /** @type {any} */ res, /** @type {any} */ next) => {
     try {
       const user = await User.findById(req.userId);
+      if (!user) return res.status(401).json({ error: 'Account not found' });   // valid token, gone user → auth error, not an upsell
       if (canAccess(user, feature)) return next();
       const need = REQUIRED_TIER[feature];
       return res.status(403).json({
@@ -115,5 +130,5 @@ function requireEntitlement(feature) {
 
 module.exports = {
   TIER_ENTITLEMENTS, REQUIRED_TIER, tierOf, entitlementsFor, canAccess,
-  swipeLimitPerWeek, labelFor, consumeSwipe, swipeStatus, weekKey, requireEntitlement,
+  swipeLimitPerWeek, labelFor, swipeAllowance, recordSwipe, swipeStatus, weekKey, requireEntitlement,
 };

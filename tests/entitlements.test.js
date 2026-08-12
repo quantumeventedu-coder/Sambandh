@@ -44,19 +44,22 @@ describe('tier resolution + feature ladder', () => {
 });
 
 describe('swipe budget', () => {
-  test('Basic is capped at 400/week and blocks past it; Plus/Signature are unlimited; no tier is locked', async () => {
+  test('Basic is capped at 400/week and blocks past it; Plus/Signature unlimited (never metered); no tier locked', async () => {
     const basic = await mk('base');
     await User.atomicUpdate({ _id: basic._id }, { $set: { swipeWeek: ent.weekKey(new Date()), swipeUsed: 399 } });
-    expect((await ent.consumeSwipe(basic._id)).ok).toBe(true);      // the 400th swipe
-    const blocked = await ent.consumeSwipe(basic._id);
+    expect(ent.swipeAllowance(await User.findById(basic._id)).ok).toBe(true);     // the 400th is allowed
+    await ent.recordSwipe(basic._id);                                            // spend it → 400 used
+    const blocked = ent.swipeAllowance(await User.findById(basic._id));
     expect(blocked.ok).toBe(false);
     expect(blocked.reason).toBe('limit');
 
     const plus = await mk('pro');
-    for (let i = 0; i < 5; i++) expect((await ent.consumeSwipe(plus._id)).ok).toBe(true);   // unlimited, never charged
+    expect(ent.swipeAllowance(plus).unlimited).toBe(true);
+    await ent.recordSwipe(plus._id);                                             // no-op for unlimited
+    expect((await User.findById(plus._id)).swipeUsed).toBeFalsy();               // meter never written
 
     const none = await mk(null);
-    const locked = await ent.consumeSwipe(none._id);
+    const locked = ent.swipeAllowance(none);
     expect(locked.ok).toBe(false);
     expect(locked.reason).toBe('locked');
   });
