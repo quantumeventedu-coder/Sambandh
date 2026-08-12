@@ -467,6 +467,20 @@ describe('release + stale-reservation reclaim (abandoned-checkout safety)', () =
     expect((await CouponRedemption.findOne({ redemptionKey: String(c._id) + ':hl' })).committed).toBe(true);   // healed out of the candidate set
   });
 
+  test('sweep self-heals a NO-paymentId row whose payment (found by couponOrderRef) captured — never released', async () => {
+    const c = await mkCoupon({ code: 'NOBACK', percentOff: 50, maxRedemptions: 5, perUserLimit: 5 });
+    // Lost backfill: reservation committed:false with NO paymentId, but a CAPTURED payment carrying
+    // its couponOrderRef exists (the /verify capture happened, commit + backfill both lost).
+    const pay = await Payment.create({ userId: TEST_USER_ID, purpose: 'base_subscription', amountCHF: 5, currency: 'INR', razorpayOrderId: 'nb', status: 'captured', createdAt: new Date(), metadata: { couponCode: 'NOBACK', couponOrderRef: 'nb' } });
+    expect(pay._id).toBeTruthy();
+    await coupons.redeem({ coupon: c, userId: TEST_USER_ID, orderRef: 'nb', committed: false });   // no paymentId
+    await CouponRedemption.updateMany({}, { $set: { at: new Date(Date.now() - 3 * 3600 * 1000) } });
+    const r = await coupons.releaseStaleReservations(new Date(), 120);
+    expect(r.released).toBe(0);                                  // captured (found via couponOrderRef) → NOT released
+    expect((await Coupon.findById(c._id)).remaining).toBe(4);    // real use retained
+    expect((await CouponRedemption.findOne({ redemptionKey: String(c._id) + ':nb' })).committed).toBe(true);   // self-healed
+  });
+
   test('capture→commit gap: commitReservation RE-CONSUMES a slot the racing sweep released — no over-issue past the cap', async () => {
     const c = await mkCoupon({ code: 'GAP', percentOff: 50, maxRedemptions: 1, perUserLimit: 5 });
     const pay = await Payment.create({ userId: TEST_USER_ID, purpose: 'marketplace_order', amountCHF: 5, currency: 'INR', razorpayOrderId: 'gp', status: 'created', createdAt: new Date(), metadata: { couponCode: 'GAP', couponOrderRef: 'gp' } });
