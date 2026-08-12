@@ -24,6 +24,14 @@ const { requireLaunched } = require('./services/site-mode');
 const { computeActivitySignals } = require('./karma-book');
 const { userDistanceKm } = require('./data/cities');
 const recommender = require('./services/recommender');
+const entitlements = require('./services/entitlements');   // tier swipe caps + no-free lockout
+
+/** 403 body for a blocked swipe: locked (no tier) vs weekly cap reached. @param {any} s consumeSwipe result */
+function swipeError(s) {
+  return s.reason === 'locked'
+    ? { error: 'Subscribe to a plan to start swiping.', reason: 'locked', upgrade: true }
+    : { error: `You've used all ${s.limit} swipes this week. Upgrade to Plus for unlimited swipes.`, reason: 'limit', used: s.used, limit: s.limit, upgrade: true };
+}
 const trainer = require('./services/trainer');
 const events = require('./services/events');
 const reading = require('./services/reading-engine');
@@ -230,11 +238,26 @@ router.post('/:userId/like', requireAuth, requireLaunched, async (req, res, next
     const target = await User.findById(targetId);
     if (!target || !target.status?.active) return res.status(404).json({ error: 'User not found' });
 
+    // Tier swipe budget: acting on a NEW profile (never liked OR passed before) costs one weekly
+    // swipe (Basic is capped; Plus/Signature unlimited; no active tier → locked out). Unlimited tiers
+    // skip all of this. We CHARGE ONLY AFTER the write succeeds, so a failed write never spends budget.
+    const me = await User.findById(req.userId);
+    const allow = entitlements.swipeAllowance(me);
+    let chargeSwipe = false;
+    if (!allow.unlimited) {
+      const acted = (await Like.findOne({ from: req.userId, to: targetId })) || (await Pass.findOne({ from: req.userId, to: targetId }));
+      if (!acted) {
+        if (!allow.ok) return res.status(403).json(swipeError(allow));
+        chargeSwipe = true;
+      }
+    }
+
     await Like.findOneAndUpdate(
       { from: req.userId, to: targetId },
       { $setOnInsert: { createdAt: new Date() } },
       { upsert: true });
     await Pass.deleteOne({ from: req.userId, to: targetId }); // liking overrides a past pass
+    if (chargeSwipe) entitlements.recordSwipe(req.userId).catch(() => {});   // charge after the write landed
     recommender.recordSwipe(req.userId, targetId, true).catch(() => {}); // learn desirability (async)
     trainer.captureSwipe(req.userId, targetId, true).catch(() => {}); // consent-gated organic training data
     events.record('Liked', { userId: req.userId, payload: { targetId } }); // behavioural event log
@@ -247,7 +270,6 @@ router.post('/:userId/like', requireAuth, requireLaunched, async (req, res, next
     let isNewMatch = false;
     if (!chat) {
       isNewMatch = true;
-      const me = await User.findById(req.userId);
       chat = await Chat.create({
         participants: [req.userId, targetId],
         createdAt: new Date(), lastMessageAt: new Date(), messageCount: 1,
@@ -286,11 +308,24 @@ router.post('/:userId/like', requireAuth, requireLaunched, async (req, res, next
 // POST /api/discover/:userId/pass — hide from feed for 7 days
 router.post('/:userId/pass', requireAuth, requireLaunched, async (req, res, next) => {
   try {
-    if (req.params.userId === req.userId) return res.status(400).json({ error: 'Invalid' });
+    const targetId = req.params.userId;
+    if (targetId === req.userId) return res.status(400).json({ error: 'Invalid' });
+    // Same swipe budget as /like: charge one swipe only for a NEW profile (never liked OR passed),
+    // and only AFTER the write lands. Unlimited tiers skip it entirely.
+    const allow = entitlements.swipeAllowance(await User.findById(req.userId));
+    let chargeSwipe = false;
+    if (!allow.unlimited) {
+      const acted = (await Pass.findOne({ from: req.userId, to: targetId })) || (await Like.findOne({ from: req.userId, to: targetId }));
+      if (!acted) {
+        if (!allow.ok) return res.status(403).json(swipeError(allow));
+        chargeSwipe = true;
+      }
+    }
     await Pass.findOneAndUpdate(
-      { from: req.userId, to: req.params.userId },
+      { from: req.userId, to: targetId },
       { createdAt: new Date(), expiresAt: new Date(Date.now() + 7 * 86400000) },
       { upsert: true });
+    if (chargeSwipe) entitlements.recordSwipe(req.userId).catch(() => {});
     recommender.recordSwipe(req.userId, req.params.userId, false).catch(() => {}); // learn desirability (async)
     trainer.captureSwipe(req.userId, req.params.userId, false).catch(() => {}); // consent-gated organic training data
     events.record('Passed', { userId: req.userId, payload: { targetId: req.params.userId } }); // behavioural event log

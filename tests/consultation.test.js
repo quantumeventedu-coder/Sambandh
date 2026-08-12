@@ -30,7 +30,8 @@ app.use(errorHandler());
 const SK = { 'X-Super-Key': 'test-super-key' };
 
 let seq = 7500000000;
-const mkUser = () => User.create({ phone: '+91' + (seq++) });
+// Consultations require the Plus tier (astrology/consultations); give test members an active one.
+const mkUser = () => User.create({ phone: '+91' + (seq++), membership: { tier: 'max', tierExpiresAt: new Date(Date.now() + 30 * 86400000) } });
 const auth = (u) => ({ Authorization: 'Bearer ' + jwt.sign({ userId: String(u._id), phone: u.phone, role: 'user' }, process.env.JWT_SECRET, { expiresIn: '30d' }) });
 
 beforeAll(db.start);

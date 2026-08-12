@@ -10,7 +10,7 @@ const express = require('express');
 const User = require('./models/User');
 const { requireAuth } = require('./routes-auth');
 const { requireLaunched } = require('./services/site-mode');
-const { proOrMaxActive } = require('./services/membership');
+const { canAccess } = require('./services/entitlements');   // astrology entitlement — single source of truth for tier→feature
 const engine = require('./services/astro-engine');
 const { nakshatraByName } = require('./data/nakshatras');
 
@@ -121,7 +121,7 @@ router.get('/chart/:userId', requireAuth, requireLaunched, async (req, res, next
       User.findById(req.params.userId).lean()
     ]);
     if (!user) return res.status(404).json({ error: 'User not found' });
-    const privileged = proOrMaxActive(me) || ['admin', 'moderator'].includes(req.role);
+    const privileged = canAccess(me, 'astrology') || ['admin', 'moderator'].includes(req.role);
     if (!privileged) return res.json({ locked: true, requiredTier: 'pro' });
     if (user.preferences?.showAstrologyToOthers === false) return res.status(403).json({ error: 'This person keeps their astrology private.' });
     if (!user.astrology?.birthDate) return res.json({ chart: null, needsBirthData: true });
@@ -176,7 +176,7 @@ router.get('/compat/:userId', requireAuth, requireLaunched, async (req, res, nex
   try {
     const [me, other] = await Promise.all([User.findById(req.userId).lean(), User.findById(req.params.userId).lean()]);
     if (!other) return res.status(404).json({ error: 'User not found' });
-    const privileged = proOrMaxActive(me) || ['admin', 'moderator'].includes(req.role);
+    const privileged = canAccess(me, 'astrology') || ['admin', 'moderator'].includes(req.role);
     if (!privileged) return res.json({ locked: true, requiredTier: 'pro' });
     if (other.preferences?.showAstrologyToOthers === false) return res.status(403).json({ error: 'This person keeps their astrology private.' });
     if (!me?.astrology?.birthDate || !other?.astrology?.birthDate) return res.json({ compat: null, needsBirthData: true });

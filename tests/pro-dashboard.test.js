@@ -21,7 +21,8 @@ app.use('/api/marketplace', require('../src/routes-marketplace'));
 app.use(errorHandler());
 
 let seq = 7700000000;
-const mkUser = () => User.create({ phone: '+91' + (seq++) });
+// A client booking a consultation needs the Plus tier; give test members an active one.
+const mkUser = () => User.create({ phone: '+91' + (seq++), membership: { tier: 'max', tierExpiresAt: new Date(Date.now() + 30 * 86400000) } });
 const auth = (u) => ({ Authorization: 'Bearer ' + jwt.sign({ userId: String(u._id), phone: u.phone, role: 'user' }, process.env.JWT_SECRET, { expiresIn: '30d' }) });
 const applyPro = (u) => request(app).post('/api/pro/apply').set(auth(u)).send({ name: 'Dr A', category: 'counselor', bio: 'Hi', city: 'Pune' });
 const mkListing = (u) => request(app).post('/api/pro/listings').set(auth(u)).send({ title: 'Therapy', billing: 'flat', priceCHF: 80 });
