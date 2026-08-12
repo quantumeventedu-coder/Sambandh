@@ -11,7 +11,8 @@
     "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js",
     "test:setup": "node scripts/ensure-mongo-binary.js",
     "test:ci": "npm run test:setup && node --experimental-vm-modules node_modules/jest/bin/jest.js --coverage --ci --runInBand",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "schema:doc": "node scripts/gen-schema-doc.js"
   },
   "//config": "mongodb-memory-server: PIN the mongod version so the test substrate is deterministic (unpinned = whatever MongoDB released today), and put the binary in a fixed, cacheable dir so CI restores it instead of downloading mid-test.",
   "config": {

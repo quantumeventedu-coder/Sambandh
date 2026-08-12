@@ -773,3 +773,12 @@ module.exports = { Schema, model, connect, disconnect, ping, dbStats, connection
 // + bound params out), so it can — and must — be tested without a database.
 // Not part of the public ODM surface; do not use from application code.
 module.exports._internal = { SAFE_PATH, assertSafePath, jsonExpr, sqlPrefilter, scalarStr, _setPoolForTests };
+// Exposed for db/schema-hardening.js — it turns the model schemas into DB-ENFORCED constraints
+// (enum/range/FK) and needs the live pool, the model registry, the table-name rule, and ensureTable.
+module.exports._schema = {
+  getPool: () => pool,
+  registeredModels,
+  tableName,
+  ensureTable,
+  assertSafePath,
+};

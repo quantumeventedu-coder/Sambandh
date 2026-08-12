@@ -193,6 +193,10 @@ async function connectDatabase() {
   if (process.env.DATABASE_URL) {
     await mongoose.connect(process.env.DATABASE_URL);
     console.log('[OK] PostgreSQL connected (Supabase)');
+    // Promote the model invariants to DB-ENFORCED constraints (enum/range/money CHECKs + spine
+    // FKs). Non-fatal: a constraint that can't apply must never brick boot — it retries next deploy.
+    try { await require('./db/schema-hardening').hardenSchema(); }
+    catch (e) { console.warn('[WARN] schema hardening skipped:', (e && e.message ? e.message.split('\n')[0] : String(e))); }
     return;
   }
 

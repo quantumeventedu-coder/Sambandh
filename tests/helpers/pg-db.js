@@ -25,6 +25,9 @@ async function start() {
   db = new PGlite();
   await db.waitReady;
   pgodm._internal._setPoolForTests({ query: (t, p) => db.query(t, p || []), end: () => db.close() });
+  // Apply the SAME DB-level constraints production uses (enum/range/money CHECKs + spine FKs), so
+  // tests run against the real hardened schema and a constraint regression is caught here, not prod.
+  await require('../../src/db/schema-hardening').hardenSchema({ silent: true });
 }
 
 async function stop() {
@@ -39,8 +42,12 @@ async function stop() {
 // ensured-table cache stays valid — faster than dropping/recreating).
 async function clear() {
   if (!db) return;
-  const r = await db.query("select tablename from pg_tables where schemaname = 'public'");
-  for (const row of r.rows) await db.query(`truncate table "${row.tablename}"`);
+  // Truncate every table in ONE statement with CASCADE: with real foreign keys present, a
+  // per-table truncate of a referenced table (e.g. payments) would fail — all tables must go together.
+  // Keep _schema_meta (the hardening version marker) so start()'s hardening isn't redone every test.
+  const r = await db.query("select tablename from pg_tables where schemaname = 'public' and tablename <> '_schema_meta'");
+  const tbls = r.rows.map((row) => `"${row.tablename}"`);
+  if (tbls.length) await db.query(`truncate table ${tbls.join(', ')} cascade`);
 }
 
 module.exports = { start, stop, clear, Types: pgodm.Types };
