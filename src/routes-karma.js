@@ -4,6 +4,9 @@ const express = require('express');
 const { z } = require('zod');
 const KarmaBook = require('./models/KarmaBook');
 const Payment = require('./models/Payment');
+/** Atomic conditional update across both ODM backends (pg-odm static; Mongoose findOneAndUpdate). */
+const atomicUpdate = (/** @type {any} */ M, /** @type {any} */ f, /** @type {any} */ u) =>
+  typeof M.atomicUpdate === 'function' ? M.atomicUpdate(f, u) : M.findOneAndUpdate(f, u, { new: true });
 const { requireAuth, requireAdmin } = require('./routes-auth');
 const { requireLaunched } = require('./services/site-mode');
 const {
@@ -62,21 +65,26 @@ router.post('/escalate', requireAuth, async (req, res, next) => {
       if (payment.purpose !== 'karma_escalation' || payment.status !== 'captured') {
         return res.status(400).json({ error: 'Payment not valid for escalation' });
       }
-      if (payment.metadata?.usedForEscalation) {
-        return res.status(400).json({ error: 'Payment already used' });
-      }
+      // ATOMICALLY consume the payment BEFORE escalating. The old flow read metadata.usedForEscalation
+      // then set it only AFTER escalateAndReveal (many awaits later), so two concurrent requests with
+      // the same paymentId both passed the read and double-used one paid escalation. This CAS lets
+      // exactly one win; the loser gets 'already used'.
+      const claimed = await atomicUpdate(Payment, { _id: payment._id, escalationUsed: false }, { $set: { escalationUsed: true } });
+      if (!claimed) return res.status(400).json({ error: 'Payment already used' });
     }
 
-    const result = await escalateAndReveal(
-      req.userId,
-      parsed.data.targetUserId,
-      parsed.data.flagType,
-      parsed.data.paymentId || null
-    );
-
-    if (payment) {
-      payment.metadata = { ...payment.metadata, usedForEscalation: true };
-      await payment.save();
+    let result;
+    try {
+      result = await escalateAndReveal(
+        req.userId,
+        parsed.data.targetUserId,
+        parsed.data.flagType,
+        parsed.data.paymentId || null
+      );
+    } catch (err) {
+      // Escalation failed after the claim → release it so the paid escalation is retryable.
+      if (payment) await atomicUpdate(Payment, { _id: payment._id }, { $set: { escalationUsed: false } }).catch(() => { });
+      throw err;
     }
 
     res.json(result);

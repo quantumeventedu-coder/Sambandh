@@ -9,8 +9,13 @@
 // simulates a document whose fields don't match; a selfie payload starting with
 // "FAIL" simulates a failed face match.
 
-const DEV_MODE = process.env.DEV_MODE === 'true' ||
-  (!process.env.HYPERVERGE_APP_ID && !process.env.KARZA_API_KEY);
+// DEV_MODE is an EXPLICIT opt-in that is IMPOSSIBLE in production. It must NEVER be inferred from
+// missing provider keys: for this in-house platform those keys are normally unset, and inferring
+// DEV_MODE there would AUTO-APPROVE any selfie/ID in prod — a verification fail-OPEN (identity
+// spoofing). Absence of a real provider must fail CLOSED instead (matchFace / decideClaimDocument
+// throw). Mirrors the OTP hardening in routes-auth.js.
+const { isProduction } = require('../config/require-secrets');
+const DEV_MODE = process.env.DEV_MODE === 'true' && !isProduction(process.env);
 
 // ---------------- Fuzzy matching ----------------
 

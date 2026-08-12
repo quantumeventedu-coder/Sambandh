@@ -18,6 +18,9 @@ const PaymentSchema = new mongoose.Schema({
   // can be an atomic conditional set on invoiceNo:'').
   invoiceNo: { type: String, default: '' },
   invoiceAt: Date,
+  // Single-use guard for a karma_escalation payment — a scalar default so the "consume" can be an
+  // ATOMIC conditional set (escalationUsed:false → true), preventing one paid escalation being used twice.
+  escalationUsed: { type: Boolean, default: false },
   createdAt: { type: Date, default: Date.now },
   capturedAt: Date, refundedAt: Date,
   metadata: mongoose.Schema.Types.Mixed
