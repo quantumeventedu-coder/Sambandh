@@ -21,6 +21,8 @@ const Review = require('./models/Review');
 const market = require('./services/marketplace');
 const coupons = require('./services/coupons');
 const { sharesActiveMatch } = require('./services/verification-service');
+const { requireEntitlement } = require('./services/entitlements');   // marketplace = Signature tier
+const gateMarket = requireEntitlement('marketplace');
 
 const router = express.Router();
 const staff = requireSuperOrScope('market:manage');
@@ -54,7 +56,7 @@ const pubOrder = (/** @type {any} */ o, /** @type {any} */ callerId = null) => o
 });
 
 // ==== Consumer: browse ======================================================
-router.get('/listings', requireAuth, async (req, res, next) => {
+router.get('/listings', requireAuth, gateMarket, async (req, res, next) => {
   try {
     /** @type {Record<string, any>} */ const filter = { active: true };
     if (req.query.category) filter.category = String(req.query.category);
@@ -82,7 +84,7 @@ router.get('/listings', requireAuth, async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
-router.get('/listings/:id', requireAuth, async (req, res, next) => {
+router.get('/listings/:id', requireAuth, gateMarket, async (req, res, next) => {
   try {
     const listing = await Listing.findById(req.params.id).lean();
     if (!listing || !listing.active) return res.status(404).json({ error: 'Listing not found' });
@@ -108,7 +110,7 @@ const orderSchema = z.object({
   couponCode: z.string().max(40).optional()     // discount coupon applied at checkout
 });
 
-router.post('/orders', requireAuth, async (req, res, next) => {
+router.post('/orders', requireAuth, gateMarket, async (req, res, next) => {
   try {
     const parsed = orderSchema.safeParse(req.body || {});
     if (!parsed.success) return res.status(400).json({ error: 'listingId required' });

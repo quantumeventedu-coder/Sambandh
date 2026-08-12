@@ -28,7 +28,8 @@ app.use(errorHandler());
 const SK = { 'X-Super-Key': 'test-super-key' };
 
 let seq = 7300000000;
-const mkUser = () => User.create({ phone: '+91' + (seq++) });
+// The marketplace requires the Signature tier; give test buyers an active one.
+const mkUser = () => User.create({ phone: '+91' + (seq++), membership: { tier: 'max', tierExpiresAt: new Date(Date.now() + 30 * 86400000) } });
 const tokenFor = (u) => jwt.sign({ userId: String(u._id), phone: u.phone, role: 'user' }, process.env.JWT_SECRET, { expiresIn: '30d' });
 const auth = (u) => ({ Authorization: 'Bearer ' + tokenFor(u) });
 

@@ -24,6 +24,14 @@ const { requireLaunched } = require('./services/site-mode');
 const { computeActivitySignals } = require('./karma-book');
 const { userDistanceKm } = require('./data/cities');
 const recommender = require('./services/recommender');
+const entitlements = require('./services/entitlements');   // tier swipe caps + no-free lockout
+
+/** 403 body for a blocked swipe: locked (no tier) vs weekly cap reached. @param {any} s consumeSwipe result */
+function swipeError(s) {
+  return s.reason === 'locked'
+    ? { error: 'Subscribe to a plan to start swiping.', reason: 'locked', upgrade: true }
+    : { error: `You've used all ${s.limit} swipes this week. Upgrade to Plus for unlimited swipes.`, reason: 'limit', used: s.used, limit: s.limit, upgrade: true };
+}
 const trainer = require('./services/trainer');
 const events = require('./services/events');
 const reading = require('./services/reading-engine');
@@ -230,6 +238,14 @@ router.post('/:userId/like', requireAuth, requireLaunched, async (req, res, next
     const target = await User.findById(targetId);
     if (!target || !target.status?.active) return res.status(404).json({ error: 'User not found' });
 
+    // Tier swipe budget: a NEW like costs one weekly swipe (Basic is capped; Plus/Signature are
+    // unlimited; no active tier → locked out). A re-like of someone you already liked isn't charged.
+    const alreadyLiked = await Like.findOne({ from: req.userId, to: targetId });
+    if (!alreadyLiked) {
+      const swipe = await entitlements.consumeSwipe(req.userId);
+      if (!swipe.ok) return res.status(403).json(swipeError(swipe));
+    }
+
     await Like.findOneAndUpdate(
       { from: req.userId, to: targetId },
       { $setOnInsert: { createdAt: new Date() } },
@@ -287,6 +303,11 @@ router.post('/:userId/like', requireAuth, requireLaunched, async (req, res, next
 router.post('/:userId/pass', requireAuth, requireLaunched, async (req, res, next) => {
   try {
     if (req.params.userId === req.userId) return res.status(400).json({ error: 'Invalid' });
+    const alreadyPassed = await Pass.findOne({ from: req.userId, to: req.params.userId });
+    if (!alreadyPassed) {
+      const swipe = await entitlements.consumeSwipe(req.userId);
+      if (!swipe.ok) return res.status(403).json(swipeError(swipe));
+    }
     await Pass.findOneAndUpdate(
       { from: req.userId, to: req.params.userId },
       { createdAt: new Date(), expiresAt: new Date(Date.now() + 7 * 86400000) },

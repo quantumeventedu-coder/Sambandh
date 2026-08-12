@@ -8,7 +8,9 @@
 const express = require('express');
 const { z } = require('zod');
 const { requireAuth } = require('./routes-auth');
+const { requireEntitlement } = require('./services/entitlements');   // consultations = Plus tier and up
 const { requireSuperOrScope } = require('./services/dev-auth');
+const gateConsult = requireEntitlement('consultations');
 const Partner = require('./models/Partner');
 const Listing = require('./models/Listing');
 const Order = require('./models/Order');
@@ -33,7 +35,7 @@ const pubSlot = (/** @type {any} */ s) => s && ({ id: s._id, listingId: s.listin
 const pubSession = (/** @type {any} */ s) => s && ({ id: s._id, orderId: s.orderId, partnerId: s.partnerId, status: s.status, startedAt: s.startedAt, endedAt: s.endedAt, actualMinutes: s.actualMinutes });
 
 // ==== Consumer: discover consultation offerings =============================
-router.get('/consultants', requireAuth, async (req, res, next) => {
+router.get('/consultants', requireAuth, gateConsult, async (req, res, next) => {
   try {
     /** @type {Record<string, any>} */ const filter = { active: true, category: { $in: consult.CONSULT_CATEGORIES } };
     if (req.query.category && consult.CONSULT_CATEGORIES.includes(String(req.query.category))) filter.category = String(req.query.category);
@@ -51,7 +53,7 @@ router.get('/consultants', requireAuth, async (req, res, next) => {
 });
 
 // A consultant's PUBLIC profile — bio, credentials-at-a-glance, offerings + open-slot counts.
-router.get('/consultants/:id', requireAuth, async (req, res, next) => {
+router.get('/consultants/:id', requireAuth, gateConsult, async (req, res, next) => {
   try {
     const partner = await Partner.findById(req.params.id).lean();
     if (!partner || partner.active === false || !consult.CONSULT_CATEGORIES.includes(partner.category)) return res.status(404).json({ error: 'Consultant not found' });
@@ -75,7 +77,7 @@ router.get('/consultants/:id', requireAuth, async (req, res, next) => {
 });
 
 // Open, future slots for a consultation offering.
-router.get('/listings/:id/slots', requireAuth, async (req, res, next) => {
+router.get('/listings/:id/slots', requireAuth, gateConsult, async (req, res, next) => {
   try {
     const slots = await Slot.find({ listingId: req.params.id, status: 'open' }).sort({ startsAt: 1 }).limit(100).lean();
     const now = Date.now();
@@ -84,7 +86,7 @@ router.get('/listings/:id/slots', requireAuth, async (req, res, next) => {
 });
 
 // ==== Consumer: book a slot =================================================
-router.post('/book', requireAuth, async (req, res, next) => {
+router.post('/book', requireAuth, gateConsult, async (req, res, next) => {
   try {
     const parsed = z.object({ slotId: z.string().min(1), couponCode: z.string().max(40).optional(), giftForUserId: z.string().max(64).optional() }).safeParse(req.body || {});
     if (!parsed.success) return res.status(400).json({ error: 'slotId required' });
