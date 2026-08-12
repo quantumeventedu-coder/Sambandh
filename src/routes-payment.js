@@ -272,13 +272,10 @@ router.post('/create-order', requireAuth, async (req, res, next) => {
         });
       } catch (e) {
         // The grant was consumed (committed:true, no paymentId → the sweep won't normally reach it),
-        // so release now rather than leak the slot on a membership that was never granted.
-        // markSweepable FIRST so that even if release ALSO fails (double DB failure), the row is
-        // committed:false and the nightly sweep reclaims it (no captured payment exists → released).
-        if (coupon) {
-          await coupons.markSweepable(/** @type {string} */ (couponRef)).catch(() => { });
-          await coupons.release({ coupon, orderRef: /** @type {string} */ (couponRef) }).catch(() => { });
-        }
+        // so release now rather than leak the slot on a membership that was never granted. markSweepable
+        // (inside releaseCouponFor) FIRST so that even on a double DB failure the row is committed:false
+        // and the nightly sweep reclaims it.
+        if (coupon) await releaseCouponFor({ metadata: { couponCode: coupon.code, couponOrderRef: couponRef } });
         throw e;
       }
       await fulfillCaptured(req.userId, payment);
@@ -464,15 +461,8 @@ router.post('/cancel-subscription', requireAuth, async (req, res, next) => {
       // 'captured' — a retry would re-dispatch the gateway refund (notes.idempotency is not a
       // real gateway idempotency key). Leave it 'refunding' for an idempotent operator replay.
       await claimPayment({ _id: claimed._id, status: 'refunding' }, { status: 'refunded', refundedAt: new Date() });
-      // The membership charge is reversed → give back any coupon it consumed. markSweepable first so
-      // the nightly sweep backstops a lost release (the payment is now refunded); idempotent.
-      if (claimed.metadata && claimed.metadata.couponCode && claimed.metadata.couponOrderRef) {
-        await coupons.markSweepable(claimed.metadata.couponOrderRef).catch(() => { });
-        try {
-          const usedCoupon = await coupons.findByCode(claimed.metadata.couponCode);
-          if (usedCoupon) await coupons.release({ coupon: usedCoupon, orderRef: claimed.metadata.couponOrderRef });
-        } catch { /* best-effort; releaseStaleReservations backstops */ }
-      }
+      // The membership charge is reversed → give back any coupon it consumed (sweep backstops a lost release).
+      await releaseCouponFor(claimed);
     }
 
     await User.findByIdAndUpdate(userId, {
@@ -673,6 +663,20 @@ async function redeemOrderCoupon(userId, payment) {
       });
     } catch { /* best-effort */ }
   }
+}
+
+// Give back any coupon a REVERSED payment consumed (markSweepable so the sweep backstops a lost
+// release, then release). Shared by cancel-subscription, admin refund, and the free-grant rollback.
+// Best-effort and idempotent; never throws — releaseStaleReservations is the ultimate backstop.
+/** @param {any} carrier a doc with metadata.{couponCode,couponOrderRef} */
+async function releaseCouponFor(carrier) {
+  const md = carrier && carrier.metadata;
+  if (!(md && md.couponCode && md.couponOrderRef)) return;
+  try {
+    await coupons.markSweepable(md.couponOrderRef);
+    const c = await coupons.findByCode(md.couponCode);
+    if (c) await coupons.release({ coupon: c, orderRef: md.couponOrderRef });
+  } catch { /* releaseStaleReservations backstops */ }
 }
 
 // GET /payment/pricing — live, localized prices for display (server order is authoritative)
@@ -913,14 +917,8 @@ router.post('/admin/:paymentId/refund', requireAdmin, async (req, res, next) => 
     await claimPayment({ _id: payment._id, status: 'refunding' }, { status: 'refunded', refundedAt: new Date() });
 
     // Reversing the charge → give back any coupon this payment consumed (same as cancel-subscription
-    // and marketplace transition). markSweepable first so the sweep backstops a lost release.
-    if (payment.metadata && payment.metadata.couponCode && payment.metadata.couponOrderRef) {
-      await coupons.markSweepable(payment.metadata.couponOrderRef).catch(() => { });
-      try {
-        const usedCoupon = await coupons.findByCode(payment.metadata.couponCode);
-        if (usedCoupon) await coupons.release({ coupon: usedCoupon, orderRef: payment.metadata.couponOrderRef });
-      } catch { /* best-effort; releaseStaleReservations backstops */ }
-    }
+    // and marketplace transition; sweep backstops a lost release).
+    await releaseCouponFor(payment);
 
     if (payment.purpose === 'join_fee' || payment.purpose === 'base_subscription') {
       // Refunding the base membership removes access entirely (nothing is free)
