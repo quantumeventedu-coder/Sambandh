@@ -99,12 +99,23 @@ async function recordSwipe(userId, now = new Date()) {
   else await atomicUpdate(User, { _id: userId }, { $set: { swipeWeek: wk, swipeUsed: 1 } });
 }
 
-/** Read-only meter snapshot for display (no spend). @param {any} user @param {Date} [now] */
+/** Next weekly reset — 00:00 UTC on the coming Monday (when the swipe meter rolls over). @param {Date} now */
+function nextWeekReset(now) {
+  const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+  const daysToMonday = ((8 - (d.getUTCDay() || 7)) % 7) || 7;   // next Monday (never today)
+  d.setUTCDate(d.getUTCDate() + daysToMonday);
+  return d;
+}
+
+/** Read-only meter snapshot for the UI (no spend): how many swipes left this week, the plan, and
+ * when it resets — so the client can show a counter and an upgrade nudge. @param {any} user @param {Date} [now] */
 function swipeStatus(user, now = new Date()) {
+  const tier = tierOf(user);
   const limit = swipeLimitPerWeek(user);
-  if (limit == null) return { unlimited: true, tier: tierOf(user) };
-  const used = user.swipeWeek === weekKey(now) ? (Number(user.swipeUsed) || 0) : 0;
-  return { unlimited: false, used, limit, remaining: Math.max(0, limit - used), tier: tierOf(user) };
+  const plan = labelFor(tier);
+  if (limit == null) return { unlimited: true, tier, plan };
+  const used = user && user.swipeWeek === weekKey(now) ? (Number(user.swipeUsed) || 0) : 0;
+  return { unlimited: false, used, limit, remaining: Math.max(0, limit - used), tier, plan, resetsAt: nextWeekReset(now) };
 }
 
 // ---- route gate ---------------------------------------------------------------------------------
