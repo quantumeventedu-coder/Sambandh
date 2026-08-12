@@ -212,6 +212,21 @@ describe('checkout integration', () => {
     expect(cancel.status).toBe(200);
     expect((await Coupon.findById(c._id)).remaining).toBe(5);       // released on refund
   });
+
+  test('an ADMIN refund of a coupon membership also releases the coupon', async () => {
+    const Payment = require('../src/models/Payment');
+    await mkUser();
+    const c = await mkCoupon({ code: 'ADMREF', percentOff: 50, maxRedemptions: 5 });
+    const order = await request(app).post('/payment/create-order').send({ purpose: 'base_subscription', couponCode: 'ADMREF' });
+    const oid = order.body.orderId, pid = 'pay_live_adm';
+    const sign = crypto.createHmac('sha256', process.env.RAZORPAY_KEY_SECRET).update(oid + '|' + pid).digest('hex');
+    await request(app).post('/payment/verify').send({ razorpay_order_id: oid, razorpay_payment_id: pid, razorpay_signature: sign });
+    const payment = await Payment.findOne({ razorpayOrderId: oid });
+    expect((await Coupon.findById(c._id)).remaining).toBe(4);
+    const refund = await request(app).post(`/payment/admin/${payment._id}/refund`).send({});
+    expect(refund.status).toBe(200);
+    expect((await Coupon.findById(c._id)).remaining).toBe(5);       // released on admin refund too
+  });
 });
 
 describe('review fixes — cap reserved up front, per-user race-safe, numeric guards', () => {
@@ -462,6 +477,7 @@ describe('release + stale-reservation reclaim (abandoned-checkout safety)', () =
     expect(await coupons.release({ coupon: await Coupon.findById(c._id), orderRef: 'gp', onlyIfUncommitted: true })).toBe(true);
     expect((await Coupon.findById(c._id)).remaining).toBe(1);   // slot handed back by the racing sweep
     // (C) /verify's commitReservation runs on the genuinely-CAPTURED payment → must re-consume, not leak.
+    await Payment.findByIdAndUpdate(pay._id, { status: 'captured' });   // the capture that preceded this commit
     await coupons.commitReservation({ coupon: await Coupon.findById(c._id), orderRef: 'gp' });
     const after = await Coupon.findById(c._id);
     expect(after.remaining).toBe(0);                            // slot reclaimed — cap honored, no over-issue
@@ -469,5 +485,22 @@ describe('release + stale-reservation reclaim (abandoned-checkout safety)', () =
     expect(row.committed).toBe(true);
     expect(row.released).toBe(false);
     await expect(coupons.validate('GAP', 'marketplace_order', 5, oid())).rejects.toThrow(/fully redeemed/);   // the 1 real use holds
+  });
+
+  test('a REFUND-released row is NOT re-consumed by a racing commitReservation (payment is refunded, not captured)', async () => {
+    const c = await mkCoupon({ code: 'RFRACE', percentOff: 50, maxRedemptions: 5, perUserLimit: 5 });
+    const pay = await Payment.create({ userId: TEST_USER_ID, purpose: 'base_subscription', amountCHF: 5, currency: 'INR', razorpayOrderId: 'rf', status: 'captured', createdAt: new Date(), metadata: { couponCode: 'RFRACE', couponOrderRef: 'rf' } });
+    await coupons.redeem({ coupon: c, userId: TEST_USER_ID, orderRef: 'rf', paymentId: pay._id, committed: false });
+    await coupons.commitReservation({ coupon: await Coupon.findById(c._id), orderRef: 'rf' });   // committed at capture
+    expect((await Coupon.findById(c._id)).remaining).toBe(4);
+    // Refund: payment→refunded, then release correctly returns the slot.
+    await Payment.findByIdAndUpdate(pay._id, { status: 'refunded' });
+    await coupons.markSweepable('rf');
+    await coupons.release({ coupon: await Coupon.findById(c._id), orderRef: 'rf' });
+    expect((await Coupon.findById(c._id)).remaining).toBe(5);       // returned by the refund
+    // A duplicate/racing commitReservation (e.g. sweep self-heal off a stale 'captured' snapshot)
+    // must NOT reclaim the slot — the payment is now refunded, not a live capture.
+    await coupons.commitReservation({ coupon: await Coupon.findById(c._id), orderRef: 'rf' });
+    expect((await Coupon.findById(c._id)).remaining).toBe(5);       // NOT re-consumed — no slot leak
   });
 });

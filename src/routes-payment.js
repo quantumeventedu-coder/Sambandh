@@ -912,6 +912,16 @@ router.post('/admin/:paymentId/refund', requireAdmin, async (req, res, next) => 
     // replay rather than reopening 'captured' (which would re-dispatch the gateway refund).
     await claimPayment({ _id: payment._id, status: 'refunding' }, { status: 'refunded', refundedAt: new Date() });
 
+    // Reversing the charge → give back any coupon this payment consumed (same as cancel-subscription
+    // and marketplace transition). markSweepable first so the sweep backstops a lost release.
+    if (payment.metadata && payment.metadata.couponCode && payment.metadata.couponOrderRef) {
+      await coupons.markSweepable(payment.metadata.couponOrderRef).catch(() => { });
+      try {
+        const usedCoupon = await coupons.findByCode(payment.metadata.couponCode);
+        if (usedCoupon) await coupons.release({ coupon: usedCoupon, orderRef: payment.metadata.couponOrderRef });
+      } catch { /* best-effort; releaseStaleReservations backstops */ }
+    }
+
     if (payment.purpose === 'join_fee' || payment.purpose === 'base_subscription') {
       // Refunding the base membership removes access entirely (nothing is free)
       await User.findByIdAndUpdate(payment.userId, {
