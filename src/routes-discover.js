@@ -339,6 +339,16 @@ function maxTierActive(user) {
     (!user.membership?.tierExpiresAt || user.membership.tierExpiresAt > new Date());
 }
 
+// GET /api/discover/swipe-status — swipes left this week + plan + reset time, so the client can show
+// a counter and an upgrade nudge instead of the member hitting an unexplained wall at the cap.
+router.get('/swipe-status', requireAuth, async (req, res, next) => {
+  try {
+    const me = await User.findById(req.userId);
+    if (!me) return res.status(401).json({ error: 'Account not found' });
+    res.json(entitlements.swipeStatus(me));
+  } catch (err) { next(err); }
+});
+
 // GET /api/discover/likes — who liked me (count for everyone; the list is a Max perk)
 router.get('/likes', requireAuth, requireLaunched, async (req, res, next) => {
   try {

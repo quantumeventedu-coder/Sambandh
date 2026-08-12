@@ -14,6 +14,7 @@ const app = express();
 app.use(express.json());
 app.use('/api/consultation', require('../src/routes-consultation'));
 app.use('/api/marketplace', require('../src/routes-marketplace'));
+app.use('/api/discover', require('../src/routes-discover'));
 const auth = (u) => ({ Authorization: 'Bearer ' + jwt.sign({ userId: String(u._id), phone: u.phone, role: 'user' }, process.env.JWT_SECRET, { expiresIn: '30d' }) });
 
 let seq = 9500000000;
@@ -62,6 +63,26 @@ describe('swipe budget', () => {
     const locked = ent.swipeAllowance(none);
     expect(locked.ok).toBe(false);
     expect(locked.reason).toBe('locked');
+  });
+});
+
+describe('swipe status (for the UI counter + upgrade nudge)', () => {
+  test('swipeStatus: Basic shows used/limit/remaining + plan + reset; Plus is unlimited', async () => {
+    const basic = await mk('base');
+    await User.atomicUpdate({ _id: basic._id }, { $set: { swipeWeek: ent.weekKey(new Date()), swipeUsed: 30 } });
+    const s = ent.swipeStatus(await User.findById(basic._id));
+    expect(s).toMatchObject({ unlimited: false, used: 30, limit: 400, remaining: 370, plan: 'Basic' });
+    expect(new Date(s.resetsAt).getUTCDay()).toBe(1);                // resets on a Monday
+    expect(ent.swipeStatus(await mk('pro'))).toMatchObject({ unlimited: true, plan: 'Plus' });
+  });
+
+  test('GET /discover/swipe-status returns the member’s live meter', async () => {
+    const basic = await mk('base');
+    const r = await request(app).get('/api/discover/swipe-status').set(auth(basic));
+    expect(r.status).toBe(200);
+    expect(r.body).toMatchObject({ unlimited: false, limit: 400, remaining: 400, plan: 'Basic' });
+    const sig = await mk('max');
+    expect((await request(app).get('/api/discover/swipe-status').set(auth(sig))).body).toMatchObject({ unlimited: true, plan: 'Signature' });
   });
 });
 
