@@ -840,6 +840,12 @@ async function requireAuth(req, res, next) {
     const black = await TokenBlacklist.findOne({ tokenHash: sha256(token) }).lean();
     if (black) return res.status(401).json({ error: 'Session ended — log in again' });
 
+    // Fail closed on a BANNED account: a ban must end every live session immediately, not just block
+    // the next login — otherwise a banned harasser keeps acting (chatting, swiping) for the token's
+    // 30-day life (and auto-refresh renews it). Cheap status-only projection on the existing hot path.
+    const acct = await User.findById(decoded.userId).select('status').lean();
+    if (acct && acct.status && acct.status.banned) return res.status(403).json({ error: 'Account banned' });
+
     req.userId = decoded.userId;
     req.phone = decoded.phone;
     req.role = decoded.role || 'user';

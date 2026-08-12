@@ -135,7 +135,7 @@ router.post('/start', requireAuth, requireLaunched, async (req, res, next) => {
     if (!me.membership.joinFeePaid) {
       return res.status(403).json({ error: 'An active membership is required to chat (CHF 5/month)' });
     }
-    if (me.status?.suspended) return res.status(403).json({ error: 'Account suspended' });
+    if (me.status?.suspended || me.status?.banned) return res.status(403).json({ error: 'Account suspended' });
 
     const limitError = await checkDailyLimits(me, 'newChat');
     if (limitError) return res.status(429).json({ error: limitError });
@@ -175,7 +175,7 @@ router.post('/:chatId/messages', requireAuth, requireLaunched, async (req, res, 
     if (chat.status !== 'active') return res.status(400).json({ error: 'Chat not active' });
 
     const me = await User.findById(req.userId);
-    if (me.status?.suspended) return res.status(403).json({ error: 'Account suspended' });
+    if (me.status?.suspended || me.status?.banned) return res.status(403).json({ error: 'Account suspended' });
     const limitError = await checkDailyLimits(me, 'message');
     if (limitError) return res.status(429).json({ error: limitError });
 
@@ -290,15 +290,16 @@ router.post('/:chatId/reveal', requireAuth, requireLaunched, async (req, res, ne
       return res.json({ ok: true, bothRevealed: true });
     }
 
-    // Register (or refresh) my reveal request
-    const me = await User.findById(req.userId);
+    // Register (or refresh) my reveal request. CRITICAL: the chat is still anonymous until BOTH
+    // sides consent, so the prompt to the other person must NOT contain the requester's name —
+    // embedding displayName here leaked identity one-sidedly before mutual reveal.
     await Chat.findByIdAndUpdate(chat._id, {
       'anonymity.revealRequestedBy': req.userId,
       'anonymity.revealRequestedAt': new Date()
     });
     await Message.create({
       chatId: chat._id, from: req.userId, to: other,
-      text: `${me.profile?.displayName || 'Someone'} wants to reveal identities. Tap Reveal to agree — the request expires in 48 hours.`,
+      text: 'Your match wants to reveal identities. Tap Reveal to agree — the request expires in 48 hours.',
       type: 'system', createdAt: new Date()
     });
     const io = req.app.get('io');

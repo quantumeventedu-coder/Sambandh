@@ -20,6 +20,18 @@ const docRetention = require('./doc-retention');
 async function eraseUser(id) {
   // Delete the stored ID/selfie/doc IMAGE files first (deleteMany below removes only rows).
   try { await docRetention.purgeUserDocuments(id); } catch { /* best-effort */ }
+  // VAULT — the most sensitive PII (aadhaar/passport/pan/driving_licence/medical/legal). Erasure MUST
+  // destroy the ENCRYPTED blobs AND the rows AND every share, or the identity documents remain fully
+  // recoverable (the key derives from the live JWT_SECRET) after the account is "erased" (DPDP §2.8.4).
+  try {
+    const VaultDocument = require('../models/VaultDocument');
+    const VaultShare = require('../models/VaultShare');
+    const storage = require('./storage');
+    const vaultDocs = await VaultDocument.find({ ownerId: id });
+    for (const d of vaultDocs) { if (d.storageKey) await storage.deleteFile(d.storageKey, { private: true }).catch(() => {}); }
+    await VaultDocument.deleteMany({ ownerId: id }).catch(() => {});
+    await VaultShare.deleteMany({ $or: [{ ownerId: id }, { granteeId: id }] }).catch(() => {});
+  } catch { /* best-effort, mirrors the per-collection pattern below */ }
   await Promise.all([
     KarmaBook.deleteOne({ userId: id }).catch(() => {}),
     Reputation.deleteOne({ userId: id }).catch(() => {}),
