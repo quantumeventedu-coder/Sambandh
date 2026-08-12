@@ -404,7 +404,7 @@
 | stockReserved | Boolean |  |  |  |
 | escrowHeld | Boolean |  |  |  |
 | escrowReleasedAt | Date |  |  |  |
-| paymentId | ObjectId |  | → Payment | FK ✓ |
+| paymentId | ObjectId |  | → Payment |  |
 | scheduledFor | Date |  |  |  |
 | notes | String |  |  |  |
 | disputeReason | String |  |  |  |
@@ -543,7 +543,6 @@
 | text | String |  |  |  |
 | verifiedPurchase | Boolean |  |  |  |
 | createdAt | Date |  |  |  |
-| _(check)_ | | | | `rating_range`: (doc->>'rating') is null or ((doc->>'rating')::numeric >= 1 and (doc->>'rating')::numeric <= 5) |
 
 ## `rooms`  (model `Room`)
 

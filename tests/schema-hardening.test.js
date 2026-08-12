@@ -25,12 +25,15 @@ afterAll(db.stop);
 afterEach(db.clear);
 
 describe('DB-enforced schema (schema-hardening)', () => {
-  test('ENUM: the database rejects an out-of-set Payment.status / purpose', async () => {
+  test('ENUM: the DATABASE (not just app validate) rejects an out-of-set status', async () => {
     const u = await mkUser();
-    await expect(Payment.create({ userId: u._id, purpose: 'base_subscription', status: 'BOGUS' })).rejects.toThrow();
-    await expect(Payment.create({ userId: u._id, purpose: 'NOT_A_PURPOSE', status: 'created' })).rejects.toThrow();
     const ok = await Payment.create({ userId: u._id, purpose: 'base_subscription', status: 'captured', amountCHF: 5 });
     expect(ok._id).toBeTruthy();                                   // a valid one is accepted
+    // atomicUpdate is a RAW update that bypasses app-level validate(), so it reaches the DB CHECK —
+    // this proves the enum is enforced by Postgres, not merely by the model's validate().
+    await expect(Payment.atomicUpdate({ _id: ok._id }, { $set: { status: 'BOGUS' } })).rejects.toThrow();
+    expect((await Payment.findById(ok._id)).status).toBe('captured');   // unchanged — the DB refused it
+    await expect(Payment.create({ userId: u._id, purpose: 'NOT_A_PURPOSE', status: 'created' })).rejects.toThrow();   // app layer also rejects
   });
 
   test('FOREIGN KEY: the database rejects an Order that references a ghost listing/partner', async () => {
@@ -59,6 +62,15 @@ describe('DB-enforced schema (schema-hardening)', () => {
     await expect(Coupon.create({ code: 'BADPCT', kind: 'percent', percentOff: 150, active: true, redeemedCount: 0 })).rejects.toThrow();
     const ok = await Coupon.create({ code: 'GOODPCT', kind: 'percent', percentOff: 50, active: true, redeemedCount: 0 });
     expect(ok._id).toBeTruthy();
+  });
+
+  test('a Payment referenced by an Order can still be DELETED (superadmin purge is NOT blocked by a FK)', async () => {
+    const u = await mkUser();
+    const { p, l } = await mkPartnerListing();
+    const pay = await Payment.create({ userId: u._id, purpose: 'marketplace_order', amountCHF: 10, status: 'captured' });
+    await Order.create({ userId: u._id, listingId: l._id, partnerId: p._id, amountCHF: 10, paymentId: pay._id });
+    await Payment.deleteMany({ _id: pay._id });                   // must not throw — there is deliberately no Order→Payment FK
+    expect(await Payment.findById(pay._id)).toBeFalsy();          // the financial row is actually purged
   });
 
   test('hardenSchema is idempotent + version-gated (second run is a fast no-op)', async () => {

@@ -9,16 +9,22 @@
 // "we must re-audit every change" and "the database won't let it happen."
 //
 // SAFE BY CONSTRUCTION:
-//  • Every constraint is added NOT VALID — it enforces every NEW insert/update but never rejects
-//    pre-existing rows, so hardening an already-populated table can't fail or lock out writes.
+//  • CHECK/FK constraints are added NOT VALID — they enforce every NEW insert/update but never
+//    re-scan pre-existing rows, so adding them is a fast, metadata-only operation that can't fail on
+//    or lock out an already-populated table.
+//  • The FK generated columns are the ONE exception: `ADD COLUMN … GENERATED … STORED` rewrites the
+//    table once under a brief lock. Harmless pre-launch (tables are small/empty) and it runs ONCE
+//    (version-gated); for a large production table, add those columns in a dedicated migration
+//    window instead of at boot. Everything else is lock-free.
 //  • Adding a constraint that already exists is a no-op (idempotent — safe to run on every boot).
 //  • Foreign keys ride STORED GENERATED columns derived from the JSONB, so app code keeps writing
 //    plain documents while the DB checks referential integrity. (toStorable() stores an ObjectId as
 //    its hex string, which equals the referenced table's `id`, so the FK matches.)
-//  • We DELIBERATELY do NOT add user-referencing FKs on retained financial records (Payment/Order):
-//    DPDP account-erasure HARD-deletes the user while KEEPING those rows (tax retention), and a
-//    generated FK column cannot ON DELETE SET NULL. A user FK would therefore block erasure. Those
-//    references stay app-enforced; everything else the DB now guarantees.
+//  • We DELIBERATELY add FKs ONLY where the parent is NEVER hard-deleted while children survive.
+//    Excluded: any user-referencing FK (DPDP erasure hard-deletes the user but KEEPS Payment/Order
+//    for tax) and Order→Payment (superadmin purge-test-data deletes Payments but not their Orders).
+//    A generated FK column can't ON DELETE SET NULL, so those stay app-enforced; the rest — parents
+//    (Partner/Listing/Coupon/Order/Session) that are only ever deactivated — the DB now guarantees.
 
 const odm = require('./pg-odm');
 const { getPool, registeredModels, tableName, ensureTable, assertSafePath } = odm._schema;
@@ -42,7 +48,9 @@ function sqlEnum(values) {
 const RELATIONS = [
   {
     model: 'Order',
-    fk: [{ field: 'listingId', ref: 'Listing' }, { field: 'partnerId', ref: 'Partner' }, { field: 'paymentId', ref: 'Payment' }],
+    // NB: no Order→Payment FK — superadmin purge-test-data deletes Payments but not their Orders,
+    // and a generated FK column can't cascade/null, so it would block the purge. App-enforced instead.
+    fk: [{ field: 'listingId', ref: 'Listing' }, { field: 'partnerId', ref: 'Partner' }],
     checks: [
       { name: 'amt_nonneg', sql: `(doc->>'amountCHF') is null or (doc->>'amountCHF')::numeric >= 0` },
       { name: 'commission_nonneg', sql: `(doc->>'commissionCHF') is null or (doc->>'commissionCHF')::numeric >= 0` },
@@ -62,7 +70,7 @@ const RELATIONS = [
   { model: 'Session', fk: [{ field: 'orderId', ref: 'Order' }, { field: 'partnerId', ref: 'Partner' }] },
   { model: 'Listing', fk: [{ field: 'partnerId', ref: 'Partner' }], checks: [{ name: 'price_nonneg', sql: `(doc->>'priceCHF') is null or (doc->>'priceCHF')::numeric >= 0` }] },
   { model: 'ConsultantSlot', fk: [{ field: 'partnerId', ref: 'Partner' }, { field: 'listingId', ref: 'Listing' }] },
-  { model: 'Review', fk: [{ field: 'partnerId', ref: 'Partner' }], checks: [{ name: 'rating_range', sql: `(doc->>'rating') is null or ((doc->>'rating')::numeric >= 1 and (doc->>'rating')::numeric <= 5)` }] },
+  { model: 'Review', fk: [{ field: 'partnerId', ref: 'Partner' }] },   // rating 1..5 comes from the AUTO min/max pass (Review.rating has min/max)
   // WalletTransaction: the valuable guarantee (type ∈ topup/spend/refund/adjustment) is added by the
   // AUTO enum pass; the money field is amountMinor and is not separately constrained here.
 ];
@@ -77,7 +85,7 @@ const HARDEN_VERSION = 1;
  *   1) AUTO from each schema: an enum whitelist CHECK + numeric min/max CHECKs for every field.
  *   2) EXPLICIT from RELATIONS: FK generated-columns + money/business CHECKs on the spine.
  * @param {{ silent?: boolean, force?: boolean }} [opts]
- * @returns {Promise<{ constraints: number, columns: number, skipped: number, upToDate?: boolean }>}
+ * @returns {Promise<{ constraints: number, columns: number, skipped: number, failed?: number, upToDate?: boolean }>}
  */
 async function hardenSchema(opts = {}) {
   const pool = getPool();
@@ -102,17 +110,17 @@ async function hardenSchema(opts = {}) {
   // Tables first — a FK can only reference a table that already exists.
   for (const [, M] of models) { try { await ensureTable(M); } catch (/** @type {any} */ e) { log(`[harden] ensureTable ${M.table}: ${e.message.split('\n')[0]}`); } }
 
-  let constraints = 0, columns = 0, skipped = 0;
+  let constraints = 0, columns = 0, skipped = 0, failed = 0;   // `failed` = a HARD error → do NOT stamp the version, so it retries next boot
   const addConstraint = async (/** @type {string} */ table, /** @type {string} */ name, /** @type {string} */ body) => {
     try { await pool.query(`alter table ${table} add constraint ${name} ${body}`); constraints++; }
     catch (/** @type {any} */ e) {
       if (/already exists|duplicate/i.test(e.message)) { skipped++; return; }
-      log(`[harden] ${name} on ${table} skipped: ${e.message.split('\n')[0]}`);
+      failed++; log(`[harden] ${name} on ${table} FAILED: ${e.message.split('\n')[0]}`);
     }
   };
   const addColumn = async (/** @type {string} */ table, /** @type {string} */ col, /** @type {string} */ body) => {
     try { await pool.query(`alter table ${table} add column if not exists ${col} ${body}`); columns++; }
-    catch (/** @type {any} */ e) { log(`[harden] column ${col} on ${table} skipped: ${e.message.split('\n')[0]}`); }
+    catch (/** @type {any} */ e) { failed++; log(`[harden] column ${col} on ${table} FAILED: ${e.message.split('\n')[0]}`); }
   };
 
   // 1) AUTO — enum + numeric range for every model field.
@@ -147,12 +155,16 @@ async function hardenSchema(opts = {}) {
     }
   }
 
-  try {
-    await pool.query(`insert into _schema_meta (key, value) values ('harden_version', $1) on conflict (key) do update set value = $1`, [String(HARDEN_VERSION)]);
-  } catch (/** @type {any} */ e) { log(`[harden] version stamp skipped: ${e.message.split('\n')[0]}`); }
+  // Only stamp the version when EVERYTHING applied — a hard failure (missing table, permission,
+  // transient) must leave the marker un-bumped so the next boot re-attempts the missing constraint.
+  if (failed === 0) {
+    try {
+      await pool.query(`insert into _schema_meta (key, value) values ('harden_version', $1) on conflict (key) do update set value = $1`, [String(HARDEN_VERSION)]);
+    } catch (/** @type {any} */ e) { log(`[harden] version stamp skipped: ${e.message.split('\n')[0]}`); }
+  }
 
-  if (!opts.silent) console.log(`[OK] schema hardening: ${constraints} constraints + ${columns} generated columns (${skipped} already present)`);
-  return { constraints, columns, skipped };
+  if (!opts.silent) console.log(`[OK] schema hardening: ${constraints} constraints + ${columns} generated columns (${skipped} present, ${failed} failed)`);
+  return { constraints, columns, skipped, failed };
 }
 
 module.exports = { hardenSchema, RELATIONS };
