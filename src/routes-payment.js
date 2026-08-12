@@ -7,7 +7,7 @@
 // ALL amounts in CHF. Base membership is a SINGLE FLAT PRICE for every member —
 // CHF 5/month — computed server-side (never taken from the request). No gender
 // differential: one transparent price, easier to explain and equal by design.
-// Tiers (display → internal key): Essential=base CHF 5 · Plus=pro CHF 12 ·
+// Tiers (display → internal key): Basic=base CHF 5 · Plus=pro CHF 12 ·
 // Signature=max CHF 25 per month; annual is CHF 48 · 120 · 240. Keys stay base/pro/max.
 //
 // Dev mode: when Razorpay keys are not configured (or DEV_PAYMENTS=true),

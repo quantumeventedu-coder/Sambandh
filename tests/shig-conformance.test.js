@@ -145,18 +145,18 @@ describe('R-14 money honesty — displayed prices match the canonical backend pr
 
 // -------------------------------------------------------------------------
 // SHIG-0008 vocabulary / C-15 — one canonical term per concept.
-// Member-facing plan names are Essential/Plus/Signature, never Pro/Max.
+// Member-facing plan names are Basic/Plus/Signature, never Pro/Max.
 // -------------------------------------------------------------------------
 describe('SHIG-0008 vocabulary — plan names are canonical in member-facing UI', () => {
-  test('the homepage uses Essential/Plus/Signature and not the deprecated Pro/Max', () => {
-    expect(homeHtml).toMatch(/Sambandh Essential/);
+  test('the homepage uses Basic/Plus/Signature and not the deprecated Pro/Max', () => {
+    expect(homeHtml).toMatch(/Sambandh Basic/);
     expect(homeHtml).toMatch(/Sambandh Plus/);
     expect(homeHtml).toMatch(/Sambandh Signature/);
     expect(homeHtml).not.toMatch(/Sambandh Pro\b|Sambandh Max\b|Go Pro\b|Go Max\b/);
   });
 
   test('the app settings plan cards use the canonical names', () => {
-    expect(appJs).toMatch(/Sambandh Essential/);
+    expect(appJs).toMatch(/Sambandh Basic/);
     expect(appJs).toMatch(/Sambandh Plus/);
     expect(appJs).toMatch(/Sambandh Signature/);
   });
