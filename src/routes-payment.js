@@ -271,9 +271,14 @@ router.post('/create-order', requireAuth, async (req, res, next) => {
           metadata: { free: true, gender: user.profile.gender, amountLocal: 0, ...breakdown },
         });
       } catch (e) {
-        // The grant was consumed (committed:true, no paymentId → the sweep can't reclaim it), so
-        // release now rather than leak the cap slot on a membership that was never granted.
-        if (coupon) await coupons.release({ coupon, orderRef: /** @type {string} */ (couponRef) }).catch(() => { });
+        // The grant was consumed (committed:true, no paymentId → the sweep won't normally reach it),
+        // so release now rather than leak the slot on a membership that was never granted.
+        // markSweepable FIRST so that even if release ALSO fails (double DB failure), the row is
+        // committed:false and the nightly sweep reclaims it (no captured payment exists → released).
+        if (coupon) {
+          await coupons.markSweepable(/** @type {string} */ (couponRef)).catch(() => { });
+          await coupons.release({ coupon, orderRef: /** @type {string} */ (couponRef) }).catch(() => { });
+        }
         throw e;
       }
       await fulfillCaptured(req.userId, payment);

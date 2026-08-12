@@ -451,4 +451,23 @@ describe('release + stale-reservation reclaim (abandoned-checkout safety)', () =
     expect((await Coupon.findById(c._id)).remaining).toBe(4);    // slot retained
     expect((await CouponRedemption.findOne({ redemptionKey: String(c._id) + ':hl' })).committed).toBe(true);   // healed out of the candidate set
   });
+
+  test('capture→commit gap: commitReservation RE-CONSUMES a slot the racing sweep released — no over-issue past the cap', async () => {
+    const c = await mkCoupon({ code: 'GAP', percentOff: 50, maxRedemptions: 1, perUserLimit: 5 });
+    const pay = await Payment.create({ userId: TEST_USER_ID, purpose: 'marketplace_order', amountCHF: 5, currency: 'INR', razorpayOrderId: 'gp', status: 'created', createdAt: new Date(), metadata: { couponCode: 'GAP', couponOrderRef: 'gp' } });
+    await coupons.redeem({ coupon: c, userId: TEST_USER_ID, orderRef: 'gp', paymentId: pay._id, committed: false });   // reserve at create
+    expect((await Coupon.findById(c._id)).remaining).toBe(0);
+    // Interleaving D<R<C: (D) redeem at capture read released:false and returned WITHOUT committing;
+    // (R) the sweep releases off a stale 'created' snapshot (its CAS guards committed:false, still true):
+    expect(await coupons.release({ coupon: await Coupon.findById(c._id), orderRef: 'gp', onlyIfUncommitted: true })).toBe(true);
+    expect((await Coupon.findById(c._id)).remaining).toBe(1);   // slot handed back by the racing sweep
+    // (C) /verify's commitReservation runs on the genuinely-CAPTURED payment → must re-consume, not leak.
+    await coupons.commitReservation({ coupon: await Coupon.findById(c._id), orderRef: 'gp' });
+    const after = await Coupon.findById(c._id);
+    expect(after.remaining).toBe(0);                            // slot reclaimed — cap honored, no over-issue
+    const row = await CouponRedemption.findOne({ redemptionKey: String(c._id) + ':gp' });
+    expect(row.committed).toBe(true);
+    expect(row.released).toBe(false);
+    await expect(coupons.validate('GAP', 'marketplace_order', 5, oid())).rejects.toThrow(/fully redeemed/);   // the 1 real use holds
+  });
 });

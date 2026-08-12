@@ -195,12 +195,29 @@ async function release({ coupon, orderRef, onlyIfUncommitted = false }) {
 
 /**
  * Mark a reservation's charge as FINAL (its payment captured) so the abandonment sweep never
- * considers it again — called at capture-confirm. Idempotent (committed:false→true CAS); a no-op
- * for grants that were already committed at create.
+ * considers it again — called at capture-confirm. Idempotent; a no-op for grants already committed.
+ *
+ * CRITICAL RACE it closes (the capture→commit gap): redeem() at capture may read the reservation as
+ * released:false and return WITHOUT committing, and only THEN does the concurrent nightly sweep
+ * release it off a stale 'created' payment snapshot (release guards committed:false, which still
+ * holds). If we merely committed here, the row would end committed:true + released:true — a real
+ * captured, granted purchase whose cap slot was handed back → a coupon honored past its cap. So:
+ * commit an active reservation; but if it was RELEASED under us, RE-CONSUME the slot instead
+ * (lockstep remaining−1/redeemedCount+1) since the payment genuinely captured. Only the CAS winner
+ * acts, so retries/self-heal can't double-count.
  * @param {{ coupon:any, orderRef:string }} a
  */
 async function commitReservation({ coupon, orderRef }) {
-  await atomicUpdate(CouponRedemption, { redemptionKey: `${coupon._id}:${orderRef}`, committed: false }, { $set: { committed: true } });
+  const couponId = coupon._id;
+  const redemptionKey = `${couponId}:${orderRef}`;
+  const committed = await atomicUpdate(CouponRedemption, { redemptionKey, released: false, committed: false }, { $set: { committed: true } });
+  if (committed) return;
+  // Not committable as-is → either already committed (no-op) or RELEASED in the capture→commit gap.
+  const reclaimed = await atomicUpdate(CouponRedemption, { redemptionKey, released: true }, { $set: { released: false, committed: true, releasedAt: null } });
+  if (!reclaimed) return;
+  const full = (coupon.remaining !== undefined) ? coupon : await Coupon.findById(couponId);   // self-heal may pass a bare {_id}
+  if (full && full.remaining != null) await atomicUpdate(Coupon, { _id: couponId }, { $inc: { remaining: -1, redeemedCount: 1 }, $set: { updatedAt: new Date() } });
+  else await atomicUpdate(Coupon, { _id: couponId }, { $inc: { redeemedCount: 1 }, $set: { updatedAt: new Date() } });
 }
 
 /**
@@ -254,13 +271,15 @@ async function releaseStaleReservations(now, ttlMinutes = 120) {
   const couponById = new Map(cpns.map((/** @type {any} */ c) => [String(c._id), c]));
   let released = 0;
   for (const r of open) {
+    const rowCoupon = couponById.get(String(r.couponId));
     if (r.paymentId) {
       const pay = payById.get(String(r.paymentId));
       if (pay && pay.status === 'refunding') continue;                 // in-flight refund — transition() owns it
       if (pay && pay.status === 'captured') {
         // Real use whose commit was lost (commitReservation threw) — self-heal so it leaves the
-        // candidate set next run instead of re-scanning forever, and never gets released.
-        await commitReservation({ coupon: { _id: r.couponId }, orderRef: r.orderRef }).catch(() => { });
+        // candidate set next run instead of re-scanning forever, and never gets released. Pass the
+        // FULL coupon so if the row was also released, the re-consume stays lockstep.
+        await commitReservation({ coupon: rowCoupon || { _id: r.couponId }, orderRef: r.orderRef }).catch(() => { });
         continue;
       }
     }
@@ -268,11 +287,10 @@ async function releaseStaleReservations(now, ttlMinutes = 120) {
     // its order was cancelled/refunded and the immediate release was lost — so reclaiming is correct.
     // onlyIfUncommitted re-checks committed:false in the release CAS, so a reservation that captured
     // between the snapshot above and here is NOT released off the stale 'created' read.
-    const coupon = couponById.get(String(r.couponId));
     // Coupon hard-deleted out from under a live reservation: nothing to release, but commit the row
     // so it leaves the candidate set instead of re-clogging the oldest-first 5000-row budget forever.
-    if (!coupon) { await commitReservation({ coupon: { _id: r.couponId }, orderRef: r.orderRef }).catch(() => { }); continue; }
-    if (await release({ coupon, orderRef: r.orderRef, onlyIfUncommitted: true })) released++;
+    if (!rowCoupon) { await commitReservation({ coupon: { _id: r.couponId }, orderRef: r.orderRef }).catch(() => { }); continue; }
+    if (await release({ coupon: rowCoupon, orderRef: r.orderRef, onlyIfUncommitted: true })) released++;
   }
   return { released, capped };
 }
