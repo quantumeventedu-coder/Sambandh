@@ -443,13 +443,17 @@ describe('release + stale-reservation reclaim (abandoned-checkout safety)', () =
   test('reconcileStrandedOrders releases the coupon a late capture re-consumed on a dead order', async () => {
     const market = require('../src/services/marketplace');
     const Order = require('../src/models/Order');
+    const Partner = require('../src/models/Partner'), Listing = require('../src/models/Listing');
     const c = await mkCoupon({ code: 'STRND', percentOff: 50, maxRedemptions: 5, perUserLimit: 5 });
     // The captured payment carries the coupon refs; the reservation is in the re-consumed state
     // (active + committed) a late capture would leave after the order was already cancelled.
     const pay = await Payment.create({ userId: TEST_USER_ID, purpose: 'marketplace_order', amountCHF: 5, currency: 'INR', razorpayOrderId: 'st1', status: 'captured', createdAt: new Date(), metadata: { couponCode: 'STRND', couponOrderRef: 'st1' } });
     await coupons.redeem({ coupon: c, userId: TEST_USER_ID, orderRef: 'st1', paymentId: pay._id, committed: true });
     expect((await Coupon.findById(c._id)).remaining).toBe(4);
-    await Order.create({ userId: TEST_USER_ID, listingId: oid(), partnerId: oid(), amountCHF: 5, status: 'cancelled', paymentId: pay._id });   // dead order, stranded capture
+    // Real listing/partner so the order satisfies the DB foreign keys (a real order always has them).
+    const p = await Partner.create({ name: 'P', category: 'gift', active: true });
+    const listing = await Listing.create({ partnerId: p._id, category: 'gift', title: 'T', kind: 'product', priceCHF: 5, active: true });
+    await Order.create({ userId: TEST_USER_ID, listingId: listing._id, partnerId: p._id, amountCHF: 5, status: 'cancelled', paymentId: pay._id });   // dead order, stranded capture
     const r = await market.reconcileStrandedOrders();
     expect(r.reclaimed).toBe(1);
     expect((await Payment.findById(pay._id)).status).toBe('refunded');
