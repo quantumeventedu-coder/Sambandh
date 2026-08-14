@@ -13,7 +13,6 @@ const User = require('./models/User');
 const KarmaBook = require('./models/KarmaBook');
 const Reputation = require('./models/Reputation');
 const Chat = require('./models/Chat');
-const Message = require('./models/Message');
 const Like = require('./models/Like');
 const Pass = require('./models/Pass');
 const { requireAuth } = require('./routes-auth');
@@ -25,6 +24,7 @@ const { computeActivitySignals } = require('./karma-book');
 const { userDistanceKm } = require('./data/cities');
 const recommender = require('./services/recommender');
 const entitlements = require('./services/entitlements');   // tier swipe caps + no-free lockout
+const matchmaking = require('./services/matchmaking');     // mutual like → match (chat + notify + emit)
 const { bestEffort } = require('./services/best-effort');
 
 /** 403 body for a blocked swipe: locked (no tier) vs weekly cap reached. @param {any} s consumeSwipe result */
@@ -263,46 +263,14 @@ router.post('/:userId/like', requireAuth, requireLaunched, async (req, res, next
     bestEffort(trainer.captureSwipe(req.userId, targetId, true), { op: 'swipe:trainer-capture' }); // consent-gated organic training data
     events.record('Liked', { userId: req.userId, payload: { targetId } }); // behavioural event log
 
-    // Mutual like → match (spec §2.3.2)
-    const reciprocal = await Like.findOne({ from: targetId, to: req.userId });
-    if (!reciprocal) return res.json({ ok: true, matched: false });
-
-    let chat = await Chat.findOne({ participants: { $all: [req.userId, targetId], $size: 2 } });
-    let isNewMatch = false;
-    if (!chat) {
-      isNewMatch = true;
-      chat = await Chat.create({
-        participants: [req.userId, targetId],
-        createdAt: new Date(), lastMessageAt: new Date(), messageCount: 1,
-        anonymity: { isAnonymous: false, userA_revealed: false, userB_revealed: false },
-        intent: (me.intent || [])[0] || 'dating',
-        status: 'active'
-      });
-      const nameA = me.profile?.displayName || me.profile?.firstName || 'You';
-      const nameB = target.profile?.displayName || target.profile?.firstName || 'they';
-      await Message.create({
-        chatId: chat._id, from: req.userId, to: targetId,
-        text: `You matched! ${nameA} and ${nameB} both liked each other.`,
-        type: 'system', createdAt: new Date()
-      });
-      const { deliverNotification } = require('./routes-notifications'); // in-app + web push + email
-      for (const uid of [req.userId, targetId]) {
-        await deliverNotification(uid, {
-          type: 'new_match', severity: 'info',
-          title: 'New match!',
-          body: 'You both liked each other. Say hello — good conversations build good Karma.'
-        });
-      }
-      const io = req.app.get('io');
-      if (io) {
-        io.to('user:' + targetId).emit('new_match', { chatId: chat._id });
-        io.to('user:' + req.userId).emit('new_match', { chatId: chat._id });
-      }
-      require('./services/analytics').track('match_created', req.userId, { withUserId: targetId });
-      events.record('Matched', { userId: req.userId, payload: { withUserId: targetId, chatId: chat._id } });
-      events.record('Matched', { userId: targetId, payload: { withUserId: req.userId, chatId: chat._id } });
-    }
-    res.json({ ok: true, matched: true, newMatch: isNewMatch, chatId: chat._id });
+    // Mutual like → match (spec §2.3.2). The shared matchmaking service owns chat creation, the
+    // system message, both notifications, the realtime emit and analytics — so it's reusable and
+    // unit-tested independently of this route.
+    const match = await matchmaking.createMatchOnMutualLike({
+      meId: req.userId, otherId: targetId, me, other: target, io: req.app.get('io'),
+    });
+    if (!match.matched) return res.json({ ok: true, matched: false });
+    res.json({ ok: true, matched: true, newMatch: match.newMatch, chatId: match.chatId });
   } catch (err) { next(err); }
 });
 
