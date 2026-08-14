@@ -65,7 +65,7 @@ router.get('/shared-with-me', requireAuth, async (req, res, next) => {
 router.get('/documents/:id', requireAuth, async (req, res, next) => {
   try {
     const doc = await VaultDocument.findById(req.params.id);
-    if (!doc || doc.status !== 'active' || !(await vault.canAccess(doc, req.userId))) return res.status(404).json({ error: 'Document not found' });
+    if (!doc || doc.status !== 'active' || !(await vault.userCanReadDoc(doc, req.userId))) return res.status(404).json({ error: 'Document not found' });
     res.json({ document: { ...pub(doc), owner: String(doc.ownerId) === String(req.userId) } });
   } catch (err) { next(err); }
 });

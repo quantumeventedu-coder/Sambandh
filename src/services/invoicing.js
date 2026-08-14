@@ -10,12 +10,7 @@ const AppConfig = require('../models/AppConfig');
 const Counter = require('../models/Counter');
 const Payment = require('../models/Payment');
 
-/** @param {any} Model @param {any} filter @param {any} update */
-function atomicUpdate(Model, filter, update) {
-  return typeof Model.atomicUpdate === 'function'
-    ? Model.atomicUpdate(filter, update)
-    : Model.findOneAndUpdate(filter, update, { new: true });
-}
+const { atomicUpdate } = require('../db/atomic');
 /** @param {any} v */
 const num = (v) => { const n = Number(v); return Number.isFinite(n) ? n : 0; };
 const r2 = (/** @type {number} */ n) => Math.round(n * 100) / 100;

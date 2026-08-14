@@ -333,10 +333,9 @@ router.post('/:userId/pass', requireAuth, requireLaunched, async (req, res, next
   } catch (err) { next(err); }
 });
 
-// Sambandh Max, currently active (the top tier's exclusive perks)
+// Signature (top-tier) perks — resolved through the entitlements SSOT (handles expiry → free).
 function maxTierActive(user) {
-  return user.membership?.tier === 'max' &&
-    (!user.membership?.tierExpiresAt || user.membership.tierExpiresAt > new Date());
+  return entitlements.tierOf(user) === 'max';
 }
 
 // GET /api/discover/swipe-status — swipes left this week + plan + reset time, so the client can show

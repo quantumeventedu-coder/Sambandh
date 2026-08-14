@@ -18,13 +18,14 @@ function tierActive(user) {
 }
 
 /**
- * Active Sambandh Pro or Max membership (unexpired). The entitlement that unlocks
- * the full Nature Dial reading and another member's astrology.
- * @param {{membership?: {tier?: string, tierExpiresAt?: Date|string|null}}|null|undefined} user
- * @returns {boolean}
+ * Active Plus/Signature membership — the astrology/readings entitlement.
+ * @deprecated Prefer `require('./entitlements').canAccess(user, 'astrology')` directly. Kept as a
+ * thin delegating alias so the tier→feature rule lives in ONE place and the two can never drift.
+ * (Lazy require avoids the entitlements↔membership import cycle.)
+ * @param {any} user @returns {boolean}
  */
 function proOrMaxActive(user) {
-  return !!user && ['pro', 'max'].includes(user.membership?.tier ?? '') && tierActive(user);
+  return require('./entitlements').canAccess(user, 'astrology');
 }
 
 /**

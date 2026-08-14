@@ -50,7 +50,7 @@ describe('dossier lifecycle', () => {
     // subject shares one of their vault documents
     const doc = await vault.storeDocument({ ownerId: subject._id, buf: PNG, label: 'passport', docType: 'passport' });
     await request(app).post(`/api/due-diligence/cases/${id}/documents`).set(auth(subject)).send({ vaultDocumentId: String(doc._id) });
-    expect(await vault.canAccess(await VaultDocument.findById(doc._id), requester._id)).toBe(true);
+    expect(await vault.userCanReadDoc(await VaultDocument.findById(doc._id), requester._id)).toBe(true);
 
     // requester now sees a compiled dossier: verification + the shared document
     const view = await request(app).get(`/api/due-diligence/cases/${id}`).set(auth(requester));
@@ -62,7 +62,7 @@ describe('dossier lifecycle', () => {
     // subject revokes → dossier gone AND the document share is revoked
     expect((await request(app).post(`/api/due-diligence/cases/${id}/revoke`).set(auth(subject))).body.case.status).toBe('revoked');
     expect((await request(app).get(`/api/due-diligence/cases/${id}`).set(auth(requester))).status).toBe(403);
-    expect(await vault.canAccess(await VaultDocument.findById(doc._id), requester._id)).toBe(false);
+    expect(await vault.userCanReadDoc(await VaultDocument.findById(doc._id), requester._id)).toBe(false);
   });
 });
 

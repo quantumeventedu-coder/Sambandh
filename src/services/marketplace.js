@@ -18,10 +18,7 @@ const coupons = require('./coupons');
  * SQL primitive; Mongoose's native findOneAndUpdate applies the filter at write
  * time (also atomic). Returns the updated doc or null if the guard did not hold.
  * @param {any} Model @param {any} filter @param {any} update */
-async function atomicUpdate(Model, filter, update) {
-  if (typeof Model.atomicUpdate === 'function') return Model.atomicUpdate(filter, update);
-  return Model.findOneAndUpdate(filter, update, { new: true });
-}
+const { atomicUpdate } = require('../db/atomic');
 
 /** Category → default commission (0..1). A partner may override via commissionRate.
  * @type {Record<string, number>} */

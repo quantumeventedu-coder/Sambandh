@@ -4,9 +4,7 @@ const express = require('express');
 const { z } = require('zod');
 const KarmaBook = require('./models/KarmaBook');
 const Payment = require('./models/Payment');
-/** Atomic conditional update across both ODM backends (pg-odm static; Mongoose findOneAndUpdate). */
-const atomicUpdate = (/** @type {any} */ M, /** @type {any} */ f, /** @type {any} */ u) =>
-  typeof M.atomicUpdate === 'function' ? M.atomicUpdate(f, u) : M.findOneAndUpdate(f, u, { new: true });
+const { atomicUpdate } = require('./db/atomic');
 const { requireAuth, requireAdmin } = require('./routes-auth');
 const { requireLaunched } = require('./services/site-mode');
 const {

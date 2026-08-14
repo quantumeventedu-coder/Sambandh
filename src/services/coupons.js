@@ -10,13 +10,7 @@
 const Coupon = require('../models/Coupon');
 const CouponRedemption = require('../models/CouponRedemption');
 
-/** Genuinely-atomic conditional update (pg-odm), Mongoose fallback where absent.
- * @param {any} Model @param {any} filter @param {any} update */
-function atomicUpdate(Model, filter, update) {
-  return typeof Model.atomicUpdate === 'function'
-    ? Model.atomicUpdate(filter, update)
-    : Model.findOneAndUpdate(filter, update, { new: true });
-}
+const { atomicUpdate } = require('../db/atomic');
 
 /** A unique-violation from the DB (the idempotency/limit backstop firing). @param {any} e */
 function isDupKey(e) { return !!(e && (e.code === '23505' || e.code === 11000 || /duplicate key|E11000/i.test(String((e && e.message) || '')))); }

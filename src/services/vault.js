@@ -108,9 +108,10 @@ async function storeDocument({ ownerId, buf, mime, label, docType }) {
   return doc;
 }
 
-/** Owner always; an active, unexpired grantee share otherwise.
+/** May this user READ this vault document? Owner always; an active, unexpired grantee share
+ * otherwise. (Named distinctly from entitlements.canAccess — a different concept entirely.)
  * @param {any} doc @param {any} userId */
-async function canAccess(doc, userId) {
+async function userCanReadDoc(doc, userId) {
   if (String(doc.ownerId) === String(userId)) return true;
   const share = await VaultShare.findOne({ documentId: doc._id, granteeId: userId, status: 'active' });
   if (!share) return false;
@@ -122,7 +123,7 @@ async function canAccess(doc, userId) {
  * (GCM tag + plaintext hash). @param {{ doc:any, requesterId:any }} args */
 async function getContent({ doc, requesterId }) {
   if (!doc || doc.status !== 'active') throw new Error('Document not found');
-  if (!(await canAccess(doc, requesterId))) throw new Error('Not authorized');
+  if (!(await userCanReadDoc(doc, requesterId))) throw new Error('Not authorized');
   const blob = await storage.readFile(doc.storageKey);
   const buf = decrypt(blob, doc.enc && doc.enc.keyVersion);
   if (doc.evidenceHash && crypto.createHash('sha256').update(buf).digest('hex') !== doc.evidenceHash) {
@@ -172,6 +173,6 @@ async function deleteDocument({ doc, ownerId }) {
 }
 
 module.exports = {
-  MAX_BYTES, storeDocument, getContent, canAccess, shareDocument, revokeShare, deleteDocument,
+  MAX_BYTES, storeDocument, getContent, userCanReadDoc, shareDocument, revokeShare, deleteDocument,
   encrypt, decrypt   // exported for unit tests
 };

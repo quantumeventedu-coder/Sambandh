@@ -103,9 +103,9 @@ describe('security-review fixes', () => {
     await post(B, id, 'accept');
     const doc = await uploadDoc(A);
     await post(A, id, 'documents', { requirementKey: 'dob_proof', vaultDocumentId: String(doc._id) });
-    expect(await vault.canAccess(await VaultDocument.findById(doc._id), B._id)).toBe(true);
+    expect(await vault.userCanReadDoc(await VaultDocument.findById(doc._id), B._id)).toBe(true);
     await post(A, id, 'cancel');
-    expect(await vault.canAccess(await VaultDocument.findById(doc._id), B._id)).toBe(false);
+    expect(await vault.userCanReadDoc(await VaultDocument.findById(doc._id), B._id)).toBe(false);
   });
 
   test('decline; then a cooldown blocks an immediate re-proposal', async () => {
