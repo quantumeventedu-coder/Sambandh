@@ -19,7 +19,7 @@ const Notification = require('./models/Notification');
 const { requireAuth, requireAdmin } = require('./routes-auth');
 const crypto = require('crypto');
 const { uploadToR2, uploadPrivate } = require('./services/storage');
-const { decideIdDocument, decideSelfie, decideClaimDocument } = require('./services/verify-engine');
+const { decideIdDocument, decideSelfie, decideClaimDocument, bindLiveIdentity } = require('./services/verify-engine');
 const liveness = require('./services/liveness-engine');
 const LivenessChallenge = require('./models/LivenessChallenge');
 const { atomicUpdate } = require('./db/atomic');
@@ -187,11 +187,7 @@ router.post('/selfie', requireAuth, async (req, res, next) => {
     // (@vladmandic/face-api). Validate server-side, then check for the same face
     // already enrolled on another account (ban-evasion / duplicate-identity fraud).
     const { isValidDescriptor, normalizeDescriptor, scanForDuplicateFace, matchFaces } = require('./services/face-engine');
-    const faceDescriptor = req.body.faceDescriptor ? normalizeDescriptor(req.body.faceDescriptor) : null;
-    let faceDuplicates = [];
-    if (faceDescriptor && isValidDescriptor(faceDescriptor)) {
-      faceDuplicates = await scanForDuplicateFace(req.userId, faceDescriptor);   // ban-evasion / duplicate-identity
-    }
+    const clientFace = req.body.faceDescriptor ? normalizeDescriptor(req.body.faceDescriptor) : null;
     const idFace = (req.body.idFaceDescriptor && isValidDescriptor(normalizeDescriptor(req.body.idFaceDescriptor)))
       ? normalizeDescriptor(req.body.idFaceDescriptor) : null;
 
@@ -199,7 +195,15 @@ router.post('/selfie', requireAuth, async (req, res, next) => {
     // completed a challenge and submitted per-frame landmark/descriptor evidence. That is
     // authoritative. Otherwise fall back to decideSelfie() — a dev simulation locally, and a
     // FAIL-CLOSED throw in production (we NEVER approve a selfie without proven liveness).
+    //
+    // IDENTITY BINDING (critical): everything we enrol / dedup / match on is the descriptor of the
+    // PROVEN-LIVE face — the frames' own descriptor, which verifyLiveness already held constant across
+    // the capture — NOT an independent client field. Otherwise an attacker could pass liveness with
+    // their real face while enrolling a junk/stranger descriptor (poisoning the duplicate scan to evade
+    // a ban, or binding a stranger's identity). `enrolledDesc` is the single source of truth downstream.
     let decision;
+    let enrolledDesc = null;
+    let faceDuplicates = [];
     if (req.body.challengeId && Array.isArray(req.body.frames)) {
       // Consume the challenge ATOMICALLY (single-use → replay-safe), scoped to this user + still pending.
       const consumed = await atomicUpdate(LivenessChallenge,
@@ -207,18 +211,20 @@ router.post('/selfie', requireAuth, async (req, res, next) => {
         { $set: { status: 'consumed', consumedAt: new Date() } });
       if (!consumed) return res.status(400).json({ error: 'Liveness challenge is invalid, already used, or expired — start a new one.' });
       const live = liveness.verifyLiveness({ actions: consumed.actions, issuedAt: new Date(consumed.issuedAt).getTime() }, req.body.frames, Date.now());
-      const selfieDesc = faceDescriptor || (req.body.frames[req.body.frames.length - 1] || {}).descriptor;
-      const matchOk = !idFace || (isValidDescriptor(selfieDesc) && matchFaces(selfieDesc, idFace).matched);
-      const approved = !!(live.live && matchOk);
-      decision = {
-        approved,
-        checks: [...live.checks, { check: 'id_face_match', pass: matchOk }],
-        reason: approved ? 'Selfie verified in-house (live + face match)' : (!live.live ? live.reason : 'Selfie does not match your ID photo'),
-      };
+      // Bind the decision to the PROVEN-LIVE face (enrol/dedup/ID-match on the frames' own descriptor,
+      // never a raw client field). Pure + unit-tested in verify-engine.bindLiveIdentity.
+      decision = bindLiveIdentity(live, req.body.frames, clientFace, idFace);
+      enrolledDesc = decision.enrolledDesc;
+      // Dedup on the PROVEN-LIVE face (ban-evasion / duplicate-identity), not a poisonable client field.
+      if (decision.approved && enrolledDesc) faceDuplicates = await scanForDuplicateFace(req.userId, enrolledDesc);
     } else {
       decision = await decideSelfie(buffer, null);   // dev sim / fail-closed in prod (no provider, no frames)
-      if (idFace && faceDescriptor && !matchFaces(faceDescriptor, idFace).matched) {
-        decision.approved = false; decision.reason = 'Selfie does not match your ID photo';
+      if (clientFace && isValidDescriptor(clientFace)) {
+        enrolledDesc = clientFace;                                                // dev-only path (no live frames)
+        faceDuplicates = await scanForDuplicateFace(req.userId, clientFace);
+        if (idFace && !matchFaces(clientFace, idFace).matched) {
+          decision.approved = false; decision.reason = 'Selfie does not match your ID photo';
+        }
       }
     }
 
@@ -247,8 +253,8 @@ router.post('/selfie', requireAuth, async (req, res, next) => {
       const others = (user.profile?.photos || []).filter(p => !p.fromSelfie).map(p => ({ ...p.toObject?.() || p, isPrimary: false }));
       const { photoBytesHash } = require('./services/risk-engine');
       const hashes = new Set([...(Array.isArray(user.photoHashes) ? user.photoHashes : []), photoBytesHash(buffer)]);
-      const faceUpdate = (faceDescriptor && isValidDescriptor(faceDescriptor))
-        ? { faceDescriptor, faceEnrolledAt: new Date() } : {};
+      const faceUpdate = (enrolledDesc && isValidDescriptor(enrolledDesc))
+        ? { faceDescriptor: enrolledDesc, faceEnrolledAt: new Date() } : {};   // the PROVEN-LIVE face, never a raw client field
       await User.findByIdAndUpdate(req.userId, {
         'profile.photos': [
           { url: photoUrl, isPrimary: true, fromSelfie: true, uploadedAt: new Date() },
