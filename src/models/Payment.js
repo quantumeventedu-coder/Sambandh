@@ -4,7 +4,6 @@ const PaymentSchema = new mongoose.Schema({
   purpose: { type: String, enum: ['base_subscription', 'join_fee', 'karma_escalation', 'pro_subscription', 'max_subscription', 'base_annual', 'pro_annual', 'max_annual', 'boost', 'marketplace_order', 'verification_service', 'gift_pass', 'wallet_topup'], required: true },
   amountCHF: Number,
   currency: { type: String, default: 'CHF' },
-  amountINR: Number, amountUSD: Number, // legacy, unused
   razorpayOrderId: String,
   razorpayPaymentId: { type: String, unique: true, sparse: true },
   razorpaySignature: String,

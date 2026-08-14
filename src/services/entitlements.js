@@ -63,11 +63,7 @@ function weekKey(d) {
   return `${t.getUTCFullYear()}-W${String(week).padStart(2, '0')}`;
 }
 
-/** Atomic update across both ODM backends (pg-odm exposes the static; Mongoose needs findOneAndUpdate).
- * @param {any} Model @param {any} filter @param {any} update */
-function atomicUpdate(Model, filter, update) {
-  return typeof Model.atomicUpdate === 'function' ? Model.atomicUpdate(filter, update) : Model.findOneAndUpdate(filter, update, { new: true });
-}
+const { atomicUpdate } = require('../db/atomic');
 
 /**
  * READ-ONLY: may this user spend a swipe? Returns { ok, unlimited?, reason?, used?, limit? }. No write.

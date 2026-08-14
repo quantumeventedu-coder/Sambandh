@@ -12,12 +12,7 @@ const { toMinor, fromMinor } = require('./money');
 // UPDATE … WHERE … RETURNING; concurrent callers serialise on the Postgres row lock)
 // in prod/tests; Mongoose findOneAndUpdate (atomic in MongoDB) as the fallback. Plain
 // pg-odm findOneAndUpdate is read-then-write and would let two spends overdraw.
-/** @param {any} Model @param {any} filter @param {any} update */
-function atomicUpdate(Model, filter, update) {
-  return typeof Model.atomicUpdate === 'function'
-    ? Model.atomicUpdate(filter, update)
-    : Model.findOneAndUpdate(filter, update, { new: true });
-}
+const { atomicUpdate } = require('../db/atomic');
 
 /** @param {any} userId */
 async function getWallet(userId) {
