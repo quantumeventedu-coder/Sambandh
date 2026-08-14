@@ -84,6 +84,23 @@ describe('verifyLiveness', () => {
     expect(r.checks.find(c => c.check === 'action:blink').pass).toBe(true);   // the blink WAS seen
   });
 
+  test('actions performed in the WRONG order fail an ordered challenge', () => {
+    // liveCapture blinks (t~300) THEN turns left (t~900); a challenge asking left-THEN-blink must fail
+    // even though BOTH actions are present — a pre-recorded all-actions clip can't satisfy a random order.
+    const r = liveness.verifyLiveness({ actions: ['turn_left', 'blink'], issuedAt: 0 }, liveCapture(), 1000);
+    expect(r.live).toBe(false);
+    expect(r.checks.find(c => c.check === 'action_order').pass).toBe(false);
+    expect(r.checks.find(c => c.check === 'action:blink').pass).toBe(true);      // both actions WERE seen…
+    expect(r.checks.find(c => c.check === 'action:turn_left').pass).toBe(true);  // …just not in the asked order
+  });
+
+  test('an oversized frame payload is REJECTED (DoS cap)', () => {
+    const many = Array.from({ length: liveness.MAX_FRAMES + 100 }, (_, i) => face(0.30, 0, i * 10));
+    const r = liveness.verifyLiveness({ actions: ['blink'], issuedAt: 0 }, many, 1000);
+    expect(r.live).toBe(false);
+    expect(r.checks.find(c => c.check === 'frames').pass).toBe(false);
+  });
+
   test('randomActions yields 2–3 distinct valid actions', () => {
     let rng = 0.42; const seq = liveness.randomActions(() => (rng = (rng * 9301 + 49297) % 233280 / 233280));
     expect(seq.length).toBeGreaterThanOrEqual(2);

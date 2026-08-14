@@ -23,6 +23,7 @@ const faceEngine = require('./face-engine');
 // ---- tunables (all in ONE place) ---------------------------------------------------------------
 const ACTIONS = /** @type {const} */ (['blink', 'turn_left', 'turn_right']);
 const MIN_FRAMES = 8;              // enough temporal samples to see a valley / a turn
+const MAX_FRAMES = 300;            // cap the sequence so a huge payload can't burn CPU (O(n) descriptor compares)
 const MIN_DURATION_MS = 1200;      // the capture must span real time, not a burst of one frame
 const MAX_DURATION_MS = 30000;     // and must be recent/bounded
 const CHALLENGE_TTL_MS = 3 * 60 * 1000;
@@ -73,14 +74,22 @@ function variance(xs) {
   return xs.reduce((a, b) => a + (b - m) * (b - m), 0) / xs.length;
 }
 
+/** index of the min / max element of a numeric series. @param {number[]} xs */
+function argmin(xs) { return xs.reduce((b, x, i) => (x < xs[b] ? i : b), 0); }
+function argmax(/** @type {number[]} */ xs) { return xs.reduce((b, x, i) => (x > xs[b] ? i : b), 0); }
+
 /**
- * Derive the liveness signals from a frame sequence (pure — no I/O).
+ * Derive the liveness signals from a frame sequence (pure — no I/O). Also returns the representative
+ * TIME of each action (the extremum frame: deepest blink, most-left / most-right yaw) so the caller
+ * can enforce that the actions happened in the challenge's requested ORDER — a single pre-recorded
+ * clip of all actions then can't satisfy an arbitrary random challenge.
  * @param {Array<{landmarks:any[], descriptor:number[], t:number}>} frames
- * @returns {{ ok:boolean, reason?:string, blinked:boolean, turnedLeft:boolean, turnedRight:boolean, identityConsistent:boolean, moved:boolean, durationMs:number }}
+ * @returns {{ ok:boolean, reason?:string, blinked:boolean, turnedLeft:boolean, turnedRight:boolean, identityConsistent:boolean, moved:boolean, durationMs:number, actionTimes:Record<string,number> }}
  */
 function analyzeFrames(frames) {
-  const fail = (/** @type {string} */ reason) => ({ ok: false, reason, blinked: false, turnedLeft: false, turnedRight: false, identityConsistent: false, moved: false, durationMs: 0 });
+  const fail = (/** @type {string} */ reason) => ({ ok: false, reason, blinked: false, turnedLeft: false, turnedRight: false, identityConsistent: false, moved: false, durationMs: 0, actionTimes: {} });
   if (!Array.isArray(frames) || frames.length < MIN_FRAMES) return fail(`Need at least ${MIN_FRAMES} frames`);
+  if (frames.length > MAX_FRAMES) return fail(`Too many frames (max ${MAX_FRAMES})`);
   if (!frames.every(isValidFrame)) return fail('Malformed frame (need 68 landmarks + a valid descriptor + timestamp)');
 
   const ts = frames.map((f) => f.t);
@@ -97,6 +106,13 @@ function analyzeFrames(frames) {
   const turnedLeft = Math.min(...yaws) < -YAW_TURN;
   const turnedRight = Math.max(...yaws) > YAW_TURN;
 
+  // When each action peaked (∞ if it never happened) — used for order enforcement.
+  const actionTimes = {
+    blink: blinked ? ts[argmin(ears)] : Infinity,
+    turn_left: turnedLeft ? ts[argmin(yaws)] : Infinity,
+    turn_right: turnedRight ? ts[argmax(yaws)] : Infinity,
+  };
+
   // Not a static image: EAR or yaw must actually move (a printed photo's landmarks barely vary).
   const moved = variance(ears) > 1e-4 || variance(yaws) > MIN_YAW_VARIATION * MIN_YAW_VARIATION;
 
@@ -104,7 +120,7 @@ function analyzeFrames(frames) {
   const base = frames[0].descriptor;
   const identityConsistent = frames.every((f) => faceEngine.matchFaces(base, f.descriptor).distance <= IDENTITY_MAX_DISTANCE);
 
-  return { ok: true, blinked, turnedLeft, turnedRight, identityConsistent, moved, durationMs };
+  return { ok: true, blinked, turnedLeft, turnedRight, identityConsistent, moved, durationMs, actionTimes };
 }
 
 /** A fresh random challenge: 2–3 distinct actions in random order. Deterministic RNG is injected so
@@ -126,19 +142,24 @@ function randomActions(rng = Math.random) {
 function verifyLiveness(challenge, frames, now = 0) {
   const a = analyzeFrames(frames);
   const detected = { blink: a.blinked, turn_left: a.turnedLeft, turn_right: a.turnedRight };
+  // The prompted actions must occur in ORDER: each action's peak strictly after the previous one's.
+  // A pre-recorded clip containing all actions can't satisfy an arbitrary random ordering.
+  const times = challenge.actions.map((act) => /** @type {any} */ (a.actionTimes)[act]);
+  const ordered = times.every((t, i) => Number.isFinite(t) && (i === 0 || t > times[i - 1]));
   const checks = [
     { check: 'frames', pass: a.ok, detail: a.reason || 'ok' },
     { check: 'identity_consistent', pass: a.identityConsistent },
     { check: 'motion', pass: a.moved },
     ...challenge.actions.map((act) => ({ check: 'action:' + act, pass: !!(/** @type {any} */ (detected)[act]) })),
+    { check: 'action_order', pass: ordered },
   ];
   const expired = now > 0 && (now - challenge.issuedAt) > CHALLENGE_TTL_MS;
-  const live = a.ok && a.identityConsistent && a.moved && !expired && challenge.actions.every((act) => (/** @type {any} */ (detected)[act]));
+  const live = a.ok && a.identityConsistent && a.moved && !expired && ordered && challenge.actions.every((act) => (/** @type {any} */ (detected)[act]));
   const failed = checks.find((c) => !c.pass);
   return { live, reason: expired ? 'Challenge expired' : (live ? 'Liveness confirmed' : `Liveness not proven (${failed ? failed.check : 'unknown'})`), checks };
 }
 
 module.exports = {
-  ACTIONS, CHALLENGE_TTL_MS, MIN_FRAMES,
+  ACTIONS, CHALLENGE_TTL_MS, MIN_FRAMES, MAX_FRAMES,
   eyeAspectRatio, headYaw, analyzeFrames, verifyLiveness, randomActions, isValidFrame,
 };
