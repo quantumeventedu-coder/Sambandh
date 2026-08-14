@@ -104,7 +104,25 @@ async function redeem({ coupon, userId, orderRef, paymentId, purpose, discountCH
     // (validate treats remaining<=0 as exhausted) and (b) reverses cleanly when this order is later
     // released (+1/−1) instead of over-restoring the cap. Only ever arises from the narrow sweep-
     // then-late-capture race, never from normal reserve→capture.
-    const won = await atomicUpdate(CouponRedemption, { redemptionKey, released: true }, { $set: { released: false, committed: true, releasedAt: null } });
+    // RE-CHECK the per-user cap BEFORE reactivating. While this order was abandoned+released, a NEW
+    // order of the same user may have taken the freed slot; a late capture on this one must not push the
+    // user past perUserLimit. If they're already at the cap via other ACTIVE redemptions, refuse the
+    // re-consume and leave this row released — the safe (under-issue) direction, and it keeps
+    // userRedemptionCount (and therefore validate()) from ever exceeding the per-user limit. When the
+    // re-consume IS allowed, restore a REAL lowest-free slot key (not the 'rel:' placeholder) so the
+    // unique index re-enforces the cap on the reactivated row too.
+    const perUserRe = coupon.perUserLimit != null ? Number(coupon.perUserLimit) : null;
+    let restoredKey = prior.userLimitKey;
+    if (perUserRe != null) {
+      const others = (await CouponRedemption.find({ couponId, userId }))
+        .filter((/** @type {any} */ r) => !r.released && String(r.redemptionKey) !== redemptionKey);
+      if (others.length >= perUserRe) return prior;                    // already at cap via another order → don't reactivate
+      const taken = new Set(others.map((/** @type {any} */ r) => r.userLimitKey));
+      let slot = 0;
+      while (taken.has(`${couponId}:${userId}:${slot}`)) slot++;
+      restoredKey = `${couponId}:${userId}:${slot}`;
+    }
+    const won = await atomicUpdate(CouponRedemption, { redemptionKey, released: true }, { $set: { released: false, committed: true, releasedAt: null, userLimitKey: restoredKey } });
     if (won) {
       if (coupon.remaining != null) await atomicUpdate(Coupon, { _id: couponId }, { $inc: { remaining: -1, redeemedCount: 1 }, $set: { updatedAt: new Date() } });
       else await atomicUpdate(Coupon, { _id: couponId }, { $inc: { redeemedCount: 1 }, $set: { updatedAt: new Date() } });

@@ -94,6 +94,22 @@ describe('redeem — atomic caps + idempotency', () => {
       .rejects.toThrow(/already used/);
     expect((await Coupon.findById(c._id)).remaining).toBe(9);   // the blocked attempt rolled back
   });
+
+  test('a swept-then-late-captured reservation cannot push a user past perUserLimit', async () => {
+    // The exploit: reserve o1, let the abandonment sweep release it, take the freed slot with o2, then
+    // pay o1 LATE — the re-consume branch must re-check the per-user cap and REFUSE, not silently hand
+    // the user a second active redemption of a one-per-customer coupon.
+    const CouponRedemption = require('../src/models/CouponRedemption');
+    const c = await mkCoupon({ maxRedemptions: 10, perUserLimit: 1 });
+    await coupons.redeem({ coupon: c, userId: TEST_USER_ID, orderRef: 'o1', committed: false });      // reserved at create-order
+    await coupons.release({ coupon: await Coupon.findById(c._id), orderRef: 'o1' });                   // sweep releases the abandoned reservation
+    await coupons.redeem({ coupon: await Coupon.findById(c._id), userId: TEST_USER_ID, orderRef: 'o2' }); // a NEW order takes the freed slot (the user's ONE use)
+    await coupons.redeem({ coupon: await Coupon.findById(c._id), userId: TEST_USER_ID, orderRef: 'o1', committed: false }); // o1 pays late → re-consume
+
+    const active = (await CouponRedemption.find({ couponId: c._id, userId: TEST_USER_ID })).filter((/** @type {any} */ r) => !r.released);
+    expect(active.length).toBe(1);                              // exactly ONE active redemption, never two
+    expect(String(active[0].orderRef)).toBe('o2');             // the genuine one; the late o1 stays released
+  });
 });
 
 describe('checkout integration', () => {

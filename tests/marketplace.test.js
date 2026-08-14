@@ -381,6 +381,18 @@ describe('gift to a match: private (blind) delivery', () => {
     expect(ord.shippingAddress).toBeNull();
   });
 
+  test('a cancelled gift can no longer be accepted — no delivery PII stored on a dead order', async () => {
+    const { recipient, orderId } = await paidGift();
+    // Buyer cancels after the recipient was notified: refunds + drops escrow, but giftStatus stays 'pending'.
+    await market.transition(await Order.findById(orderId), 'cancelled');
+    const RA = { name: 'Meera', phone: '+919111111111', line1: '9 Fancy Bazar', city: 'Guwahati', pincode: '781001' };
+    const acc = await request(app).post(`/api/marketplace/orders/${orderId}/accept-gift`).set(auth(recipient)).send({ shippingAddress: RA });
+    expect(acc.status).toBe(409);                                          // refused — the money state is dead
+    const ord = await Order.findById(orderId);
+    expect(ord.shippingAddress).toBeNull();                               // recipient's private PII NOT persisted
+    expect(ord.giftStatus).toBe('pending');                              // never flipped to 'accepted'
+  });
+
   test('recipient accepts with a PRIVATE address the buyer never sees; fulfilment gated until then', async () => {
     const { buyer, recipient, orderId } = await paidGift();
     // staff cannot advance a gift that is not yet accepted
