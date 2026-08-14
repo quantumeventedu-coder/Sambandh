@@ -46,6 +46,18 @@ describe('karma escalation payment is single-use', () => {
   });
 });
 
+describe('liveness challenge is single-use (replay-safe)', () => {
+  test('the atomic consume succeeds once; a replay of the same challenge fails', async () => {
+    const LivenessChallenge = require('../src/models/LivenessChallenge');
+    const u = await mkUser();
+    const ch = await LivenessChallenge.create({ userId: u._id, actions: ['blink', 'turn_left'], status: 'pending', issuedAt: new Date() });
+    const first = await atomicUpdate(LivenessChallenge, { _id: ch._id, userId: u._id, status: 'pending' }, { $set: { status: 'consumed', consumedAt: new Date() } });
+    expect(first).toBeTruthy();                                               // the genuine submission wins
+    const replay = await atomicUpdate(LivenessChallenge, { _id: ch._id, userId: u._id, status: 'pending' }, { $set: { status: 'consumed' } });
+    expect(replay).toBeFalsy();                                               // a captured/replayed challenge is refused
+  });
+});
+
 describe('banned account is blocked at requireAuth', () => {
   test('a banned user’s existing token is rejected (403), an active user passes', async () => {
     const { requireAuth } = require('../src/routes-auth');
