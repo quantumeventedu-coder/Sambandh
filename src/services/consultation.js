@@ -9,13 +9,14 @@
 // live session (start/end) that drives the order to fulfilled.
 
 const market = require('./marketplace');
+const { bestEffort } = require('./best-effort');
 const Order = require('../models/Order');
 const Session = require('../models/Session');
 const Slot = require('../models/ConsultantSlot');
 
 // In-app notify (best-effort; never blocks a booking transition). Lazy require avoids a cycle.
 const notify = (/** @type {any} */ uid, /** @type {any} */ n) => {
-  try { return /** @type {any} */ (require('../routes-notifications')).deliverNotification(uid, n).catch(() => {}); }
+  try { return bestEffort(/** @type {any} */ (require('../routes-notifications')).deliverNotification(uid, n), { op: 'consultation:notify' }); }
   catch { return Promise.resolve(); }
 };
 

@@ -20,6 +20,7 @@ const User = require('./models/User');
 const Review = require('./models/Review');
 const market = require('./services/marketplace');
 const coupons = require('./services/coupons');
+const { bestEffort } = require('./services/best-effort');
 const { sharesActiveMatch } = require('./services/verification-service');
 const { requireEntitlement } = require('./services/entitlements');   // marketplace = Signature tier
 const gateMarket = requireEntitlement('marketplace');
@@ -30,7 +31,7 @@ const staff = requireSuperOrScope('market:manage');
 const msg = (/** @type {unknown} */ e) => (e instanceof Error ? e.message : String(e));
 // In-app notify (best-effort; never blocks the response). Lazy require avoids a require cycle.
 const notify = (/** @type {any} */ uid, /** @type {any} */ n) => {
-  try { return /** @type {any} */ (require('./routes-notifications')).deliverNotification(uid, n).catch(() => {}); }
+  try { return bestEffort(/** @type {any} */ (require('./routes-notifications')).deliverNotification(uid, n), { op: 'marketplace:notify' }); }
   catch { return Promise.resolve(); }
 };
 
@@ -145,7 +146,7 @@ router.post('/orders', requireAuth, gateMarket, async (req, res, next) => {
         metadata: { orderId: String(order._id), listingId: String(listing._id), partnerId: String(partner._id), commissionCHF: order.commissionCHF }
       });
     } catch (e) {
-      await market.transition(order, 'cancelled').catch(() => {});   // roll back the reserved stock/escrow if pricing fails
+      await bestEffort(market.transition(order, 'cancelled'), { op: 'marketplace:rollback-reservation', userId: String(req.userId), orderId: String(order._id) });   // roll back the reserved stock/escrow if pricing fails
       throw e;
     }
     await Order.findByIdAndUpdate(order._id, { paymentId: quoted.payment._id });

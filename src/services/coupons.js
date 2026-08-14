@@ -11,6 +11,7 @@ const Coupon = require('../models/Coupon');
 const CouponRedemption = require('../models/CouponRedemption');
 
 const { atomicUpdate } = require('../db/atomic');
+const { bestEffort } = require('./best-effort');
 
 /** A unique-violation from the DB (the idempotency/limit backstop firing). @param {any} e */
 function isDupKey(e) { return !!(e && (e.code === '23505' || e.code === 11000 || /duplicate key|E11000/i.test(String((e && e.message) || '')))); }
@@ -290,14 +291,14 @@ async function releaseStaleReservations(now, ttlMinutes = 120) {
       // Real use whose commit was lost (commitReservation threw) — self-heal so it leaves the
       // candidate set next run instead of re-scanning forever, and never gets released. Pass the
       // FULL coupon so if the row was also released, the re-consume stays lockstep.
-      await commitReservation({ coupon: rowCoupon || { _id: r.couponId }, orderRef: r.orderRef }).catch(() => { });
+      await bestEffort(commitReservation({ coupon: rowCoupon || { _id: r.couponId }, orderRef: r.orderRef }), { op: 'coupon-sweep:self-heal-commit', orderRef: String(r.orderRef) });
       continue;
     }
     // pay is created / failed / refunded / absent → the charge is NOT a live capture, so reclaim.
     // (release's onlyIfUncommitted re-checks committed:false, so a row that commits under us is safe.)
     // Coupon hard-deleted out from under a live reservation: nothing to release, but commit the row
     // so it leaves the candidate set instead of re-clogging the oldest-first 5000-row budget forever.
-    if (!rowCoupon) { await commitReservation({ coupon: { _id: r.couponId }, orderRef: r.orderRef }).catch(() => { }); continue; }
+    if (!rowCoupon) { await bestEffort(commitReservation({ coupon: { _id: r.couponId }, orderRef: r.orderRef }), { op: 'coupon-sweep:commit-orphan-row', orderRef: String(r.orderRef) }); continue; }
     if (await release({ coupon: rowCoupon, orderRef: r.orderRef, onlyIfUncommitted: true })) released++;
   }
   return { released, capped };

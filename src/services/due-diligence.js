@@ -9,6 +9,7 @@
 // share. Revoking cuts off access and revokes every document share.
 
 const market = require('./marketplace');            // atomicUpdate primitive (CAS)
+const { bestEffort } = require('./best-effort');
 const checks = require('./verification-checks');
 const vault = require('./vault');
 const vsvc = require('./verification-service');      // reuse sharesActiveMatch / blockedBetween
@@ -65,7 +66,7 @@ async function revoke({ kase, subjectId }) {
   if (!c || !['pending', 'granted'].includes(c.status)) throw new Error('Consent is not active');
   await market.atomicUpdate(Consent, { _id: c._id }, { $set: { status: 'revoked', revokedAt: new Date() } });
   for (const sd of (kase.sharedDocs || [])) {
-    if (sd.shareId) await vault.revokeShare({ shareId: sd.shareId, ownerId: subjectId }).catch(() => { /* best-effort */ });
+    if (sd.shareId) await bestEffort(vault.revokeShare({ shareId: sd.shareId, ownerId: subjectId }), { op: 'due-diligence:revoke-vault-share', ownerId: String(subjectId) });
   }
   await market.atomicUpdate(DueDiligenceCase, { _id: kase._id }, { $set: { status: 'revoked', revokedAt: new Date() } });
   return await DueDiligenceCase.findById(kase._id);

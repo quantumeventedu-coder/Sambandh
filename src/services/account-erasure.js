@@ -14,36 +14,42 @@ const Verification = require('../models/Verification');
 const Message = require('../models/Message');
 const Chat = require('../models/Chat');
 const docRetention = require('./doc-retention');
+const { bestEffort } = require('./best-effort');
 
 /** Erase a user and everything tied to them. Best-effort per collection so one failure
- * doesn't strand the rest. @param {any} id user _id */
+ * doesn't strand the rest — but every failure is now LOGGED (op + userId), because a silently
+ * failed erasure means recoverable PII survives a "deleted" account, which is exactly the DPDP
+ * breach we must be able to detect and retry. @param {any} id user _id */
 async function eraseUser(id) {
+  const userId = String(id);
   // Delete the stored ID/selfie/doc IMAGE files first (deleteMany below removes only rows).
-  try { await docRetention.purgeUserDocuments(id); } catch { /* best-effort */ }
+  await bestEffort(() => docRetention.purgeUserDocuments(id), { op: 'erasure:doc-files', userId });
   // VAULT — the most sensitive PII (aadhaar/passport/pan/driving_licence/medical/legal). Erasure MUST
   // destroy the ENCRYPTED blobs AND the rows AND every share, or the identity documents remain fully
   // recoverable (the key derives from the live JWT_SECRET) after the account is "erased" (DPDP §2.8.4).
-  try {
+  // Each step is independently observable so a blob-delete failure can't hide behind a row-delete.
+  await bestEffort(async () => {
     const VaultDocument = require('../models/VaultDocument');
-    const VaultShare = require('../models/VaultShare');
     const storage = require('./storage');
     const vaultDocs = await VaultDocument.find({ ownerId: id });
-    for (const d of vaultDocs) { if (d.storageKey) await storage.deleteFile(d.storageKey, { private: true }).catch(() => {}); }
-    await VaultDocument.deleteMany({ ownerId: id }).catch(() => {});
-    await VaultShare.deleteMany({ $or: [{ ownerId: id }, { granteeId: id }] }).catch(() => {});
-  } catch { /* best-effort, mirrors the per-collection pattern below */ }
+    for (const d of vaultDocs) {
+      if (d.storageKey) await bestEffort(() => storage.deleteFile(d.storageKey, { private: true }), { op: 'erasure:vault-blob', userId });
+    }
+  }, { op: 'erasure:vault-blobs', userId });
+  await bestEffort(() => require('../models/VaultDocument').deleteMany({ ownerId: id }), { op: 'erasure:vault-docs', userId });
+  await bestEffort(() => require('../models/VaultShare').deleteMany({ $or: [{ ownerId: id }, { granteeId: id }] }), { op: 'erasure:vault-shares', userId });
   await Promise.all([
-    KarmaBook.deleteOne({ userId: id }).catch(() => {}),
-    Reputation.deleteOne({ userId: id }).catch(() => {}),
-    Claim.deleteMany({ userId: id }).catch(() => {}),
-    Like.deleteMany({ $or: [{ from: id }, { to: id }] }).catch(() => {}),
-    Pass.deleteMany({ $or: [{ from: id }, { to: id }] }).catch(() => {}),
-    Notification.deleteMany({ userId: id }).catch(() => {}),
-    Verification.deleteMany({ userId: id }).catch(() => {}),
-    require('../models/LocationPing').deleteMany({ userId: id }).catch(() => {}),
-    require('../models/LocationShare').deleteMany({ pair: id }).catch(() => {}),
-    Message.updateMany({ from: id }, { text: '[deleted]', deleted: true }).catch(() => {}),
-    Chat.updateMany({ participants: id }, { status: 'archived' }).catch(() => {}),
+    bestEffort(KarmaBook.deleteOne({ userId: id }), { op: 'erasure:karmabook', userId }),
+    bestEffort(Reputation.deleteOne({ userId: id }), { op: 'erasure:reputation', userId }),
+    bestEffort(Claim.deleteMany({ userId: id }), { op: 'erasure:claims', userId }),
+    bestEffort(Like.deleteMany({ $or: [{ from: id }, { to: id }] }), { op: 'erasure:likes', userId }),
+    bestEffort(Pass.deleteMany({ $or: [{ from: id }, { to: id }] }), { op: 'erasure:passes', userId }),
+    bestEffort(Notification.deleteMany({ userId: id }), { op: 'erasure:notifications', userId }),
+    bestEffort(Verification.deleteMany({ userId: id }), { op: 'erasure:verifications', userId }),
+    bestEffort(require('../models/LocationPing').deleteMany({ userId: id }), { op: 'erasure:location-pings', userId }),
+    bestEffort(require('../models/LocationShare').deleteMany({ pair: id }), { op: 'erasure:location-shares', userId }),
+    bestEffort(Message.updateMany({ from: id }, { text: '[deleted]', deleted: true }), { op: 'erasure:messages', userId }),
+    bestEffort(Chat.updateMany({ participants: id }, { status: 'archived' }), { op: 'erasure:chats', userId }),
   ]);
   await User.deleteOne({ _id: id });   // frees the phone number for reuse
 }

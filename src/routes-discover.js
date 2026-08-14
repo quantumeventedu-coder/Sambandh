@@ -25,6 +25,7 @@ const { computeActivitySignals } = require('./karma-book');
 const { userDistanceKm } = require('./data/cities');
 const recommender = require('./services/recommender');
 const entitlements = require('./services/entitlements');   // tier swipe caps + no-free lockout
+const { bestEffort } = require('./services/best-effort');
 
 /** 403 body for a blocked swipe: locked (no tier) vs weekly cap reached. @param {any} s consumeSwipe result */
 function swipeError(s) {
@@ -257,9 +258,9 @@ router.post('/:userId/like', requireAuth, requireLaunched, async (req, res, next
       { $setOnInsert: { createdAt: new Date() } },
       { upsert: true });
     await Pass.deleteOne({ from: req.userId, to: targetId }); // liking overrides a past pass
-    if (chargeSwipe) entitlements.recordSwipe(req.userId).catch(() => {});   // charge after the write landed
-    recommender.recordSwipe(req.userId, targetId, true).catch(() => {}); // learn desirability (async)
-    trainer.captureSwipe(req.userId, targetId, true).catch(() => {}); // consent-gated organic training data
+    if (chargeSwipe) bestEffort(entitlements.recordSwipe(req.userId), { op: 'swipe:record-charge', userId: String(req.userId) });   // charge after the write landed — must be observable (silent failure = uncapped swipes)
+    bestEffort(recommender.recordSwipe(req.userId, targetId, true), { op: 'swipe:recommender-learn' }); // learn desirability (async)
+    bestEffort(trainer.captureSwipe(req.userId, targetId, true), { op: 'swipe:trainer-capture' }); // consent-gated organic training data
     events.record('Liked', { userId: req.userId, payload: { targetId } }); // behavioural event log
 
     // Mutual like → match (spec §2.3.2)
@@ -325,9 +326,9 @@ router.post('/:userId/pass', requireAuth, requireLaunched, async (req, res, next
       { from: req.userId, to: targetId },
       { createdAt: new Date(), expiresAt: new Date(Date.now() + 7 * 86400000) },
       { upsert: true });
-    if (chargeSwipe) entitlements.recordSwipe(req.userId).catch(() => {});
-    recommender.recordSwipe(req.userId, req.params.userId, false).catch(() => {}); // learn desirability (async)
-    trainer.captureSwipe(req.userId, req.params.userId, false).catch(() => {}); // consent-gated organic training data
+    if (chargeSwipe) bestEffort(entitlements.recordSwipe(req.userId), { op: 'swipe:record-charge', userId: String(req.userId) });   // silent failure = uncapped swipes
+    bestEffort(recommender.recordSwipe(req.userId, req.params.userId, false), { op: 'swipe:recommender-learn' }); // learn desirability (async)
+    bestEffort(trainer.captureSwipe(req.userId, req.params.userId, false), { op: 'swipe:trainer-capture' }); // consent-gated organic training data
     events.record('Passed', { userId: req.userId, payload: { targetId: req.params.userId } }); // behavioural event log
     res.json({ ok: true });
   } catch (err) { next(err); }

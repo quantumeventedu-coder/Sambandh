@@ -5,6 +5,7 @@ const Notification = require('./models/Notification');
 const User = require('./models/User');
 const { requireAuth } = require('./routes-auth');
 const { vapidPublicKey } = require('./services/notify');
+const { bestEffort } = require('./services/best-effort');
 
 const router = express.Router();
 
@@ -73,7 +74,7 @@ async function deliverNotification(userId, { type, title, body, severity = 'info
     }
     // Email for the things people actually want off-app: matches, moderation, safety.
     if (user?.email && ['new_match', 'account_suspended', 'account_under_review', 'moderation_warning'].includes(type)) {
-      await sendEventEmail(user.email, title, body).catch(() => {});
+      await bestEffort(sendEventEmail(user.email, title, body), { op: 'notifications:event-email' });
     }
   } catch (e) { console.warn('[NOTIFY] delivery:', e.message); }
   return notif;

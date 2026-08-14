@@ -10,6 +10,7 @@ const Room = require('./models/Room');
 const RoomMessage = require('./models/RoomMessage');
 const RoomMember = require('./models/RoomMember');
 const Report = require('./models/Report');
+const { bestEffort } = require('./services/best-effort');
 const { requireAuth } = require('./routes-auth');
 const { requireLaunched } = require('./services/site-mode');
 const flagEngine = require('./services/flag-engine');
@@ -150,12 +151,12 @@ router.post('/rooms/:slug/messages', requireAuth, requireLaunched, requireMember
     const scan = flagEngine.scan({ messages: [{ text, createdAt: new Date() }], context: {} });
     const bad = scan.flags.find(f => ['MONEY_REQUEST_RULE', 'ISOLATION_RULE', 'OFFPLATFORM_RULE', 'COERCION_RULE'].includes(f.ruleId) || f.severity === 'critical');
     if (bad) {
-      await Report.create({
+      await bestEffort(Report.create({
         source: 'system', reportedUserId: req.userId,
         category: bad.ruleId === 'MONEY_REQUEST_RULE' ? 'scam' : 'other',
         description: `Community message blocked (${bad.detects}) in #${room.slug}: ${text.slice(0, 180)}`,
         status: 'pending', createdAt: new Date()
-      }).catch(() => {});
+      }), { op: 'community:abuse-report', userId: String(req.userId) });
       return res.status(422).json({ error: 'That message looks unsafe (money request, off-platform, or controlling language) and was not posted.' });
     }
 

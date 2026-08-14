@@ -5,6 +5,7 @@ const { z } = require('zod');
 const KarmaBook = require('./models/KarmaBook');
 const Payment = require('./models/Payment');
 const { atomicUpdate } = require('./db/atomic');
+const { bestEffort } = require('./services/best-effort');
 const { requireAuth, requireAdmin } = require('./routes-auth');
 const { requireLaunched } = require('./services/site-mode');
 const {
@@ -81,7 +82,7 @@ router.post('/escalate', requireAuth, async (req, res, next) => {
       );
     } catch (err) {
       // Escalation failed after the claim → release it so the paid escalation is retryable.
-      if (payment) await atomicUpdate(Payment, { _id: payment._id }, { $set: { escalationUsed: false } }).catch(() => { });
+      if (payment) await bestEffort(atomicUpdate(Payment, { _id: payment._id }, { $set: { escalationUsed: false } }), { op: 'karma:release-escalation-claim', userId: String(req.userId) });
       throw err;
     }
 

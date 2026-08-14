@@ -15,13 +15,14 @@ const { z } = require('zod');
 const { requireAuth } = require('./routes-auth');
 const { sharesActiveMatch } = require('./services/verification-service');
 const market = require('./services/marketplace');   // atomicUpdate (CAS)
+const { bestEffort } = require('./services/best-effort');
 const LocationShare = require('./models/LocationShare');
 const Chat = require('./models/Chat');
 
 const router = express.Router();
 const DURATION_CAP_MIN = 480;   // 8 h hard cap
 const notify = (/** @type {any} */ uid, /** @type {any} */ n) => {
-  try { return /** @type {any} */ (require('./routes-notifications')).deliverNotification(uid, n).catch(() => {}); }
+  try { return bestEffort(/** @type {any} */ (require('./routes-notifications')).deliverNotification(uid, n), { op: 'couple-location:notify' }); }
   catch { return Promise.resolve(); }
 };
 

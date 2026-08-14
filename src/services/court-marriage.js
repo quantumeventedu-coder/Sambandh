@@ -9,6 +9,7 @@
 // no government filing, no third party (see data/court-marriage.js).
 
 const market = require('./marketplace');            // atomicUpdate primitive (CAS)
+const { bestEffort } = require('./best-effort');
 const ref = require('../data/court-marriage');
 const CourtMarriageCase = require('../models/CourtMarriageCase');
 
@@ -174,7 +175,7 @@ async function issueCertificate({ kase, userId, vaultDocumentId }) {
 async function revokeCaseShares(kase) {
   const vault = require('./vault');
   for (const d of (kase.documents || [])) {
-    if (d.shareId && d.byUserId) await vault.revokeShare({ shareId: d.shareId, ownerId: d.byUserId }).catch(() => { /* best-effort */ });
+    if (d.shareId && d.byUserId) await bestEffort(vault.revokeShare({ shareId: d.shareId, ownerId: d.byUserId }), { op: 'court-marriage:revoke-vault-share', ownerId: String(d.byUserId) });
   }
 }
 

@@ -23,6 +23,7 @@ const { decideIdDocument, decideSelfie, decideClaimDocument } = require('./servi
 const liveness = require('./services/liveness-engine');
 const LivenessChallenge = require('./models/LivenessChallenge');
 const { atomicUpdate } = require('./db/atomic');
+const { bestEffort } = require('./services/best-effort');
 const { track } = require('./services/analytics');
 
 const router = express.Router();
@@ -82,10 +83,10 @@ router.post('/id', requireAuth, async (req, res, next) => {
 
       // AAV Trust Engine — evaluate BEFORE trusting the document (Layers 3/11/12/15).
       const trust = await require('./services/trust').evaluateDocument(buffer, { filename: d.document.filename, ip: req.ip, userId: req.userId });
-      await require('./models/AuditLog').create({
+      await bestEffort(require('./models/AuditLog').create({
         actor: 'aav-trust-engine', action: 'id_document_evaluated', targetType: 'user', targetId: String(req.userId),
         detail: { decision: trust.decision, score: trust.score, hardFail: trust.hardFail, fileType: trust.fileType, evidenceHash: trust.evidenceHash, signals: trust.signals }
-      }).catch(() => { /* audit must not break the request */ });
+      }), { op: 'verification:trust-audit', userId: String(req.userId) });   // audit must not break the request, but a failed write is logged
 
       if (trust.decision === 'reject') {
         // Dangerous or clearly inauthentic file — refuse. Do NOT leak which check failed.
