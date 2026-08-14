@@ -9,6 +9,7 @@ const express = require('express');
 const { z } = require('zod');
 const { requireAuth } = require('./routes-auth');
 const { requireEntitlement } = require('./services/entitlements');   // consultations = Plus tier and up
+const { bestEffort } = require('./services/best-effort');
 const { requireSuperOrScope } = require('./services/dev-auth');
 const gateConsult = requireEntitlement('consultations');
 const Partner = require('./models/Partner');
@@ -118,9 +119,10 @@ router.post('/book', requireAuth, gateConsult, async (req, res, next) => {
       });
     } catch (e) {
       // Roll back the slot reservation if pricing fails, so a bad coupon never strands it.
-      await market.atomicUpdate(Slot, { _id: slot._id }, { $set: { status: 'open', orderId: null } }).catch(() => {});
-      await market.transition(order, 'cancelled').catch(() => {});
-      await Session.findByIdAndUpdate(session._id, { status: 'cancelled' }).catch(() => {});
+      const ctx = { userId: String(req.userId), sessionId: String(session._id) };
+      await bestEffort(market.atomicUpdate(Slot, { _id: slot._id }, { $set: { status: 'open', orderId: null } }), { op: 'consultation:rollback-slot', ...ctx });
+      await bestEffort(market.transition(order, 'cancelled'), { op: 'consultation:rollback-order', ...ctx });
+      await bestEffort(Session.findByIdAndUpdate(session._id, { status: 'cancelled' }), { op: 'consultation:rollback-session', ...ctx });
       throw e;
     }
     await Order.findByIdAndUpdate(order._id, { paymentId: quoted.payment._id });
@@ -286,7 +288,7 @@ router.post('/sessions/:id/reschedule', requireAuth, async (req, res, next) => {
       await market.atomicUpdate(Slot, { _id: session.slotId }, { $set: { status: 'open', orderId: null } });   // free the old
       await Order.findByIdAndUpdate(session.orderId, { scheduledFor: new Date(newSlot.startsAt) });
     } catch (e) {
-      await market.atomicUpdate(Slot, { _id: newSlot._id }, { $set: { status: 'open', orderId: null } }).catch(() => {});   // release the just-reserved slot so it never leaks
+      await bestEffort(market.atomicUpdate(Slot, { _id: newSlot._id }, { $set: { status: 'open', orderId: null } }), { op: 'consultation:reschedule-release-slot', userId: String(req.userId), sessionId: String(session._id) });   // release the just-reserved slot so it never leaks
       throw e;
     }
     res.json({ ok: true, scheduledFor: newSlot.startsAt });

@@ -13,6 +13,7 @@ const Partner = require('../models/Partner');
 const Review = require('../models/Review');
 const Payment = require('../models/Payment');
 const coupons = require('./coupons');
+const { bestEffort } = require('./best-effort');
 
 /** Atomic conditional update across both ODM backends: pg-odm exposes our atomic
  * SQL primitive; Mongoose's native findOneAndUpdate applies the filter at write
@@ -171,11 +172,12 @@ async function transition(order, to, opts = {}) {
     // reclaims it (the payment is now refunded/cancelled → releasable). release is idempotent.
     if (pay && pay.metadata && pay.metadata.couponCode && pay.metadata.couponOrderRef) {
       const orderRef = pay.metadata.couponOrderRef;
-      await coupons.markSweepable(orderRef).catch(() => { });
-      try {
+      await bestEffort(coupons.markSweepable(orderRef), { op: 'marketplace:coupon-mark-sweepable', orderRef });
+      // best-effort; releaseStaleReservations genuinely backstops this, but a failure is still logged.
+      await bestEffort(async () => {
         const coupon = await coupons.findByCode(pay.metadata.couponCode);
         if (coupon) await coupons.release({ coupon, orderRef });
-      } catch { /* best-effort; releaseStaleReservations now genuinely backstops this */ }
+      }, { op: 'marketplace:coupon-release', orderRef });
     }
   }
   return { ...order, ...set };

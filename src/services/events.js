@@ -21,6 +21,8 @@ const TYPES = new Set([
 function record(type, { userId, payload = {}, context = {} } = {}) {
   if (!type || !userId) return;
   Event.create({ userId, type, payload, context, createdAt: new Date() })
+    // DELIBERATELY silent (not bestEffort): high-frequency event stream, no correctness/money/privacy
+    // impact on drop; routing failures to the logger would spam it. Left silent on purpose.
     .catch(() => { /* the log must never break the product */ });
 }
 

@@ -23,6 +23,7 @@ const Notification = require('./models/Notification');
 const AuditLog = require('./models/AuditLog');
 const llm = require('./services/llm');
 const { requireSuperAdmin } = require('./routes-auth');
+const { bestEffort } = require('./services/best-effort');
 
 const router = express.Router();
 router.use(requireSuperAdmin);
@@ -123,19 +124,19 @@ router.post('/purge-test-data', async (req, res, next) => {
     const inIds = { $in: ids };
     const fromTo = { $or: [{ from: inIds }, { to: inIds }] };
     await Promise.all([
-      M('KarmaBook').deleteMany({ userId: inIds }).catch(() => {}),
-      M('Reputation').deleteMany({ userId: inIds }).catch(() => {}),
-      M('Notification').deleteMany({ userId: inIds }).catch(() => {}),
-      M('Payment').deleteMany({ userId: inIds }).catch(() => {}),
-      M('Verification').deleteMany({ userId: inIds }).catch(() => {}),
-      M('Escalation').deleteMany({ userId: inIds }).catch(() => {}),
-      M('TrainingExample').deleteMany({ userId: inIds }).catch(() => {}),
-      M('RoomMember').deleteMany({ userId: inIds }).catch(() => {}),
-      M('Report').deleteMany({ $or: [{ userId: inIds }, { reportedUserId: inIds }, { reporterId: inIds }, { targetUserId: inIds }] }).catch(() => {}),
-      M('Like').deleteMany(fromTo).catch(() => {}),
-      M('Pass').deleteMany(fromTo).catch(() => {}),
-      M('Message').deleteMany(fromTo).catch(() => {}),
-      M('Chat').deleteMany({ participants: inIds }).catch(() => {})
+      bestEffort(M('KarmaBook').deleteMany({ userId: inIds }), { op: 'purge:karmabook' }),
+      bestEffort(M('Reputation').deleteMany({ userId: inIds }), { op: 'purge:reputation' }),
+      bestEffort(M('Notification').deleteMany({ userId: inIds }), { op: 'purge:notifications' }),
+      bestEffort(M('Payment').deleteMany({ userId: inIds }), { op: 'purge:payments' }),
+      bestEffort(M('Verification').deleteMany({ userId: inIds }), { op: 'purge:verifications' }),
+      bestEffort(M('Escalation').deleteMany({ userId: inIds }), { op: 'purge:escalations' }),
+      bestEffort(M('TrainingExample').deleteMany({ userId: inIds }), { op: 'purge:training-examples' }),
+      bestEffort(M('RoomMember').deleteMany({ userId: inIds }), { op: 'purge:room-members' }),
+      bestEffort(M('Report').deleteMany({ $or: [{ userId: inIds }, { reportedUserId: inIds }, { reporterId: inIds }, { targetUserId: inIds }] }), { op: 'purge:reports' }),
+      bestEffort(M('Like').deleteMany(fromTo), { op: 'purge:likes' }),
+      bestEffort(M('Pass').deleteMany(fromTo), { op: 'purge:passes' }),
+      bestEffort(M('Message').deleteMany(fromTo), { op: 'purge:messages' }),
+      bestEffort(M('Chat').deleteMany({ participants: inIds }), { op: 'purge:chats' })
     ]);
     await User.deleteMany({ _id: inIds });
     const kept = all.length - ids.length;
@@ -163,7 +164,7 @@ router.post('/reset-clean-slate', async (req, res, next) => {
     // Remove everyone except real admins/mods — and always remove preview ("experience as") accounts.
     const delIds = all.filter(u => u.preview || !KEEP_ROLES.includes(u.role)).map(u => u._id);
     await User.deleteMany({ _id: { $in: delIds } });
-    await require('./models/Employee').deleteMany({ preview: true }).catch(() => {});
+    await bestEffort(require('./models/Employee').deleteMany({ preview: true }), { op: 'clean-slate:preview-employees' });
     const keptUsers = all.length - delIds.length;
 
     // In pre-launch everything in these collections is test/dev data → wipe entirely.

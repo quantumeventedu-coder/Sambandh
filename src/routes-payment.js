@@ -40,6 +40,7 @@ const commerce = require('./services/commerce-config');
 const tax = require('./services/tax');
 const wallet = require('./services/wallet');
 const coupons = require('./services/coupons');
+const { bestEffort } = require('./services/best-effort');
 const invoicing = require('./services/invoicing');
 const { toMinor, fromMinor } = require('./services/money');
 
@@ -1035,7 +1036,7 @@ async function createQuotedOrder({ userId, purpose, amountCHF, category, label, 
       // abandonment sweep looks at; redeemOrderCoupon flips it committed at capture.
       await coupons.redeem({ coupon, userId, orderRef: /** @type {string} */ (couponMeta.couponOrderRef), paymentId: payment._id, purpose, discountCHF: quote.discountCHF, discountLocal: quote.discountLocal, currency: quote.code, committed: false });
     } catch (e) {
-      await Payment.deleteOne({ _id: payment._id }).catch(() => { });   // undo the un-reserved payment; caller cancels the order
+      await bestEffort(Payment.deleteOne({ _id: payment._id }), { op: 'payment:undo-unreserved', userId: String(userId) });   // undo the un-reserved payment; caller cancels the order
       throw e;
     }
   };
@@ -1059,7 +1060,7 @@ async function createQuotedOrder({ userId, purpose, amountCHF, category, label, 
     } catch (e) {
       // The grant was consumed above but the (committed, paymentId-less) payment never landed, so
       // the sweep can't reclaim it — release the reservation now rather than leak the cap slot.
-      if (coupon) await coupons.release({ coupon, orderRef: /** @type {string} */ (couponMeta.couponOrderRef) }).catch(() => { });
+      if (coupon) await bestEffort(coupons.release({ coupon, orderRef: /** @type {string} */ (couponMeta.couponOrderRef) }), { op: 'coupon:release-orphan', userId: String(userId) });
       throw e;
     }
     return { free: true, devMode: true, orderId, payment, ...clientQuote };

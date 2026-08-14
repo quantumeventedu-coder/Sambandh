@@ -20,6 +20,7 @@ const TokenBlacklist = require('./models/TokenBlacklist');
 const { findCity } = require('./data/cities');
 const { uploadToR2 } = require('./services/storage');
 const { track } = require('./services/analytics');
+const { bestEffort } = require('./services/best-effort');
 const events = require('./services/events');
 
 const router = express.Router();
@@ -402,10 +403,10 @@ router.post('/logout', requireAuth, async (req, res, next) => {
     const decoded = jwt.decode(token);
     const exp = (decoded && typeof decoded === 'object' && typeof decoded.exp === 'number')
       ? decoded.exp : Math.floor(Date.now() / 1000) + 60;
-    await TokenBlacklist.create({
+    await bestEffort(TokenBlacklist.create({
       tokenHash: sha256(token),
       expiresAt: new Date(exp * 1000)
-    }).catch(() => {}); // duplicate = already logged out
+    }), { op: 'auth:logout-blacklist' }); // duplicate = already logged out (expected); a REAL failure means the token still works — log it
     res.clearCookie(COOKIE_NAME);
     res.json({ ok: true });
   } catch (err) { next(err); }
@@ -543,11 +544,11 @@ router.patch('/profile', requireAuth, async (req, res, next) => {
       // Borderline photos are kept but queued for a human moderator.
       if (flaggedForReview.length) {
         const Report = require('./models/Report');
-        await Report.create({
+        await bestEffort(Report.create({
           source: 'system', reportedUserId: req.userId, category: 'other', status: 'pending',
           description: `Profile photo(s) flagged as possibly suggestive (NSFW score ${Math.max(...flaggedForReview)}) — needs a moderator look`,
           createdAt: new Date()
-        }).catch(() => {});
+        }), { op: 'auth:nsfw-photo-report', userId: String(req.userId) });
       }
     }
 
