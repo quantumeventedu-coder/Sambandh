@@ -149,4 +149,40 @@ async function decideClaimDocument(buffer, filename, mustContain) {
   };
 }
 
-module.exports = { decideIdDocument, decideSelfie, decideClaimDocument, nameSimilarity };
+/**
+ * Bind the in-house selfie decision to the PROVEN-LIVE capture. PURE (no I/O).
+ *
+ * The trap this closes: liveness only proves the FRAMES are a live human — the enrolled descriptor, the
+ * ID-match descriptor and the stored photo were all INDEPENDENT client fields, so an attacker could pass
+ * liveness with their real face while enrolling a junk/stranger descriptor (poisoning the duplicate scan
+ * to evade a ban, or binding a stranger's identity). Here the descriptor we enrol / dedup / ID-match on
+ * is ALWAYS the frames' own descriptor (which verifyLiveness already held constant across the capture) —
+ * never a raw client field — and a client-supplied faceDescriptor is accepted only if it IS that live face.
+ *
+ * @param {{live:boolean, reason?:string, checks?:any[]}} live  the liveness result for the frames
+ * @param {Array<{descriptor:any}>} frames                      the submitted capture
+ * @param {number[]|null} clientFace  client-claimed enrol descriptor (normalized) or null
+ * @param {number[]|null} idFace      ID-photo descriptor to match against (normalized) or null
+ * @returns {{ approved:boolean, enrolledDesc:number[]|null, checks:any[], reason:string }}
+ */
+function bindLiveIdentity(live, frames, clientFace, idFace) {
+  const { isValidDescriptor, normalizeDescriptor, matchFaces } = require('./face-engine');
+  const liveRaw = (Array.isArray(frames) ? frames.map(f => f && f.descriptor).find(d => d && isValidDescriptor(normalizeDescriptor(d))) : null) || null;
+  const liveDesc = liveRaw ? normalizeDescriptor(liveRaw) : null;
+  const liveOk = !!(live && live.live && liveDesc);
+  // A client-supplied enrol descriptor must BE the proven-live face, else reject (enrolment poisoning).
+  const enrollBound = !clientFace || !!(liveDesc && matchFaces(clientFace, liveDesc).matched);
+  // ID match is done against the PROVEN-LIVE face, never a client selfie descriptor.
+  const matchOk = !idFace || !!(liveDesc && matchFaces(liveDesc, idFace).matched);
+  const approved = !!(liveOk && enrollBound && matchOk);
+  return {
+    approved,
+    enrolledDesc: liveDesc,
+    checks: [...((live && live.checks) || []), { check: 'enrolment_bound_to_live', pass: !!enrollBound }, { check: 'id_face_match', pass: !!matchOk }],
+    reason: approved ? 'Selfie verified in-house (live + identity-bound)'
+      : (!(live && live.live) ? ((live && live.reason) || 'Liveness not proven')
+        : (!enrollBound ? 'Submitted face does not match the live capture' : 'Selfie does not match your ID photo')),
+  };
+}
+
+module.exports = { decideIdDocument, decideSelfie, decideClaimDocument, nameSimilarity, bindLiveIdentity };
