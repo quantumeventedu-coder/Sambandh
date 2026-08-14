@@ -35,6 +35,45 @@ describe('DPDP erasure destroys the vault', () => {
   });
 });
 
+describe('DPDP erasure is COMPLETE (no recoverable PII survives)', () => {
+  test('erasure redacts consultation + community content, drops memberships, and deletes vault blobs from the PUBLIC bucket', async () => {
+    const SessionMessage = require('../src/models/SessionMessage');
+    const RoomMessage = require('../src/models/RoomMessage');
+    const RoomMember = require('../src/models/RoomMember');
+    const VaultDocument = require('../src/models/VaultDocument');
+    const storage = require('../src/services/storage');
+    const { eraseUser } = require('../src/services/account-erasure');
+    const mongoose = require('../src/db/odm');
+
+    const u = await mkUser();
+    const sessionId = new mongoose.Types.ObjectId();
+    const roomId = new mongoose.Types.ObjectId();
+    await SessionMessage.create({ sessionId, from: u._id, text: 'my number is 98xxxxxxx' });
+    await RoomMessage.create({ roomId, userId: u._id, handle: 'anon-7', text: 'hello room' });
+    await RoomMember.create({ roomId, userId: u._id, handle: 'anon-7' });
+    await VaultDocument.create({ ownerId: u._id, label: 'Aadhaar', docType: 'aadhaar', storageKey: 'vault/x/y.enc' });
+
+    // The blob must be deleted from the bucket the vault WROTE to (public) — never with { private: true }.
+    const del = jest.spyOn(storage, 'deleteFile').mockResolvedValue(true);
+    await eraseUser(u._id);
+
+    const vaultDeletes = del.mock.calls.filter(c => String(c[0]).startsWith('vault/'));
+    expect(vaultDeletes.length).toBeGreaterThan(0);
+    expect(vaultDeletes.every(c => !(c[1] && c[1].private))).toBe(true);   // NOT the private bucket
+    del.mockRestore();
+
+    // Consultation message content is gone (but the thread row stays for the consultant).
+    const sm = await SessionMessage.findOne({ sessionId });
+    expect(sm.text).toBe('[deleted]');
+    // Community post is redacted AND un-linked from the user (userId/handle nulled → no re-attribution).
+    const rm = await RoomMessage.findOne({ roomId });
+    expect(rm.text).toBe('[deleted]');
+    expect(rm.userId == null).toBe(true);
+    // Membership is dropped outright.
+    expect(await RoomMember.countDocuments({ userId: u._id })).toBe(0);
+  });
+});
+
 describe('karma escalation payment is single-use', () => {
   test('a captured karma_escalation payment consumes exactly once — a second atomic claim fails', async () => {
     const u = await mkUser();
