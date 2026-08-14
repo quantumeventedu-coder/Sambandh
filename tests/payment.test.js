@@ -277,6 +277,35 @@ describe('webhook — only Razorpay may call it', () => {
   });
 });
 
+describe('webhook backstop — fulfills a stranded payment when /verify never fires', () => {
+  const hookSign = (raw) => crypto.createHmac('sha256', process.env.RAZORPAY_WEBHOOK_SECRET || '').update(raw).digest('hex');
+  const capturedEvent = (orderId, payId) => JSON.stringify({ event: 'payment.captured', payload: { payment: { entity: { order_id: orderId, id: payId } } } });
+  beforeAll(() => { process.env.RAZORPAY_WEBHOOK_SECRET = 'test_webhook_secret'; });
+  const postHook = (raw) => request(app).post('/payment/webhook').set('Content-Type', 'application/json').set('x-razorpay-signature', hookSign(raw)).send(raw);
+
+  test('a payment.captured webhook captures the stranded order and GRANTS membership', async () => {
+    await mkUser('male', 'IN');
+    await request(app).post('/payment/create-order').send({ purpose: 'base_subscription' });   // Payment 'created', /verify never fires
+    const r = await postHook(capturedEvent('order_live_TEST123', 'pay_hook_9'));
+    expect(r.status).toBe(200);
+    expect((await Payment.findOne({ razorpayOrderId: 'order_live_TEST123' })).status).toBe('captured');
+    expect((await User.findById(TEST_USER_ID)).membership.tier).toBe('base');                  // reconciled, not stranded
+  });
+
+  test('idempotent: once /verify has captured, the webhook does NOT double-grant', async () => {
+    await mkUser('male', 'IN');
+    await request(app).post('/payment/create-order').send({ purpose: 'base_subscription' });
+    const orderId = 'order_live_TEST123', paymentId = 'pay_live_v';
+    await request(app).post('/payment/verify').send({ razorpay_order_id: orderId, razorpay_payment_id: paymentId, razorpay_signature: sign(orderId, paymentId) });
+    const expiryAfterVerify = String((await User.findById(TEST_USER_ID)).membership.tierExpiresAt);
+    const r = await postHook(capturedEvent(orderId, 'pay_hook_dup'));                            // webhook arrives after /verify
+    expect(r.status).toBe(200);
+    // The webhook claim is scoped to status:'created' → nothing to flip → no second stacking grant.
+    expect(String((await User.findById(TEST_USER_ID)).membership.tierExpiresAt)).toBe(expiryAfterVerify);
+    expect(await Payment.countDocuments({ razorpayOrderId: orderId, status: 'captured' })).toBe(1);
+  });
+});
+
 describe('itemized checkout — base + tax + gateway fee is server-authoritative', () => {
   test('an India subscription breaks down GST 18% + 2.7% gateway fee and charges the total', async () => {
     await mkUser('female', 'IN');
@@ -443,6 +472,32 @@ describe('wallet — top-up credits on capture; pay-from-wallet debits base+tax 
     const b = await request(app).post('/payment/pay-wallet').send({ purpose: 'base_subscription' });
     expect(b.status).toBe(409);                                            // duplicate rejected
     expect((await walletSvc.getWallet(TEST_USER_ID)).balance).toBe(1410);  // 2000 - 590, once
+  });
+
+  test('two CONCURRENT pay-from-wallet debits collapse to ONE charge (no client key)', async () => {
+    await mkUser('female', 'IN');
+    await walletSvc.credit(TEST_USER_ID, 2000, 'INR', { type: 'topup' });
+    // Fire both at once so neither has created a Payment when the other's duplicate-check runs — the
+    // exact race the old code lost (ref:undefined → both debits stuck → 1180 gone). The server-side
+    // idempotency ref must now collapse the second at the ledger's unique idemKey.
+    const [a, b] = await Promise.all([
+      request(app).post('/payment/pay-wallet').send({ purpose: 'base_subscription' }),
+      request(app).post('/payment/pay-wallet').send({ purpose: 'base_subscription' }),
+    ]);
+    expect([a.status, b.status].filter(s => s === 200).length).toBeGreaterThanOrEqual(1);
+    expect((await walletSvc.getWallet(TEST_USER_ID)).balance).toBe(1410);   // 2000 - 590, charged ONCE
+    expect(await Payment.countDocuments({ userId: TEST_USER_ID, method: 'wallet', status: 'captured' })).toBe(1);
+  });
+
+  test('admin refund of a FREE (100%-off) captured payment refunds 0 and promises no money back', async () => {
+    await mkUser('male', 'IN');
+    // A 100%-off coupon order: captured, no gateway/wallet charge, metadata.total = 0.
+    const pay = await Payment.create({ userId: TEST_USER_ID, purpose: 'base_subscription', amountCHF: 5, currency: 'INR', status: 'captured', method: 'coupon', razorpayOrderId: 'free_test', metadata: { total: 0, amountLocal: 0, free: true } });
+    const r = await request(app).post(`/payment/admin/${pay._id}/refund`).send({});
+    expect(r.status).toBe(200);
+    expect(r.body.refundedAmount).toBe(0);                                 // NOT the CHF base mislabeled as INR 5
+    const note = await require('../src/models/Notification').findOne({ userId: TEST_USER_ID, type: 'refund_processed' });
+    expect(note.body).toMatch(/no payment was taken/i);                   // no phantom "reaches you in 5–7 days"
   });
 
   test('admin refund of a WALLET-PAID membership returns the money to the WALLET (never lost)', async () => {

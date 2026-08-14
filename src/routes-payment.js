@@ -85,6 +85,15 @@ function webhookSecret() {
   return secret;
 }
 
+/** Constant-time compare of a computed HMAC against a client-supplied signature, on the payment-auth
+ * boundary. A plain `!==` short-circuits on the first differing byte (a timing side-channel); this
+ * doesn't. Length-guarded so timingSafeEqual never throws on unequal buffers. @param {string} a @param {string} b */
+function signaturesEqual(a, b) {
+  const ab = Buffer.from(String(a || ''), 'utf8');
+  const bb = Buffer.from(String(b || ''), 'utf8');
+  return ab.length === bb.length && crypto.timingSafeEqual(ab, bb);
+}
+
 // CHF is the canonical price. Each user is charged in their LOCAL currency
 // (India → INR, which also unlocks UPI/netbanking/wallets; others → their
 // currency), converted from CHF at the LIVE exchange rate (services/fx.js) so the
@@ -429,9 +438,13 @@ router.post('/cancel-subscription', requireAuth, async (req, res, next) => {
     const period = Math.max(1, expires - paidAt.getTime());
     const unused = Math.max(0, expires - Date.now());
     const fraction = prorate ? Math.min(1, Math.max(0, unused / period)) : 1;
-    const paidTotal = (claimed && claimed.metadata && Number(claimed.metadata.total)) ||
-      (claimed && claimed.metadata && Number(claimed.metadata.amountLocal)) ||
-      (claimed && Number(claimed.amountCHF)) || 0;
+    // The LOCAL amount actually charged. A free (100%-off coupon) order stored total=0 and took no
+    // money — its refund is 0, never the CHF base price. Fall back to amountCHF only for legacy
+    // payments that never recorded a local amount.
+    const cm = (claimed && claimed.metadata) || {};
+    const paidTotal = (cm.total != null || cm.amountLocal != null)
+      ? (Number(cm.total) || Number(cm.amountLocal) || 0)
+      : (claimed && Number(claimed.amountCHF)) || 0;
     const currency = (claimed && claimed.currency) || 'CHF';
     const refundAmount = Math.round(paidTotal * fraction * 100) / 100;
 
@@ -560,20 +573,23 @@ router.post('/pay-wallet', requireAuth, async (req, res, next) => {
 
     // Duplicate-submit guard. The atomic debit prevents OVERSPEND, but two affordable debits
     // (double-click / client retry — /pay-wallet has no order to bind to) would buy the same
-    // membership twice. A client-supplied idempotencyKey makes the spend single-apply even
-    // under true concurrency (the ledger's unique idemKey rejects the second); the 20s window
-    // is the backstop when no key is sent.
+    // membership twice. CORRECTNESS MUST NOT DEPEND ON THE CLIENT: we always pass a debit `ref`, so
+    // the ledger's unique idemKey collapses a concurrent duplicate into a no-op reversal instead of a
+    // second charge. An explicit client idempotencyKey is preferred (unambiguous across intentional
+    // repeats); otherwise a short per-(user,purpose) time bucket collapses the common double-tap —
+    // two near-simultaneous submits share the bucket. The 20s recent-check backstops sequential retries.
     const canonicalPurpose = purpose.replace('_high', '');
-    const idemKey = (typeof req.body.idempotencyKey === 'string' && req.body.idempotencyKey.trim())
-      ? `pw_${req.body.idempotencyKey.trim().slice(0, 80)}` : null;
+    const clientKey = (typeof req.body.idempotencyKey === 'string' && req.body.idempotencyKey.trim())
+      ? req.body.idempotencyKey.trim().slice(0, 80) : null;
+    const idemKey = clientKey ? `pw_${clientKey}` : `pw_auto_${req.userId}_${canonicalPurpose}_${Math.floor(Date.now() / 10000)}`;
     const recent = await Payment.findOne({ userId: req.userId, purpose: canonicalPurpose, method: 'wallet', status: 'captured' }).sort({ createdAt: -1 });
-    if (!idemKey && recent && recent.createdAt && (Date.now() - new Date(recent.createdAt).getTime()) < 20000) {
+    if (!clientKey && recent && recent.createdAt && (Date.now() - new Date(recent.createdAt).getTime()) < 20000) {
       return res.status(409).json({ error: 'This looks like a duplicate of a wallet payment you just made.' });
     }
 
     // Atomic debit; the balance guard prevents overspend/race. A `duplicate` result means this
-    // exact spend already went through (retry) — return the original outcome, no second grant.
-    const after = await wallet.debit(user._id, walletTotal, cur, { purpose, note: `Membership (${purpose})`, ref: idemKey || undefined });
+    // exact spend already went through (retry/concurrent dup) — return the original outcome, no second grant.
+    const after = await wallet.debit(user._id, walletTotal, cur, { purpose, note: `Membership (${purpose})`, ref: idemKey });
     if (!after) return res.status(402).json({ error: 'Insufficient wallet balance', currency: cur });
     if (after.duplicate) {
       return res.json({ ok: true, paidFromWallet: true, duplicate: true, amount: walletTotal, currency: cur, balance: after.balance, paymentId: recent && recent._id });
@@ -739,7 +755,7 @@ router.post('/verify', requireAuth, async (req, res, next) => {
       .update(razorpay_order_id + '|' + razorpay_payment_id)
       .digest('hex');
 
-    if (expected !== razorpay_signature) {
+    if (!signaturesEqual(expected, razorpay_signature)) {
       console.warn('[SECURITY] Invalid Razorpay signature attempt', { userId: req.userId });
       return res.status(400).json({ error: 'Invalid payment signature' });
     }
@@ -870,10 +886,15 @@ router.post('/admin/:paymentId/refund', requireAdmin, async (req, res, next) => 
       return res.status(400).json({ error: 'Only captured payments can be refunded' });
     }
 
-    // Report the amount actually charged, in the currency actually charged (not CHF).
+    // Report the amount actually charged, in the currency actually charged (not CHF). A free order
+    // (100%-off coupon) has metadata.total = 0 and no gateway/wallet charge — its refund is 0, NOT the
+    // CHF base price. Only fall back to amountCHF for legacy payments that never stored a local amount;
+    // never mislabel a CHF figure as the local currency, and never promise a refund that never moves.
     const currency = payment.currency || 'CHF';
-    const refundedLocal = (payment.metadata && Number(payment.metadata.total)) ||
-      (payment.metadata && Number(payment.metadata.amountLocal)) || Number(payment.amountCHF) || 0;
+    const hasLocal = !!(payment.metadata && (payment.metadata.total != null || payment.metadata.amountLocal != null));
+    const refundedLocal = hasLocal
+      ? (Number(payment.metadata.total) || Number(payment.metadata.amountLocal) || 0)
+      : (Number(payment.amountCHF) || 0);
     // Where the money goes back depends on how it was paid — the gateway path alone would
     // silently lose (or duplicate) money for the wallet payment types the wallet introduced.
     const fromWallet = payment.method === 'wallet' || !!(payment.metadata && payment.metadata.paidFromWallet);
@@ -935,14 +956,23 @@ router.post('/admin/:paymentId/refund', requireAdmin, async (req, res, next) => 
     }
 
     const Notification = require('./models/Notification');
-    const arrival = destination === 'wallet'
-      ? 'has been added back to your wallet.'
-      : 'has been refunded. It reaches your account in 5–7 working days.';
-    await Notification.create({
-      userId: payment.userId, type: 'refund_processed', severity: 'info',
-      title: 'Refund processed',
-      body: `Your ${currency} ${refundedLocal} ${payment.purpose.replace(/_/g, ' ')} payment ${arrival}`
-    });
+    if (refundedLocal > 0) {
+      const arrival = destination === 'wallet'
+        ? 'has been added back to your wallet.'
+        : 'has been refunded. It reaches your account in 5–7 working days.';
+      await Notification.create({
+        userId: payment.userId, type: 'refund_processed', severity: 'info',
+        title: 'Refund processed',
+        body: `Your ${currency} ${refundedLocal} ${payment.purpose.replace(/_/g, ' ')} payment ${arrival}`
+      });
+    } else {
+      // No money was ever charged (e.g. a 100%-off coupon order) — promise no refund that will never arrive.
+      await Notification.create({
+        userId: payment.userId, type: 'refund_processed', severity: 'info',
+        title: 'Membership reversed',
+        body: `Your ${payment.purpose.replace(/_/g, ' ')} was reversed. No payment was taken, so there is nothing to refund.`
+      });
+    }
 
     const AuditLog = require('./models/AuditLog');
     await AuditLog.create({
@@ -966,14 +996,35 @@ router.post('/webhook', async (req, res, next) => {
       .update(req.body)
       .digest('hex');
 
-    if (signature !== expected) {
+    if (!signaturesEqual(String(signature || ''), expected)) {
       console.warn('[SECURITY] Invalid webhook signature');
       return res.status(400).send('Invalid signature');
     }
 
     const event = JSON.parse(req.body.toString());
     console.log('[WEBHOOK]', event.event);
-    // /verify already handles success — this is belt-and-suspenders
+
+    // BACKSTOP FULFILLMENT. The client's POST /verify is the primary path, but if it never fires
+    // (app closed / UPI network drop right after Razorpay auto-captures), the money is taken and the
+    // Payment would sit 'created' forever with no membership and no refund — no cron reconciles
+    // membership/top-up Payments. So the webhook fulfills too, IDEMPOTENTLY: it atomically claims the
+    // priced order created→captured (only if still 'created', so it can never double-fulfill a
+    // /verify that already ran), then runs the SAME fulfill + coupon-redeem path.
+    if (event.event === 'payment.captured' || event.event === 'order.paid') {
+      const entity = (event.payload && event.payload.payment && event.payload.payment.entity) || {};
+      const orderId = entity.order_id;
+      if (orderId) {
+        const payment = await claimPayment(
+          { razorpayOrderId: orderId, status: 'created' },
+          { status: 'captured', capturedAt: new Date(), razorpayPaymentId: entity.id, razorpaySignature: signature, method: 'razorpay_webhook' },
+        );
+        if (payment) {
+          await fulfillCaptured(payment.userId, payment);   // never throws — flags on failure, no strand
+          await redeemOrderCoupon(payment.userId, payment); // idempotent
+          console.log('[WEBHOOK] reconciled stranded payment', String(payment._id), payment.purpose);
+        }
+      }
+    }
     res.json({ ok: true });
   } catch (err) { next(err); }
 });
