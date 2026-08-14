@@ -20,6 +20,9 @@ const { requireAuth, requireAdmin } = require('./routes-auth');
 const crypto = require('crypto');
 const { uploadToR2, uploadPrivate } = require('./services/storage');
 const { decideIdDocument, decideSelfie, decideClaimDocument } = require('./services/verify-engine');
+const liveness = require('./services/liveness-engine');
+const LivenessChallenge = require('./models/LivenessChallenge');
+const { atomicUpdate } = require('./db/atomic');
 const { track } = require('./services/analytics');
 
 const router = express.Router();
@@ -150,6 +153,22 @@ router.post('/id', requireAuth, async (req, res, next) => {
 
 // ---------------- Selfie liveness + face match ----------------
 
+// POST /verification/selfie/challenge — issue a RANDOM, single-use, time-boxed liveness challenge.
+// The client performs the prompted actions while capturing per-frame face landmarks + descriptors
+// (@vladmandic/face-api, client-side, no keys), then POSTs them to /selfie. The random sequence +
+// single-use nonce + short TTL make a pre-recorded clip or a replay useless.
+router.post('/selfie/challenge', requireAuth, async (req, res, next) => {
+  try {
+    const actions = liveness.randomActions();
+    const now = new Date();
+    const ch = await LivenessChallenge.create({
+      userId: req.userId, actions, status: 'pending',
+      issuedAt: now, expiresAt: new Date(now.getTime() + liveness.CHALLENGE_TTL_MS),
+    });
+    res.json({ challengeId: ch._id, actions, expiresAt: ch.expiresAt, minFrames: liveness.MIN_FRAMES });
+  } catch (err) { next(err); }
+});
+
 router.post('/selfie', requireAuth, async (req, res, next) => {
   try {
     const { base64 } = req.body;
@@ -168,21 +187,39 @@ router.post('/selfie', requireAuth, async (req, res, next) => {
     // already enrolled on another account (ban-evasion / duplicate-identity fraud).
     const { isValidDescriptor, normalizeDescriptor, scanForDuplicateFace, matchFaces } = require('./services/face-engine');
     const faceDescriptor = req.body.faceDescriptor ? normalizeDescriptor(req.body.faceDescriptor) : null;
-    let faceLive = null, faceDuplicates = [];
+    let faceDuplicates = [];
     if (faceDescriptor && isValidDescriptor(faceDescriptor)) {
-      faceLive = true;
-      faceDuplicates = await scanForDuplicateFace(req.userId, faceDescriptor);
-      // Optional selfie↔ID-photo match when the client also sends the ID face
-      if (req.body.idFaceDescriptor && isValidDescriptor(req.body.idFaceDescriptor)) {
-        faceLive = matchFaces(faceDescriptor, req.body.idFaceDescriptor).matched;
+      faceDuplicates = await scanForDuplicateFace(req.userId, faceDescriptor);   // ban-evasion / duplicate-identity
+    }
+    const idFace = (req.body.idFaceDescriptor && isValidDescriptor(normalizeDescriptor(req.body.idFaceDescriptor)))
+      ? normalizeDescriptor(req.body.idFaceDescriptor) : null;
+
+    // DECISION. Primary path is our IN-HOUSE active-liveness engine (no third party): the client
+    // completed a challenge and submitted per-frame landmark/descriptor evidence. That is
+    // authoritative. Otherwise fall back to decideSelfie() — a dev simulation locally, and a
+    // FAIL-CLOSED throw in production (we NEVER approve a selfie without proven liveness).
+    let decision;
+    if (req.body.challengeId && Array.isArray(req.body.frames)) {
+      // Consume the challenge ATOMICALLY (single-use → replay-safe), scoped to this user + still pending.
+      const consumed = await atomicUpdate(LivenessChallenge,
+        { _id: req.body.challengeId, userId: req.userId, status: 'pending' },
+        { $set: { status: 'consumed', consumedAt: new Date() } });
+      if (!consumed) return res.status(400).json({ error: 'Liveness challenge is invalid, already used, or expired — start a new one.' });
+      const live = liveness.verifyLiveness({ actions: consumed.actions, issuedAt: new Date(consumed.issuedAt).getTime() }, req.body.frames, Date.now());
+      const selfieDesc = faceDescriptor || (req.body.frames[req.body.frames.length - 1] || {}).descriptor;
+      const matchOk = !idFace || (isValidDescriptor(selfieDesc) && matchFaces(selfieDesc, idFace).matched);
+      const approved = !!(live.live && matchOk);
+      decision = {
+        approved,
+        checks: [...live.checks, { check: 'id_face_match', pass: matchOk }],
+        reason: approved ? 'Selfie verified in-house (live + face match)' : (!live.live ? live.reason : 'Selfie does not match your ID photo'),
+      };
+    } else {
+      decision = await decideSelfie(buffer, null);   // dev sim / fail-closed in prod (no provider, no frames)
+      if (idFace && faceDescriptor && !matchFaces(faceDescriptor, idFace).matched) {
+        decision.approved = false; decision.reason = 'Selfie does not match your ID photo';
       }
     }
-
-    // Automated: liveness + face match against the ID photo — instant decision
-    const decision = await decideSelfie(buffer, null);
-    // If the browser proved a live face descriptor, honour it; if it proved a
-    // face MISMATCH against the ID, reject regardless of the dev simulation.
-    if (faceLive === false) { decision.approved = false; decision.reason = 'Selfie does not match your ID photo'; }
 
     const verification = await Verification.create({
       userId: req.userId,

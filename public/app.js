@@ -1022,26 +1022,49 @@ async function startFaceVerification() {
 
 function stopFaceStream() { if (_faceStream) { _faceStream.getTracks().forEach(t => t.stop()); _faceStream = null; } }
 
+// Active-liveness capture: the server issues a random action challenge, we walk the user through it
+// while continuously sampling per-frame 68-pt landmarks + face descriptors, and submit the sequence.
+// The SERVER re-derives the blink/turn/consistency signals — the client is never trusted to self-assert.
+const LIVENESS_PROMPT = { blink: 'Blink a few times 👀', turn_left: 'Slowly turn your head LEFT ⬅️', turn_right: 'Slowly turn your head RIGHT ➡️' };
 async function captureFace() {
   const vid = $('#face-vid'), setStatus = m => { const el = $('#face-status'); if (el) el.textContent = m; };
   $('#face-capture').disabled = true;
-  setStatus('Detecting your face…');
   try {
+    setStatus('Starting a quick liveness check…');
+    const ch = await api('/verification/selfie/challenge', { method: 'POST' });
+    if (!ch || !ch.challengeId || !Array.isArray(ch.actions)) throw new Error('Could not start the liveness check — try again.');
     const opts = new faceapi.TinyFaceDetectorOptions({ inputSize: 416, scoreThreshold: 0.5 });
-    const det = await faceapi.detectSingleFace(vid, opts).withFaceLandmarks(true).withFaceDescriptor();
-    if (!det) { setStatus('No face detected — move into the light and try again.'); $('#face-capture').disabled = false; return; }
-    const faceDescriptor = Array.from(det.descriptor);
-    // Grab the current frame as the selfie image
+    const frames = [], startedAt = Date.now();
+    let lastDescriptor = null;
+    const sample = async () => {
+      const det = await faceapi.detectSingleFace(vid, opts).withFaceLandmarks(true).withFaceDescriptor();
+      if (det) {
+        frames.push({ landmarks: det.landmarks.positions.map(p => ({ x: p.x, y: p.y })), descriptor: Array.from(det.descriptor), t: Date.now() - startedAt });
+        lastDescriptor = Array.from(det.descriptor);
+      }
+    };
+    // Walk each prompted action (~2.5s each), sampling ~5 frames/second.
+    for (const action of ch.actions) {
+      setStatus(LIVENESS_PROMPT[action] || 'Follow the prompt on screen');
+      const until = Date.now() + 2500;
+      while (Date.now() < until) { await sample(); await new Promise(r => setTimeout(r, 200)); }
+    }
+    const minFrames = ch.minFrames || 8;
+    while (frames.length < minFrames && Date.now() - startedAt < 30000) { await sample(); await new Promise(r => setTimeout(r, 150)); }
+    if (frames.length < minFrames) { setStatus(''); toast('Could not capture enough frames — retry in good light.'); $('#face-capture').disabled = false; return; }
+
+    // Final frame = the selfie image + enrolled descriptor.
     const c = document.createElement('canvas');
     c.width = vid.videoWidth; c.height = vid.videoHeight;
     c.getContext('2d').drawImage(vid, 0, 0);
     const base64 = c.toDataURL('image/jpeg', 0.85).split(',')[1];
+
     setStatus('Verifying…');
-    const r = await api('/verification/selfie', { method: 'POST', body: { base64, faceDescriptor } });
+    const r = await api('/verification/selfie', { method: 'POST', body: { base64, challengeId: ch.challengeId, frames, faceDescriptor: lastDescriptor } });
     stopFaceStream();
     if (r.status === 'approved') { toast('Face verified — set as your first profile photo ✓'); await refreshUserAndRoute(); }
     else { setStatus(''); toast('Not verified: ' + (r.reason || 'please try again')); $('#face-capture').disabled = false; }
-  } catch (e) { setStatus(''); toast(e.message); $('#face-capture').disabled = false; }
+  } catch (e) { setStatus(''); toast(e.message || 'Verification failed — try again.'); $('#face-capture').disabled = false; }
 }
 
 // ---- Geometric read (opt-in): face geometry → a temperament READING ----
