@@ -33,7 +33,11 @@ async function eraseUser(id) {
     const storage = require('./storage');
     const vaultDocs = await VaultDocument.find({ ownerId: id });
     for (const d of vaultDocs) {
-      if (d.storageKey) await bestEffort(() => storage.deleteFile(d.storageKey, { private: true }), { op: 'erasure:vault-blob', userId });
+      // Vault blobs are written to the PUBLIC bucket (vault.storeDocument → storage.uploadFile → BUCKET)
+      // and deleted from it (vault.deleteDocument → storage.deleteFile with no opts). Erasure MUST target
+      // the SAME bucket — a stray { private: true } here deleted from the wrong bucket, silently leaving
+      // the encrypted identity blob recoverable after a "deleted" account (DPDP §2.8.4).
+      if (d.storageKey) await bestEffort(() => storage.deleteFile(d.storageKey), { op: 'erasure:vault-blob', userId });
     }
   }, { op: 'erasure:vault-blobs', userId });
   await bestEffort(() => require('../models/VaultDocument').deleteMany({ ownerId: id }), { op: 'erasure:vault-docs', userId });
@@ -50,6 +54,14 @@ async function eraseUser(id) {
     bestEffort(require('../models/LocationShare').deleteMany({ pair: id }), { op: 'erasure:location-shares', userId }),
     bestEffort(Message.updateMany({ from: id }, { text: '[deleted]', deleted: true }), { op: 'erasure:messages', userId }),
     bestEffort(Chat.updateMany({ participants: id }, { status: 'archived' }), { op: 'erasure:chats', userId }),
+    // Consultation-thread messages the user typed to a consultant — free text, attributable via `from`.
+    // Redact the content (mirrors the dating Message treatment); the consultant's thread stays intact.
+    bestEffort(require('../models/SessionMessage').updateMany({ from: id }, { text: '[deleted]' }), { op: 'erasure:session-messages', userId }),
+    // Community-room content + membership: both store the raw userId, and `handle` is a deterministic
+    // hash of (userId, roomId) — so a surviving userId re-links the "pseudonymous" posts. Redact the
+    // text and null the userId/handle linkage; drop the room memberships outright.
+    bestEffort(require('../models/RoomMessage').updateMany({ userId: id }, { text: '[deleted]', userId: null, handle: null }), { op: 'erasure:room-messages', userId }),
+    bestEffort(require('../models/RoomMember').deleteMany({ userId: id }), { op: 'erasure:room-members', userId }),
   ]);
   await User.deleteOne({ _id: id });   // frees the phone number for reuse
 }
