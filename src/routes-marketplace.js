@@ -290,6 +290,11 @@ router.post('/orders/:id/accept-gift', requireAuth, async (req, res, next) => {
   try {
     const order = await myGift(req, res); if (!order) return;
     if (order.giftStatus !== 'pending') return res.status(409).json({ error: 'This gift is no longer pending.' });
+    // Guard the MONEY state too (decline-gift already does): a cancel/refund can land while the recipient
+    // fills in their address, leaving giftStatus 'pending' on a reversed order (cancel/refund never touch
+    // giftStatus). Accepting then would store the recipient's private delivery PII on a dead order and
+    // falsely tell the buyer it'll ship. Only a live escrow-held gift ('paid') is acceptable.
+    if (!['paid', 'confirmed'].includes(order.status)) return res.status(409).json({ error: 'This gift is no longer available.' });
     let addr = null;
     if (order.kind === 'product') {
       addr = market.normalizeAddress(req.body && req.body.shippingAddress);
