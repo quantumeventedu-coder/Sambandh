@@ -115,6 +115,50 @@ async function decideIdDocument(user, buffer, idType, filename) {
   };
 }
 
+/**
+ * Decide a government-ID BADGE — optional, fully automated, no human review, no third party, and the
+ * document is NEVER stored (analysed in memory, then discarded). PURE. It combines three in-house
+ * signals so it needs no OCR/face provider:
+ *   • AUTHENTICITY (server-side, on the raw bytes): the AAV Trust Engine already ran; a 'reject' verdict
+ *     or a hard-fail (malware / polyglot / executable / tampered) refuses outright.
+ *   • IDENTITY: the face ON the ID must match the user's already-VERIFIED live selfie face (the enrolled,
+ *     proven-live descriptor). This is the real "this ID is yours" proof — fail CLOSED if it can't be
+ *     compared (no enrolled selfie face, or no readable face on the ID).
+ *   • NAME (soft): if the client OCR'd a name, a fuzzy match corroborates; it never alone decides.
+ * @param {{ trust:{decision?:string,hardFail?:boolean}, enrolledFace:number[]|null, idFace:number[]|null, profileName?:string, ocrName?:string }} a
+ * @returns {{ approved:boolean, checks:Array<{check:string,pass:boolean,detail?:string,soft?:boolean}>, reason:string }}
+ */
+function decideIdBadge({ trust, enrolledFace, idFace, profileName, ocrName }) {
+  const { isValidDescriptor, matchFaces } = require('./face-engine');
+  const checks = [];
+
+  const authentic = !!(trust && !trust.hardFail && trust.decision !== 'reject');
+  checks.push({ check: 'authenticity', pass: authentic, detail: authentic ? 'Document passed automated authenticity checks' : 'Automated authenticity check failed' });
+
+  const canMatch = isValidDescriptor(enrolledFace) && isValidDescriptor(idFace);
+  const faceMatch = canMatch && matchFaces(idFace, enrolledFace).matched;
+  checks.push({
+    check: 'id_face_match', pass: !!faceMatch,
+    detail: faceMatch ? 'The face on your ID matches your verified selfie'
+      : (canMatch ? 'The face on the ID does not match your verified selfie' : 'Could not read a clear face from the ID photo'),
+  });
+
+  if (ocrName && profileName) {
+    const sim = nameSimilarity(ocrName, profileName);
+    checks.push({ check: 'name_match', pass: sim >= 0.7, detail: `Name on document vs profile ${Math.round(sim * 100)}%`, soft: true });
+  }
+
+  const approved = authentic && !!faceMatch;
+  return {
+    approved,
+    checks,
+    reason: approved ? 'ID verified — authentic document whose face matches your verified selfie'
+      : (!authentic ? 'This document could not be verified. Please upload a clear photo of an original government ID.'
+        : (!canMatch ? 'We couldn’t read a clear face from your ID — upload a sharper, well-lit photo of the photo page.'
+          : 'The face on your ID does not match your verified selfie.')),
+  };
+}
+
 // Selfie: liveness + face match vs ID photo, instant decision
 async function decideSelfie(selfieBuffer, idPhotoBuffer) {
   const face = await matchFace(selfieBuffer, idPhotoBuffer);
@@ -185,4 +229,4 @@ function bindLiveIdentity(live, frames, clientFace, idFace) {
   };
 }
 
-module.exports = { decideIdDocument, decideSelfie, decideClaimDocument, nameSimilarity, bindLiveIdentity };
+module.exports = { decideIdDocument, decideIdBadge, decideSelfie, decideClaimDocument, nameSimilarity, bindLiveIdentity };
