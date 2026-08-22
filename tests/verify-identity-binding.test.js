@@ -28,6 +28,15 @@ describe('bindLiveIdentity', () => {
     expect(r.enrolledDesc).toEqual(ME);
   });
 
+  test('a REAL head-turned frame (drifts past 0.55 but within the liveness budget) is still accepted', () => {
+    // On a phone the last captured frame (a head turn) legitimately differs from the frontal frames by
+    // MORE than the 0.55 static cutoff — the old code false-rejected it at the mandatory selfie gate.
+    const DRIFTED = Array(128).fill(0.162);   // distance ≈0.70 from ME: > 0.55 (old reject) but < 0.9 (accept)
+    const r = bindLiveIdentity(LIVE, framesOf(ME), DRIFTED, null);
+    expect(r.approved).toBe(true);
+    expect(pass(r, 'enrolment_bound_to_live')).toBe(true);
+  });
+
   test('ENROLMENT POISONING is rejected: real live face but a stranger/junk enrol descriptor', () => {
     const r = bindLiveIdentity(LIVE, framesOf(ME), STRANGER, null);
     expect(r.approved).toBe(false);
