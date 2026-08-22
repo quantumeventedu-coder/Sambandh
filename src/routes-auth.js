@@ -58,7 +58,10 @@ const verifyOtpSchema = z.object({
 }).refine(d => d.email || d.phone, { message: 'Provide an email or phone' });
 
 // Latin letters + Devanagari script (names in English or Hindi)
-const NAME_RE = /^[A-Za-z\p{Script=Devanagari}][A-Za-z\p{Script=Devanagari} ]{0,49}$/u;
+// Any Unicode letter/mark (so Tamil/Telugu/Bengali/Kannada/Malayalam/Gurmukhi/Gujarati/Odia names —
+// the app's own audience — are accepted, not only Latin+Devanagari) plus common name punctuation
+// (space, apostrophe, hyphen, period) so D'Souza / Anne-Marie / A. work. No digits/symbols.
+const NAME_RE = /^[\p{L}\p{M}][\p{L}\p{M} .'-]{0,49}$/u;
 const signupSchema = z.object({
   firstName: z.string().regex(NAME_RE, 'Letters and spaces only'),
   displayName: z.string().max(50).optional(),
@@ -519,12 +522,17 @@ router.patch('/profile', requireAuth, async (req, res, next) => {
     if (d.photos) {
       const { photoBytesHash } = require('./services/risk-engine');
       const { classifyDecision } = require('./services/moderation');
-      // The verified selfie always stays pinned as the first (primary) photo
-      const selfiePhoto = (before.profile?.photos || []).find((/** @type {any} */ p) => p.fromSelfie);
+      // The verified selfie always stays pinned as the first (primary) photo. CRUCIALLY, carry over the
+      // EXISTING gallery photos too — the edit UI can only send NEWLY-picked files, so without this a
+      // user who adds one photo would silently lose every photo they already had (a destructive rebuild).
+      const existing = (before.profile?.photos || []);
+      const selfiePhoto = existing.find((/** @type {any} */ p) => p.fromSelfie);
+      const keptOthers = existing.filter((/** @type {any} */ p) => !p.fromSelfie && p.url)
+        .map((/** @type {any} */ p) => ({ url: p.url, isPrimary: false, uploadedAt: p.uploadedAt || new Date(), ...(p.moderation ? { moderation: p.moderation } : {}) }));
       /** @type {Array<Record<string, unknown>>} */
       const stored = selfiePhoto
-        ? [{ url: selfiePhoto.url, isPrimary: true, fromSelfie: true, uploadedAt: selfiePhoto.uploadedAt }]
-        : [];
+        ? [{ url: selfiePhoto.url, isPrimary: true, fromSelfie: true, uploadedAt: selfiePhoto.uploadedAt }, ...keptOthers]
+        : keptOthers.map((/** @type {any} */ p, /** @type {number} */ i) => ({ ...p, isPrimary: i === 0 }));
       const hashes = new Set(Array.isArray(before.photoHashes) ? before.photoHashes : []);
       const flaggedForReview = [];
       for (let i = 0; i < d.photos.length && stored.length < 6; i++) {
@@ -687,7 +695,11 @@ router.post('/google', ipLimit, async (req, res, next) => {
     if (!user) {
       user = await User.create({
         email, emailVerified: true, googleId: payload.sub, createdAt: new Date(),
-        profile: { firstName: (payload.given_name || '').slice(0, 50) },
+        // Do NOT seed profile.firstName from Google's given_name: onboardingStep() treats a present
+        // firstName as "profile done" and would SKIP the profile step — leaving gender/dob/city
+        // uncollected (invisible in the feed) and bypassing the 18+ check. Keep the name only as a
+        // prefill suggestion; the user still completes the profile step (which runs the 18+ gate).
+        profile: {}, googleGivenName: (payload.given_name || '').slice(0, 50),
         verification: { level: 'phone_only', trustScore: 10 },
         membership: { joinFeePaid: false, tier: 'free' },
         status: { active: true, suspended: false, banned: false }
