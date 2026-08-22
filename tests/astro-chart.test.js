@@ -35,6 +35,14 @@ describe('GET /astro/chart', () => {
     expect(r.body.nakshatra).toBeTruthy();
   });
 
+  test('an INVALID stored birth date does not 500 /transits (returns needsBirthData)', async () => {
+    // '2023-13-10' passes the shape regex but is not a real calendar date → computeChart returns null.
+    await User.create({ _id: UID, phone: '+919000000012', profile: { firstName: 'X' }, astrology: { birthDate: '2023-13-10' } });
+    const r = await request(app).get('/astro/transits');
+    expect(r.status).toBe(200);
+    expect(r.body.needsBirthData).toBe(true);
+  });
+
   test('a user with no birth data gets needsBirthData, not an error', async () => {
     await User.create({ _id: UID, phone: '+919000000011', profile: { firstName: 'A' }, astrology: {} });
     const r = await request(app).get('/astro/chart');

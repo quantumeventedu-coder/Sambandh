@@ -112,11 +112,12 @@ router.get('/', requireAuth, requireLaunched, async (req, res, next) => {
     if (req.query.showAnonymous === 'false') filter['preferences.anonymousModeEnabled'] = { $ne: true };
     if (req.query.onlineOnly === 'true') filter.lastActiveAt = { $gt: new Date(Date.now() - 24 * 3600 * 1000) };
 
-    // Karma-grade filtering is a Sambandh Max perk — validate before any DB work.
-    if (req.query.karmaGrade && req.query.karmaGrade !== 'any' && !maxTierActive(me)) {
-      return res.status(403).json({ error: 'Filtering by karma grade is a Sambandh Signature perk (CHF 25/month).', requiredTier: 'max' });
-    }
-    const wantGrade = req.query.karmaGrade && req.query.karmaGrade !== 'any' ? GRADE_MIN[req.query.karmaGrade] : null;
+    // Karma-grade filtering is a Sambandh Signature perk. An unentitled filter must NOT brick the whole
+    // feed with a 403 (the SPA offers the control to every tier, and the error screen has no way to
+    // revert it — the member gets stuck). Instead, silently IGNORE the filter and return the ranked feed;
+    // the client can surface the upsell separately.
+    const gradeEntitled = req.query.karmaGrade && req.query.karmaGrade !== 'any' && maxTierActive(me);
+    const wantGrade = gradeEntitled ? GRADE_MIN[req.query.karmaGrade] : null;
 
     // The recommender context only needs `me`, so start it now and let it run
     // in parallel with the candidate queries instead of after them.
