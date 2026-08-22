@@ -424,8 +424,9 @@ router.post('/complete-signup', requireAuth, async (req, res, next) => {
     if (!parsed.success) {
       // Name the ACTUAL failing field, not a fixed "name" hint — a blank gender/DOB was misreported as a
       // name error, sending users to re-edit a name that was already correct.
+      /** @type {Record<string, string>} */
       const LABELS = { firstName: 'your name (letters only)', gender: 'your gender', dob: 'your date of birth', city: 'your city', languages: 'at least one language' };
-      const field = parsed.error.issues[0].path[0];
+      const field = String(parsed.error.issues[0].path[0] || '');
       return res.status(400).json({ error: `Please complete: ${LABELS[field] || 'your details'}` });
     }
 
