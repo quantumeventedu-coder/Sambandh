@@ -939,14 +939,19 @@ function obId() {
   </div>`;
 }
 
-// Load the @vladmandic/face-api models (idempotent — a no-op once loaded by the selfie step).
+// Load the @vladmandic/face-api script + nets once (idempotent). Shared by the live-camera selfie path,
+// the photo fallback, and the ID-photo descriptor — so face detection works whether or not we ever got a
+// live stream. Sets _faceModelsReady so the readiness watcher knows Capture can be enabled.
 async function ensureFaceModels() {
+  if (_faceModelsReady) return;
   if (typeof faceapi === 'undefined') await loadScript(FACE_CDN);
+  try { if (faceapi.tf) { try { await faceapi.tf.setBackend('webgl'); } catch { /* fall back to CPU */ } if (faceapi.tf.ready) await faceapi.tf.ready(); } } catch { /* ignore */ }
   await Promise.all([
     faceapi.nets.tinyFaceDetector.loadFromUri(FACE_MODELS),
     faceapi.nets.faceLandmark68TinyNet.loadFromUri(FACE_MODELS),
     faceapi.nets.faceRecognitionNet.loadFromUri(FACE_MODELS),
   ]);
+  _faceModelsReady = true;
 }
 
 // Compute the face descriptor of the person ON the ID, in the browser. The server cross-checks it
@@ -991,13 +996,17 @@ function obSelfie() {
         <p id="face-status" class="hint center" style="margin-top:10px">Loading face model…</p>
         <button class="btn forest" id="face-capture" disabled onclick="captureFace()">Capture &amp; verify</button>
       </div>
+      <!-- Universal fallback — works even when another app (WhatsApp/Zoom/Teams) is holding the live
+           camera. On phones this opens the OS camera app; on desktop it lets you snap/upload a photo.
+           face-api detects on a still image just as well as on video, so this needs no live stream. -->
+      <input type="file" id="face-photo-input" accept="image/*" capture="user" style="display:none" onchange="onFacePhotoSelected(this)">
+      <button class="btn ghost" id="face-photo-btn" style="margin-top:10px" onclick="pickFacePhoto()">${ic('camera')} Camera busy? Take or upload a photo instead</button>
     </div>
     <details style="margin-top:14px"><summary class="hint" style="cursor:pointer">Camera not working?</summary>
-      <div class="hint mt" style="line-height:1.6">Verification needs a <b>live camera</b> — a single photo can't prove it's really you in the moment. If the preview is black or blocked:
+      <div class="hint mt" style="line-height:1.6">If the live preview is black or blocked — usually because another app (WhatsApp, Zoom, Teams) is using the camera — you don't have to close anything:
         <ul style="margin:6px 0 0 18px;padding:0">
-          <li>Close other apps using the camera (WhatsApp, Zoom, Meet), then reload.</li>
-          <li>Allow camera permission for this site (address-bar camera icon → Allow).</li>
-          <li>Open your laptop's privacy shutter, or try your phone / another browser.</li>
+          <li><b>Use “Take or upload a photo instead”</b> above — on a phone it opens your camera app; on a computer it lets you snap or pick a clear, front-facing photo.</li>
+          <li>Or allow camera permission for this site (address-bar camera icon → Allow) and open your laptop's privacy shutter.</li>
         </ul>
       </div>
     </details>
@@ -1080,18 +1089,16 @@ async function startFaceVerification() {
     startFacePlayback();
     // 3) Load the models AFTER the camera is already live (so a slow CDN doesn't delay the preview).
     setStatus('Loading face model…');
-    await loadScript(FACE_CDN);
-    try { if (faceapi.tf) { try { await faceapi.tf.setBackend('webgl'); } catch { /* fall back */ } if (faceapi.tf.ready) await faceapi.tf.ready(); } } catch { /* ignore */ }
-    await Promise.all([
-      faceapi.nets.tinyFaceDetector.loadFromUri(FACE_MODELS),
-      faceapi.nets.faceLandmark68TinyNet.loadFromUri(FACE_MODELS),
-      faceapi.nets.faceRecognitionNet.loadFromUri(FACE_MODELS)
-    ]);
-    _faceModelsReady = true;      // the readiness watcher will enable Capture once the frame is also live
+    await ensureFaceModels();
     watchFaceReady();             // re-evaluate now that models are in (in case the frame was live first)
   } catch (e) {
-    setStatus('');
-    toast(e.name === 'NotAllowedError' ? 'Camera blocked — tap the camera icon in the address bar and choose Allow, then reload.' : (e.message || 'Camera unavailable — close other apps using it, allow permission, then reload. See “Camera not working?”.'));
+    // The live camera is unavailable (blocked, or held exclusively by another app → NotReadableError).
+    // Don't dead-end: the photo fallback works without a live stream, so point straight at it.
+    setStatus(e && e.name === 'NotReadableError'
+      ? 'Your camera is busy — another app (WhatsApp / Zoom / Teams) is using it. Use “Take or upload a photo instead” below — no need to close anything.'
+      : (e && e.name === 'NotAllowedError' ? 'Camera blocked — allow it (address-bar camera icon), or use “Take or upload a photo instead” below.'
+        : 'Camera unavailable — use “Take or upload a photo instead” below.'));
+    const btn = $('#face-photo-btn'); if (btn) { btn.classList.add('forest'); btn.classList.remove('ghost'); }  // emphasise the fallback
   }
 }
 
@@ -1134,9 +1141,12 @@ function watchFaceReady() {
       setStatus('Tap the preview above to start your camera.');
     } else {                                                  // playing but black → camera busy/covered/dark
       if (tap) tap.style.display = 'none';
-      setStatus(Date.now() - started > 2500
-        ? 'Camera is on but the image is black — another app (WhatsApp / Zoom / Camera) is likely using it. Close that app, then tap “Verify with camera” again.'
-        : 'Warming up the camera…');
+      if (Date.now() - started > 2500) {
+        setStatus('Camera image is black — another app is likely using it. Use “Take or upload a photo instead” below — no need to close anything.');
+        const btn = $('#face-photo-btn'); if (btn) { btn.classList.add('forest'); btn.classList.remove('ghost'); }   // emphasise the fallback
+      } else {
+        setStatus('Warming up the camera…');
+      }
     }
   };
   tick();
@@ -1195,6 +1205,63 @@ async function captureFace() {
     // Not approved: keep the stream live for an in-place retry; re-arm the watcher to re-enable Capture.
     else { toast(r.reason || 'Not verified — center your face in good, even light and try again.'); watchFaceReady(); }
   } catch (e) { toast(e.message || 'Verification failed — try again.'); if (_faceStream) watchFaceReady(); else { const c = $('#face-capture'); if (c) c.disabled = false; } }
+}
+
+// ---- Photo fallback: verify from a still photo (no live stream needed) ----
+// This is the reliability answer to "another app is already using the camera". On phones the file input
+// (capture="user") opens the OS camera app, which grabs the camera at the OS level even when the browser's
+// getUserMedia is contended; on desktop it lets the user snap or pick a clear photo. We run the SAME
+// face-api detection on that image and submit the SAME { base64, faceDescriptor } — so it enrols and
+// duplicate-scans identically to the live path.
+function pickFacePhoto() { const i = $('#face-photo-input'); if (i) { i.value = ''; i.click(); } }
+
+async function onFacePhotoSelected(input) {
+  const file = input && input.files && input.files[0];
+  if (!file) return;
+  const setStatus = m => { const el = $('#face-status'); if (el) el.textContent = m; };
+  const stage = $('#face-live'); if (stage) stage.style.display = 'block';   // ensure the status line is visible
+  const btn = $('#face-photo-btn'), cap = $('#face-capture');
+  if (btn) btn.disabled = true; if (cap) cap.disabled = true;
+  let img = null;
+  try {
+    stopFaceStream();                                    // the photo path doesn't use the live camera — release it
+    setStatus('Loading face model…');
+    await ensureFaceModels();
+    setStatus('Detecting your face…');
+    img = await fileToImage(file);
+    const opts = new faceapi.TinyFaceDetectorOptions({ inputSize: 416, scoreThreshold: 0.5 });
+    const det = await faceapi.detectSingleFace(img, opts).withFaceLandmarks(true).withFaceDescriptor();
+    if (!det || !det.descriptor) { setStatus(''); toast('No face detected in that photo — use a clear, front-facing photo in good, even light.'); if (btn) btn.disabled = false; return; }
+
+    const descriptor = Array.from(det.descriptor);
+    const base64 = imageToJpegBase64(img, 720);          // downscale big phone photos before upload
+    setStatus('Verifying…');
+    const r = await api('/verification/selfie', { method: 'POST', body: { base64, faceDescriptor: descriptor } });
+    if (r.status === 'approved') { toast('Face verified — set as your first profile photo ✓'); await refreshUserAndRoute(); }
+    else { setStatus(''); toast(r.reason || 'Not verified — use a clear, front-facing photo in good light.'); if (btn) btn.disabled = false; }
+  } catch (e) { setStatus(''); toast(e.message || 'Could not read that photo — try another.'); if (btn) btn.disabled = false; }
+  finally { if (img && img.src) { try { URL.revokeObjectURL(img.src); } catch { /* ignore */ } } }
+}
+
+// Load a File into an HTMLImageElement via an object URL (caller revokes it).
+function fileToImage(file) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = () => { try { URL.revokeObjectURL(url); } catch { /* ignore */ } reject(new Error('Could not read that image — try another photo.')); };
+    img.src = url;
+  });
+}
+
+// Draw an image onto a canvas, downscaled so its longest edge is <= maxEdge, → JPEG base64 (no data: prefix).
+function imageToJpegBase64(img, maxEdge) {
+  const w = img.naturalWidth || img.width, h = img.naturalHeight || img.height;
+  const scale = Math.min(1, maxEdge / Math.max(w, h || 1));
+  const cw = Math.max(1, Math.round(w * scale)), ch = Math.max(1, Math.round(h * scale));
+  const c = document.createElement('canvas'); c.width = cw; c.height = ch;
+  c.getContext('2d').drawImage(img, 0, 0, cw, ch);
+  return c.toDataURL('image/jpeg', 0.85).split(',')[1];
 }
 
 // ---- Geometric read (opt-in): face geometry → a temperament READING ----
