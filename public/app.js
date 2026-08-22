@@ -1174,21 +1174,21 @@ async function runBodyReadFromVideo(videoEl) {
 function obProfession() {
   return `<div class="section-pad">
     <h1>What do you do?</h1>
-    <p class="sub">Every profession on Sambandh is verified. Doctors, lawyers, CAs and architects verify instantly against public registries.</p>
+    <p class="sub">Add a verified profession badge. Your document is read in your browser and checked on our server — it's <b>never stored</b>. Doctors, lawyers, CAs and architects are checked against the public registry.</p>
     <div class="field"><label>Category</label><select aria-label="Profession category" id="ob-cat" onchange="obCatChange()">
       <option value="engineer">Engineer / Tech</option>
-      <option value="doctor">Doctor (instant ✓)</option>
-      <option value="lawyer">Lawyer (instant ✓)</option>
-      <option value="ca">Chartered Accountant (instant ✓)</option>
-      <option value="architect">Architect (instant ✓)</option>
+      <option value="doctor">Doctor (registry)</option>
+      <option value="lawyer">Lawyer (registry)</option>
+      <option value="ca">Chartered Accountant (registry)</option>
+      <option value="architect">Architect (registry)</option>
       <option value="designer">Designer / Creator</option>
       <option value="business_owner">Business owner</option>
       <option value="student">Student</option>
       <option value="other">Other</option></select></div>
     <div class="field"><label>Job title</label><input aria-label="Profession title" id="ob-title" placeholder="e.g. Product Designer"/></div>
     <div class="field"><label>Company / Institution</label><input aria-label="Company" id="ob-company" placeholder="e.g. Infosys"/></div>
-    <div id="ob-reg" style="display:none" class="field"><label>Registration number</label><input aria-label="Registration number" id="ob-regno" placeholder="e.g. NMC/BCI/ICAI number"/><div class="hint">Checked against the public registry — verifies instantly.</div></div>
-    <div id="ob-docs" class="field"><label>Proof document (offer letter / company ID / college ID)</label><input aria-label="Profession document" id="ob-doc" type="file" accept="image/*,.pdf"/><div class="hint">Automated document check — instant. The document must name your employer. No human reviews it.</div></div>
+    <div id="ob-reg" style="display:none" class="field"><label>Registration number</label><input aria-label="Registration number" id="ob-regno" placeholder="e.g. NMC/BCI/ICAI number"/><div class="hint">Checked against the public registry.</div></div>
+    <div id="ob-docs" class="field"><label>Proof document (offer letter / company ID / college ID)</label><input aria-label="Profession document" id="ob-doc" type="file" accept="image/*"/><div class="hint">Read in your browser to confirm it names your employer, checked for authenticity on our server, then <b>discarded</b> — never stored. Use a clear, well-lit photo.</div></div>
     <button class="btn" onclick="obSendProfession()">Verify instantly</button>
     <button class="btn ghost" onclick="S.user._skippedProfession=true;renderOnboarding()">Skip for now</button>
     <p class="hint center" style="margin-top:6px">You can add a verified profession later from your profile — it's optional.</p>
@@ -1199,6 +1199,19 @@ function obCatChange() {
   const registry = ['doctor', 'lawyer', 'ca', 'architect'].includes($('#ob-cat').value);
   $('#ob-reg').style.display = registry ? 'block' : 'none';
   $('#ob-docs').style.display = registry ? 'none' : 'block';
+}
+
+// OCR a proof document IN THE BROWSER (tesseract.js) so the server can confirm it names the employer
+// without ever storing the image. Best-effort: returns '' if it can't read (e.g. a PDF or a blurry photo).
+const TESSERACT_CDN = 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js';
+async function ocrDocumentText(file) {
+  try {
+    if (typeof Tesseract === 'undefined') await loadScript(TESSERACT_CDN);
+    const url = URL.createObjectURL(file);
+    const { data } = await Tesseract.recognize(url, 'eng');
+    URL.revokeObjectURL(url);
+    return (data && data.text) || '';
+  } catch { return ''; }
 }
 
 async function obSendProfession() {
@@ -1218,11 +1231,15 @@ async function obSendProfession() {
     } else {
       const f = $('#ob-doc').files[0];
       if (!f) return toast('Upload a proof document');
+      if (!body.company) return toast('Enter your company / institution first');
+      toast('Reading your document…');
+      body.ocrText = await ocrDocumentText(f);           // read the text in-browser; the image is never stored
       body.documents = [{ type: 'offer_letter', base64: await fileToUploadBase64(f), filename: f.name }];
     }
     const r = await api('/verification/profession', { method: 'POST', body });
-    if (r.status === 'approved') { toast('Profession verified instantly ✓'); await refreshUserAndRoute(); }
-    else toast('Not verified: ' + (r.reason || 'document check failed') + '. Upload a document that names your employer.');
+    if (r.status === 'approved') { toast('Profession verified ✓'); await refreshUserAndRoute(); }
+    else if (r.status === 'in_review') { toast(r.reason || 'Submitted for registry verification.'); await refreshUserAndRoute(); }
+    else toast('Not verified: ' + (r.reason || 'the document must clearly name your employer') + '. Try a sharper, well-lit photo.');
   } catch (e) { toast(e.message); }
 }
 

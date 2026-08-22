@@ -19,7 +19,7 @@ const Notification = require('./models/Notification');
 const { requireAuth, requireAdmin } = require('./routes-auth');
 const crypto = require('crypto');
 const { uploadToR2, uploadPrivate } = require('./services/storage');
-const { decideSelfie, decideClaimDocument, bindLiveIdentity, decideIdBadge } = require('./services/verify-engine');
+const { decideSelfie, decideClaimDocument, bindLiveIdentity, decideIdBadge, decideProfessionDoc } = require('./services/verify-engine');
 const liveness = require('./services/liveness-engine');
 const LivenessChallenge = require('./models/LivenessChallenge');
 const { atomicUpdate } = require('./db/atomic');
@@ -309,7 +309,10 @@ const submitProfessionSchema = z.object({
     type: z.enum(['offer_letter', 'company_id', 'salary_slip', 'gst_certificate', 'college_id', 'portfolio']),
     base64: z.string(),
     filename: z.string()
-  })).optional().default([])
+  })).optional().default([]),
+  // The document's text, OCR'd IN THE BROWSER (tesseract.js) — the server checks it names the declared
+  // employer. The document image itself is analysed in memory server-side and never stored.
+  ocrText: z.string().max(20000).optional()
 });
 
 router.post('/profession', requireAuth, async (req, res, next) => {
@@ -327,41 +330,47 @@ router.post('/profession', requireAuth, async (req, res, next) => {
       return res.status(400).json({ error: 'Upload a document naming your employer, or provide a registration number for registry-check professions' });
     }
 
+    // Only non-image VALUE references are ever persisted (a link / a number). The proof DOCUMENT itself
+    // is analysed in memory and never stored — no storage inflation, nothing to leak later.
     const uploadedDocs = [];
-    for (const doc of d.documents) {
-      const buffer = Buffer.from(doc.base64, 'base64');
-      const key = `verification/${req.userId}/profession/${Date.now()}_${crypto.randomBytes(8).toString('hex')}_${doc.filename}`;
-      await uploadPrivate(key, buffer, getMimeType(doc.filename));   // PRIVATE bucket
-      uploadedDocs.push({ type: doc.type, key, private: true, uploadedAt: new Date() });
-    }
     if (d.linkedinUrl) uploadedDocs.push({ type: 'linkedin_link', value: d.linkedinUrl, uploadedAt: new Date() });
     if (d.registrationNumber) uploadedDocs.push({ type: 'registration_number', value: d.registrationNumber, uploadedAt: new Date() });
 
-    // Instant decision: registry lookup, or automated document-content check
     let decision;
     if (isRegistry) {
-      // Production: query the public registry by number, fuzzy-match the name
+      // FAIL CLOSED: a regulated-profession badge (doctor/lawyer/CA/architect) must NOT auto-approve on
+      // an unchecked number — that would mint fake credentials. Until a real public-registry lookup is
+      // wired, route to review (never an instant fake pass).
       decision = {
-        approved: true,
-        checks: [{ check: 'registry_lookup', pass: true, detail: `Found in ${REGISTRY_PROFESSIONS[d.category]}` }],
-        reason: `Verified via ${REGISTRY_PROFESSIONS[d.category]}`
+        approved: false, review: true,
+        checks: [{ check: 'registry_lookup', pass: false, detail: `Submitted for ${REGISTRY_PROFESSIONS[d.category]} verification` }],
+        reason: `Submitted for verification against ${REGISTRY_PROFESSIONS[d.category]}.`,
       };
     } else {
+      // Document path — analyse the bytes in memory, then discard. Authenticity (Trust Engine) + the
+      // document naming the declared employer (from the client's OCR text). No image is stored.
       const first = d.documents[0];
-      decision = await decideClaimDocument(Buffer.from(first.base64, 'base64'), first.filename, d.company);
+      const buffer = Buffer.from(first.base64, 'base64');
+      const trust = await require('./services/trust').evaluateDocument(buffer, { filename: first.filename, ip: req.ip, userId: req.userId });
+      await bestEffort(require('./models/AuditLog').create({
+        actor: 'aav-trust-engine', action: 'profession_document_evaluated', targetType: 'user', targetId: String(req.userId),
+        detail: { decision: trust.decision, score: trust.score, hardFail: trust.hardFail, fileType: trust.fileType, evidenceHash: trust.evidenceHash },
+      }), { op: 'verification:profession-trust-audit', userId: String(req.userId) });
+      decision = decideProfessionDoc({ trust, company: d.company, ocrText: d.ocrText });
+      decision.evidenceHash = trust.evidenceHash;
     }
 
     const verification = await Verification.create({
       userId: req.userId,
       type: 'profession',
-      claim: { title: d.title, company: d.company, category: d.category, startDate: d.startDate, checks: decision.checks },
-      documents: uploadedDocs,
-      status: decision.approved ? 'approved' : 'rejected',
+      claim: { title: d.title, company: d.company, category: d.category, startDate: d.startDate, checks: decision.checks, evidenceHash: decision.evidenceHash },
+      documents: uploadedDocs,   // never an image key — only value refs (link / number)
+      status: decision.approved ? 'approved' : (decision.review ? 'in_review' : 'rejected'),
       submittedAt: new Date(),
-      reviewedAt: new Date(),
-      reviewedBy: 'auto-verify-engine',
+      reviewedAt: decision.review ? undefined : new Date(),
+      reviewedBy: decision.review ? 'registry-pending' : 'auto-verify-engine',
       reviewMethod: isRegistry ? 'api_lookup' : 'automated',
-      rejectionReason: decision.approved ? undefined : decision.reason,
+      rejectionReason: decision.approved || decision.review ? undefined : decision.reason,
       expiresAt: new Date(Date.now() + 365 * 86400000) // profession expires after 12 months
     });
 
@@ -374,6 +383,12 @@ router.post('/profession', requireAuth, async (req, res, next) => {
     if (decision.approved) {
       await applyApproval(verification);
       track('profession_verified', req.userId, { category: d.category, method: verification.reviewMethod });
+    } else if (decision.review) {
+      await Notification.create({
+        userId: req.userId, type: 'verification_pending', severity: 'info',
+        title: 'Profession submitted for verification',
+        body: decision.reason
+      });
     } else {
       await Notification.create({
         userId: req.userId, type: 'verification_rejected', severity: 'warning',
