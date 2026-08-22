@@ -98,6 +98,21 @@ router.get('/:chatId/messages', requireAuth, requireLaunched, async (req, res, n
       return res.status(404).json({ error: 'Chat not found' });
     }
 
+    // Polling path: `?after=<createdAt>` returns only NEWER messages, ascending. The web app polls this
+    // to receive incoming messages because Socket.io realtime is unavailable on serverless (Vercel).
+    if (req.query.after) {
+      const after = new Date(req.query.after);
+      const fresh = await Message.find({
+        chatId: chat._id,
+        createdAt: { $gt: after },
+        deleted: false
+      }).sort({ createdAt: 1 }).limit(100);
+      await Message.updateMany(
+        { chatId: chat._id, to: req.userId, readAt: null },
+        { readAt: new Date() });
+      return res.json({ messages: fresh });
+    }
+
     const before = req.query.before ? new Date(req.query.before) : new Date();
     const messages = await Message.find({
       chatId: chat._id,

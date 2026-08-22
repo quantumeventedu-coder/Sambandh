@@ -819,7 +819,7 @@ const OB_STEPS = ['profile', 'pay', 'selfie', 'intent', 'photos', 'id', 'profess
 // other flows) reload S.user from /auth/me — which would wipe flags stored on the user object and bounce
 // someone who skipped ID (then verified a profession) straight back to the ID step. Cleared on reload,
 // where the persisted onboarding.completedAt takes over for a returning user.
-const _obSkips = { id: false, profession: false, astro: false };
+const _obSkips = { id: false, profession: false, astro: false, photos: false };
 
 function onboardingStep() {
   const u = S.user;
@@ -828,7 +828,9 @@ function onboardingStep() {
   if (!u.membership?.joinFeePaid) return 'pay';                 // register by payment first
   if (!u.verification?.selfieVerified) return 'selfie';         // real face verification = required
   if (!(u.intent || []).length) return 'intent';
-  if (!(u.profile?.photos || []).length) return 'photos';
+  // Prompt for real gallery photos — but count only NON-selfie photos, else the verified selfie (which the
+  // selfie step already wrote as photo #1) auto-satisfies this and the step is never shown. Skippable.
+  if (!(u.profile?.photos || []).some(p => !p.fromSelfie) && !_obSkips.photos) return 'photos';
   // Required steps done. The optional badge steps are offered ONCE during first onboarding, but must
   // NEVER re-gate a returning user — the persisted flag settles it; the in-session _obSkips settle a skip
   // made mid-run (which survives the /auth/me reloads that replace S.user).
@@ -1650,6 +1652,7 @@ function obPhotos() {
     <input aria-label="Add photos" id="ob-photo-input" type="file" accept="image/*" multiple style="display:none" onchange="obAddPhotos(this.files)"/>
     <button class="btn" onclick="obSavePhotos()" id="ob-photos-save" disabled>Finish & start discovering</button>
     <button class="btn ghost" onclick="document.getElementById('ob-photo-input').click()">+ Add photo</button>
+    <button class="btn ghost" onclick="_obSkips.photos=true;renderOnboarding()">Skip for now — use my verified selfie</button>
   </div>`;
 }
 
@@ -2173,6 +2176,10 @@ let currentChat = null;
 
 async function renderChat(chatId) {
   currentChat = chatId;
+  // Per-chat state for the polling fallback (Socket.io is unavailable on serverless). `seen` dedupes by
+  // message id so a message delivered by BOTH the socket and the poll (non-serverless) shows once.
+  if (S._chat && S._chat.timer) clearInterval(S._chat.timer);
+  S._chat = { chatId, last: null, seen: new Set(), timer: null };
   screen.innerHTML = `<div class="chat-screen">
     <div class="chat-head">
       <button class="back" onclick="nav('#/chats')">←</button>
@@ -2205,18 +2212,39 @@ async function renderChat(chatId) {
     msgs.innerHTML = `<div class="bubble sys">You're chatting. Your conduct shapes your Lakshan score.</div>`;
     r.messages.forEach(appendMessage);
     if (S.socket) S.socket.emit('join_chat', { chatId });
+    // Poll for incoming messages every 3.5s while this chat is open. On serverless (Vercel) Socket.io is
+    // dead, so this is the ONLY way the other person's messages arrive live; on a realtime host the socket
+    // delivers first and the poll just no-ops (deduped by id). Self-clears when the user leaves the chat.
+    S._chat.timer = setInterval(() => {
+      if (location.hash === '#/chat/' + chatId) pollChat(chatId);
+      else if (S._chat && S._chat.timer) clearInterval(S._chat.timer);
+    }, 3500);
   } catch (e) { toast(e.message); }
+}
+
+// Fetch and append only messages newer than the newest we've shown (or the recent tail on first poll).
+async function pollChat(chatId) {
+  if (!S._chat || S._chat.chatId !== chatId) return;
+  try {
+    const after = S._chat.last ? `?after=${encodeURIComponent(S._chat.last)}` : '';
+    const r = await api(`/chat/${chatId}/messages${after}`);
+    (r.messages || []).forEach(appendMessage);
+  } catch { /* transient network error — keep polling */ }
 }
 
 function appendMessage(m) {
   const msgs = $('#msgs');
   if (!msgs) return;
+  // Dedupe by id so the socket path and the poll path can't double-render the same message.
+  if (m && m._id && S._chat) { if (S._chat.seen.has(m._id)) return; S._chat.seen.add(m._id); }
   const mine = m.from === S.user?._id;
   const div = document.createElement('div');
   div.className = 'bubble ' + (m.type === 'system' ? 'sys' : mine ? 'me' : 'them');
   div.innerHTML = esc(m.text) + (m.type !== 'system' ? `<time>${new Date(m.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</time>` : '');
   msgs.appendChild(div);
   msgs.scrollTop = msgs.scrollHeight;
+  // Track the newest timestamp so the next poll only asks for messages after it.
+  if (m && m.createdAt && S._chat && (!S._chat.last || new Date(m.createdAt) > new Date(S._chat.last))) S._chat.last = m.createdAt;
 }
 
 async function sendMsg(chatId) {
