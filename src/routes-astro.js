@@ -141,6 +141,7 @@ router.post('/ask', requireAuth, async (req, res, next) => {
     const user = await User.findById(req.userId).lean();
     if (!user?.astrology?.birthDate) return res.json({ answer: 'Add your birth date, time and place first so I can read your chart.', needsBirthData: true });
     const chart = engine.computeChart(user.astrology);
+    if (!chart) return res.json({ answer: 'Your birth date looks invalid — please re-enter it so I can read your chart.', needsBirthData: true });
     const context = summarize(chart, user.profile?.firstName);
 
     if (process.env.ANTHROPIC_API_KEY) {
@@ -167,6 +168,7 @@ router.get('/transits', requireAuth, async (req, res, next) => {
     const user = await User.findById(req.userId).lean();
     if (!user?.astrology?.birthDate) return res.json({ transits: null, needsBirthData: true });
     const chart = engine.computeChart(user.astrology);
+    if (!chart) return res.json({ transits: null, needsBirthData: true });
     res.json({ transits: engine.transits(chart), source: 'computed (astronomy)' });
   } catch (e) { next(e); }
 });
@@ -183,6 +185,7 @@ router.get('/compat/:userId', requireAuth, requireLaunched, async (req, res, nex
     if (!me?.astrology?.birthDate || !other?.astrology?.birthDate) return res.json({ compat: null, needsBirthData: true });
     const type = ['romance', 'friendship', 'business'].includes(req.query.type) ? req.query.type : 'romance';
     const a = engine.computeChart(me.astrology), b = engine.computeChart(other.astrology);
+    if (!a || !b) return res.json({ compat: null, needsBirthData: true });
     res.json({ compat: engine.relationshipCompat(a, b, type), type });
   } catch (e) { next(e); }
 });
