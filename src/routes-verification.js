@@ -221,7 +221,14 @@ router.post('/selfie', requireAuth, async (req, res, next) => {
       // Dedup on the PROVEN-LIVE face (ban-evasion / duplicate-identity), not a poisonable client field.
       if (decision.approved && enrolledDesc) faceDuplicates = await scanForDuplicateFace(req.userId, enrolledDesc);
     } else {
-      decision = await decideSelfie(buffer, null);   // dev sim / fail-closed in prod (no provider, no frames)
+      // No liveness challenge/frames. The live-camera challenge is the ONLY valid selfie path; in dev the
+      // simulator still runs, but in production there is no provider — so return a CLEAR message instead
+      // of letting decideSelfie() throw a 500 (e.g. a stale cached client or a direct API call).
+      try {
+        decision = await decideSelfie(buffer, null);
+      } catch {
+        return res.status(400).json({ error: 'Live camera verification is required — tap “Verify with camera” and complete the on-screen check.' });
+      }
       if (clientFace && isValidDescriptor(clientFace)) {
         enrolledDesc = clientFace;                                                // dev-only path (no live frames)
         faceDuplicates = await scanForDuplicateFace(req.userId, clientFace);
