@@ -19,7 +19,7 @@ const Notification = require('./models/Notification');
 const { requireAuth, requireAdmin } = require('./routes-auth');
 const crypto = require('crypto');
 const { uploadToR2, uploadPrivate } = require('./services/storage');
-const { decideSelfie, decideClaimDocument, bindLiveIdentity, decideIdBadge, decideProfessionDoc } = require('./services/verify-engine');
+const { decideSelfie, bindLiveIdentity, decideIdBadge, decideProfessionDoc } = require('./services/verify-engine');
 const liveness = require('./services/liveness-engine');
 const LivenessChallenge = require('./models/LivenessChallenge');
 const { atomicUpdate } = require('./db/atomic');
@@ -413,7 +413,8 @@ const educationSchema = z.object({
   degree: z.string().min(2).max(100),
   institution: z.string().min(2).max(150),
   year: z.number().min(1960).max(2030),
-  documents: z.array(z.object({ base64: z.string(), filename: z.string() })).min(1)
+  documents: z.array(z.object({ base64: z.string(), filename: z.string() })).min(1),
+  ocrText: z.string().max(20000).optional()   // in-browser OCR of the degree/certificate
 });
 
 router.post('/education', requireAuth, async (req, res, next) => {
@@ -422,22 +423,19 @@ router.post('/education', requireAuth, async (req, res, next) => {
     if (!parsed.success) return res.status(400).json({ error: 'Invalid submission' });
     const d = parsed.data;
 
-    const uploadedDocs = [];
-    for (const doc of d.documents) {
-      const buffer = Buffer.from(doc.base64, 'base64');
-      const key = `verification/${req.userId}/education/${Date.now()}_${crypto.randomBytes(8).toString('hex')}_${doc.filename}`;
-      await uploadPrivate(key, buffer, getMimeType(doc.filename));   // PRIVATE bucket
-      uploadedDocs.push({ type: 'degree', key, private: true, uploadedAt: new Date() });
-    }
-
+    // Analyse the certificate in memory (authenticity + it names the institution), then discard it —
+    // never stored, same as ID/profession. Only value refs would ever be persisted (none here).
     const first = d.documents[0];
-    const decision = await decideClaimDocument(Buffer.from(first.base64, 'base64'), first.filename, d.institution);
+    const buffer = Buffer.from(first.base64, 'base64');
+    const trust = await require('./services/trust').evaluateDocument(buffer, { filename: first.filename, ip: req.ip, userId: req.userId });
+    const decision = decideProfessionDoc({ trust, company: d.institution, ocrText: d.ocrText });  // "employer" = institution
+    decision.evidenceHash = trust.evidenceHash;
 
     const verification = await Verification.create({
       userId: req.userId,
       type: 'education',
-      claim: { degree: d.degree, institution: d.institution, year: d.year, checks: decision.checks },
-      documents: uploadedDocs,
+      claim: { degree: d.degree, institution: d.institution, year: d.year, checks: decision.checks, evidenceHash: decision.evidenceHash },
+      documents: [],   // certificate analysed in memory, never stored
       status: decision.approved ? 'approved' : 'rejected',
       submittedAt: new Date(),
       reviewedAt: new Date(),
@@ -560,10 +558,5 @@ async function applyApproval(verification) {
 // 30 ID + 15 selfie + 20 profession + 10 education + 10 income + 5 clean 30-day
 // record = max 100) so the write path here and the read/surface paths can't drift.
 const { computeTrustScore } = require('./services/trust-score');
-
-function getMimeType(filename) {
-  const ext = filename.split('.').pop().toLowerCase();
-  return { jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', pdf: 'application/pdf' }[ext] || 'application/octet-stream';
-}
 
 module.exports = router;
