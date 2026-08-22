@@ -72,6 +72,8 @@ const signupSchema = z.object({
 const profileSchema = z.object({
   bio: z.string().max(500).optional(),
   displayName: z.string().max(50).optional(),
+  onboarded: z.boolean().optional(),   // set once the required onboarding steps are done — stops optional badges re-gating a returning user
+
   languages: z.array(z.string()).min(1).optional(),
   city: z.string().optional(),
   intent: z.array(z.enum(['marriage', 'dating', 'casual', 'friendship', 'networking'])).min(1).max(2).optional(),
@@ -418,8 +420,12 @@ router.post('/complete-signup', requireAuth, async (req, res, next) => {
     const parsed = signupSchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: 'Fill all fields correctly (name: letters only)' });
 
+    // Accept ANY city the user types. The cities list only supplies lat/lng for distance matching; an
+    // unlisted town/village/foreign city is stored by name (distance matching simply skips it — it must
+    // NEVER block onboarding, which was leaving users stuck at the profile step).
     const city = findCity(parsed.data.city);
-    if (!city) return res.status(400).json({ error: 'Please pick a city from the list' });
+    const cityName = (city && city.name) || String(parsed.data.city || '').trim();
+    if (!cityName) return res.status(400).json({ error: 'Enter your city' });
 
     const dob = new Date(parsed.data.dob);
     const age = Math.floor((Date.now() - dob.getTime()) / (365.25 * 24 * 60 * 60 * 1000));
@@ -431,13 +437,13 @@ router.post('/complete-signup', requireAuth, async (req, res, next) => {
       'profile.gender': parsed.data.gender,
       'profile.dob': parsed.data.dob,
       'profile.age': age,
-      'profile.city': city.name,
-      'profile.state': city.state,
+      'profile.city': cityName,
+      'profile.state': (city && city.state) || '',
       'profile.country': 'IN',
       'profile.languages': parsed.data.languages
     }, { new: true });
 
-    track('signup_completed', req.userId, { city: city.name, gender: parsed.data.gender });
+    track('signup_completed', req.userId, { city: cityName, gender: parsed.data.gender });
     res.json({ ok: true, user });
   } catch (err) { next(err); }
 });
@@ -472,12 +478,12 @@ router.patch('/profile', requireAuth, async (req, res, next) => {
     if (d.displayName) updates['profile.displayName'] = d.displayName;
     if (d.languages) updates['profile.languages'] = d.languages;
     if (d.city) {
-      const city = findCity(d.city);
-      if (!city) return res.status(400).json({ error: 'Please pick a city from the list' });
-      updates['profile.city'] = city.name;
-      updates['profile.state'] = city.state;
+      const city = findCity(d.city);   // list is only for lat/lng; any typed city is accepted
+      updates['profile.city'] = (city && city.name) || String(d.city).trim();
+      updates['profile.state'] = (city && city.state) || '';
     }
     if (d.intent) updates.intent = d.intent;
+    if (d.onboarded) updates['onboarding.completedAt'] = new Date();   // idempotent: marks first-time onboarding complete
     if (d.interestedInGenders) updates['preferences.interestedInGenders'] = d.interestedInGenders;
     // Self-declared features. null → remove the whole nature profile (and its
     // provenance); otherwise dotted paths so a partial update keeps untouched
