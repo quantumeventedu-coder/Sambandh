@@ -68,6 +68,47 @@ router.get('/stats', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+// ---- Storage cleanup: reclaim stored verification-document originals -------
+// ID / profession / education images are now analysed IN MEMORY and never stored, but originals
+// uploaded BEFORE that change may still sit in the private bucket. These report + hard-delete them on
+// demand: the verification RECORDS and verdicts are kept — only the raw image blobs (and any value
+// refs like links/numbers are retained) are removed, reclaiming storage safely.
+router.get('/storage-report', async (_req, res, next) => {
+  try {
+    const vs = await Verification.find({}).lean();
+    let records = 0, blobs = 0;
+    for (const v of vs) {
+      const keyed = (v.documents || []).filter((/** @type {any} */ d) => d && d.key);
+      if (keyed.length) { records++; blobs += keyed.length; }
+    }
+    res.json({
+      verificationRecords: vs.length, recordsHoldingStoredDocs: records, storedDocumentBlobs: blobs,
+      note: 'Uploaded ID/profession/education images are now analysed in memory; any blobs here predate that change and are safe to purge (verdicts are kept).'
+    });
+  } catch (err) { next(err); }
+});
+
+router.post('/purge-verification-documents', async (req, res, next) => {
+  try {
+    if (!req.body || req.body.confirm !== true) {
+      return res.status(400).json({ error: 'Pass { confirm: true } to hard-delete stored verification-document originals (verdicts are kept).' });
+    }
+    const docRetention = require('./services/doc-retention');
+    const vs = await Verification.find({}).lean();
+    let files = 0, cleared = 0;
+    for (const v of vs) {
+      const keyed = (v.documents || []).filter((/** @type {any} */ d) => d && d.key);
+      if (!keyed.length) continue;
+      files += await docRetention.deleteDocs(keyed);                                        // hard-delete the stored blobs
+      const kept = (v.documents || []).filter((/** @type {any} */ d) => !(d && d.key));      // keep value refs (link/number)
+      await Verification.findByIdAndUpdate(v._id, { $set: { documents: kept, documentsPurgedAt: new Date() } });
+      cleared++;
+    }
+    await audit('purge_verification_documents', 'system', 'bulk', { files, records: cleared });
+    res.json({ ok: true, deletedFiles: files, recordsCleared: cleared, message: `Reclaimed ${files} stored document original(s) across ${cleared} record(s). All verdicts kept.` });
+  } catch (err) { next(err); }
+});
+
 // ---- Pre-launch gate (early-access mode) ----------------------------------
 // GET → current state + registration counts; PUT { prelaunch:boolean } → flip it.
 router.get('/prelaunch', async (req, res, next) => {
