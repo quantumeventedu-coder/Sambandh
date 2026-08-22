@@ -822,10 +822,23 @@ function onboardingStep() {
   if (!u.verification?.selfieVerified) return 'selfie';         // real face verification = required
   if (!(u.intent || []).length) return 'intent';
   if (!(u.profile?.photos || []).length) return 'photos';
+  // Required steps done. The optional badge steps are offered ONCE during first onboarding, but must
+  // NEVER re-gate a returning user — otherwise someone who skipped them is bounced back into onboarding
+  // on every login (the per-step "skip" only lives in memory). The persisted flag settles it.
+  if (u.onboarding?.completedAt) return 'done';
   if (!u.verification?.idVerified && !u._skippedId) return 'id';                          // optional
   if (!u.claims?.profession?.verified && !u._skippedProfession) return 'profession';      // optional
   if (!u.astrology?.birthDate && !u._skippedAstro) return 'astrology';                    // optional
   return 'done';
+}
+
+// Persist "onboarding complete" the first time the required steps are done, so optional badges never
+// re-gate a returning user. Idempotent + best-effort (a failed save just re-prompts next time).
+async function markOnboarded() {
+  const u = S.user;
+  if (!u || u.onboarding?.completedAt) return;
+  u.onboarding = { ...(u.onboarding || {}), completedAt: new Date().toISOString() };   // optimistic local
+  try { await api('/auth/profile', { method: 'PATCH', body: { onboarded: true } }); } catch { /* best-effort */ }
 }
 
 function obProgress(step) {
@@ -836,13 +849,13 @@ function obProgress(step) {
 async function refreshUserAndRoute() {
   S.user = (await api('/auth/me')).user;
   loadPricing();   // refresh live localized prices (gender/country now known)
-  if (onboardingStep() === 'done') { toast('Profile complete — welcome to Sambandh'); nav('#/discover'); }
+  if (onboardingStep() === 'done') { markOnboarded(); toast('Profile complete — welcome to Sambandh'); nav('#/discover'); }
   else renderOnboarding();
 }
 
 function renderOnboarding() {
   const step = onboardingStep();
-  if (step === 'done') return nav('#/discover');
+  if (step === 'done') { markOnboarded(); return nav('#/discover'); }
   const html = {
     profile: obProfile, id: obId, selfie: obSelfie, profession: obProfession,
     pay: obPay, intent: obIntent, astrology: obAstrology, photos: obPhotos
@@ -862,7 +875,7 @@ function obProfile() {
     <div class="field"><label>City</label>
       <input aria-label="City" id="ob-city" list="city-list" placeholder="Start typing… e.g. Guwahati" oninput="cityLookup(this.value)" autocomplete="off"/>
       <datalist id="city-list"></datalist>
-      <div class="hint">Pick from the list — distance matching uses your city.</div>
+      <div class="hint">Type your city — suggestions appear as you type, but any city or town works.</div>
     </div>
     <div class="field"><label>Languages you speak</label>
       <div id="ob-langs">${LANGS.map(l => `<span class="tag plain" data-l="${l}" onclick="this.classList.toggle('forest');this.classList.toggle('plain')" style="cursor:pointer;text-transform:capitalize">${l}</span>`).join('')}</div>

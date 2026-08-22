@@ -70,6 +70,9 @@ const UserSchema = new mongoose.Schema({
     incomeVerified: { type: Boolean, default: false },
     trustScore: { type: Number, default: 10 }
   },
+  // Set when the required onboarding steps are first completed — so the optional badge steps
+  // (ID / profession / astrology) never re-gate a returning user who already finished onboarding.
+  onboarding: { completedAt: Date },
   membership: {
     joinFeePaid: { type: Boolean, default: false },
     joinFeeAmountCHF: Number,
