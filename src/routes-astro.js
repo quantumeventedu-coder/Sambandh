@@ -105,7 +105,7 @@ router.get('/chart', requireAuth, async (req, res, next) => {
       nakshatra: nakshatraByName(chart.nakshatra),
       numerology: engine.numerology(user.profile?.firstName, user.astrology.birthDate),
       interpretation: interpret(chart),
-      reading: require('../services/astro-reading').detailedReading(chart),
+      reading: require('./services/astro-reading').detailedReading(chart),
       provenance: { computed: 'Astronomy (sidereal, Lahiri ayanamsa)', traditional: 'Classical Jyotish rules (yogas/doshas/dasha)', note: 'Traditional interpretations are a belief system — not medical, legal or financial advice.' }
     });
   } catch (e) { next(e); }
