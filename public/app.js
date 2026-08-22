@@ -1025,29 +1025,51 @@ async function classifyImageNSFW(base64) {
   } catch { return null; } // best-effort — moderation is a bonus layer, never blocks the flow on a CDN hiccup
 }
 
+// True when the video's current frame is essentially black — no real camera image (another app is
+// holding the camera, a privacy shutter is closed, or it's a disconnected/virtual device). This reads
+// the SAME pixels face-api would, so it distinguishes a genuinely-black feed (verification can't work)
+// from a merely-black-LOOKING preview where the pixels are actually fine (capture still works).
+function isVideoBlack(vid) {
+  try {
+    const w = vid.videoWidth, h = vid.videoHeight;
+    if (!w || !h) return true;                        // no frame decoded at all
+    const c = document.createElement('canvas'); c.width = 32; c.height = 32;
+    const ctx = c.getContext('2d'); ctx.drawImage(vid, 0, 0, 32, 32);
+    const { data } = ctx.getImageData(0, 0, 32, 32);
+    let sum = 0; for (let i = 0; i < data.length; i += 4) sum += data[i] + data[i + 1] + data[i + 2];
+    return sum / (data.length / 4 * 3) < 8;           // near-zero average luminance
+  } catch { return false; }                            // can't sample → don't block on a guess
+}
+
 async function startFaceVerification() {
   const setStatus = m => { const el = $('#face-status'); if (el) el.textContent = m; };
-  $('#face-live').style.display = 'block';
+  const stage = $('#face-live'); if (stage) stage.style.display = 'block';
+  const vid = $('#face-vid');
   try {
-    await loadScript(FACE_CDN);
+    // 1) Camera FIRST, inside the click gesture — the preview appears immediately and play() is allowed.
+    setStatus('Starting camera…');
+    _faceStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user', width: { ideal: 640 } }, audio: false });
+    vid.srcObject = _faceStream;
+    await new Promise(res => { if (vid.readyState >= 2) return res(); vid.onloadedmetadata = res; setTimeout(res, 1500); });
+    try { await vid.play(); } catch { /* muted+autoplay usually still starts it */ }
+    // 2) Black-feed guard — a black frame can't be verified; say so plainly instead of a silent failure.
+    setTimeout(() => { if (isVideoBlack(vid)) setStatus('Camera image is black — close other apps using the camera (WhatsApp/Zoom/Meet), open the lens cover, then reload and retry.'); }, 1500);
+    // 3) Load the models AFTER the camera is already live (so a slow CDN doesn't delay the preview).
     setStatus('Loading face model…');
+    await loadScript(FACE_CDN);
     try { if (faceapi.tf) { try { await faceapi.tf.setBackend('webgl'); } catch { /* fall back */ } if (faceapi.tf.ready) await faceapi.tf.ready(); } } catch { /* ignore */ }
     await Promise.all([
       faceapi.nets.tinyFaceDetector.loadFromUri(FACE_MODELS),
       faceapi.nets.faceLandmark68TinyNet.loadFromUri(FACE_MODELS),
       faceapi.nets.faceRecognitionNet.loadFromUri(FACE_MODELS)
     ]);
-    _faceStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user', width: 640 }, audio: false });
-    const vid = $('#face-vid');
-    vid.srcObject = _faceStream;
-    // A dynamically-inserted <video> doesn't always honour the autoplay attribute on mobile — start it
-    // explicitly so the preview actually shows (a black preview means poor light → a failing capture).
-    try { await vid.play(); } catch { /* autoplay attr is the fallback */ }
-    setStatus('Ready — face a bright light (a window/lamp), fill the frame, then Capture.');
+    setStatus(isVideoBlack(vid)
+      ? 'Camera image is black — close other apps using the camera, open the lens cover, then reload.'
+      : 'Ready — face a bright light (a window/lamp), fill the frame, then Capture.');
     $('#face-capture').disabled = false;
   } catch (e) {
     setStatus('');
-    toast(e.name === 'NotAllowedError' ? 'Camera blocked — allow it in your browser, or use the upload option.' : (e.message || 'Camera unavailable — use the upload option.'));
+    toast(e.name === 'NotAllowedError' ? 'Camera blocked — allow it in your browser settings, or use “Upload a selfie instead”.' : (e.message || 'Camera unavailable — try “Upload a selfie instead”.'));
   }
 }
 

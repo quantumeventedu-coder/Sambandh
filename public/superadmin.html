@@ -366,6 +366,7 @@ async function renderOverview() {
             ${launched ? 'Return to pre-launch' : 'Open the doors — LAUNCH'}
           </button>
           <button onclick="purgeTestData()" class="ghost" style="white-space:nowrap;font-size:12px">Purge demo/test accounts</button>
+          <button onclick="reclaimStorage()" class="ghost" style="white-space:nowrap;font-size:12px">Reclaim ID/doc storage</button>
           <button onclick="resetCleanSlate()" class="ghost" style="white-space:nowrap;font-size:12px;border-color:var(--pink);color:var(--pink)">Reset to clean slate</button>
         </div>
       </div>
@@ -411,6 +412,16 @@ async function purgeTestData() {
     alert(r.message || ('Deleted ' + r.deleted + ', kept ' + r.kept));
     renderOverview();
   } catch (e) { alert('Purge failed: ' + e.message); }
+}
+
+async function reclaimStorage() {
+  try {
+    const rep = await api('/storage-report');
+    if (!rep.storedDocumentBlobs) { alert('Nothing to reclaim — no stored verification-document originals.'); return; }
+    if (!confirm('Hard-delete ' + rep.storedDocumentBlobs + ' stored verification-document original(s) across ' + rep.recordsHoldingStoredDocs + ' record(s)?\n\nVerdicts are kept — only the raw ID/profession image blobs are removed. IDs are now analysed in memory and never stored, so these are safe to clear.')) return;
+    const r = await apiPost('/purge-verification-documents', { confirm: true });
+    alert(r.message || ('Reclaimed ' + r.deletedFiles + ' file(s).'));
+  } catch (e) { alert('Reclaim failed: ' + e.message); }
 }
 
 async function resetCleanSlate() {
