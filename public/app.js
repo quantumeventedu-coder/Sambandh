@@ -999,7 +999,7 @@ function obSelfie() {
       <!-- Universal fallback — works even when another app (WhatsApp/Zoom/Teams) is holding the live
            camera. On phones this opens the OS camera app; on desktop it lets you snap/upload a photo.
            face-api detects on a still image just as well as on video, so this needs no live stream. -->
-      <input type="file" id="face-photo-input" accept="image/*" capture="user" style="display:none" onchange="onFacePhotoSelected(this)">
+      <input type="file" id="face-photo-input" accept="image/*" capture="user" aria-label="Take or upload a photo of your face for verification" style="display:none" onchange="onFacePhotoSelected(this)">
       <button class="btn ghost" id="face-photo-btn" style="margin-top:10px" onclick="pickFacePhoto()">${ic('camera')} Camera busy? Take or upload a photo instead</button>
     </div>
     <details style="margin-top:14px"><summary class="hint" style="cursor:pointer">Camera not working?</summary>
