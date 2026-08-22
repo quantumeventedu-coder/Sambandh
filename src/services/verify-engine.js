@@ -242,13 +242,26 @@ async function decideClaimDocument(buffer, filename, mustContain) {
  * @returns {{ approved:boolean, enrolledDesc:number[]|null, checks:any[], reason:string }}
  */
 function bindLiveIdentity(live, frames, clientFace, idFace) {
-  const { isValidDescriptor, normalizeDescriptor, matchFaces } = require('./face-engine');
-  const liveRaw = (Array.isArray(frames) ? frames.map(f => f && f.descriptor).find(d => d && isValidDescriptor(normalizeDescriptor(d))) : null) || null;
-  const liveDesc = liveRaw ? normalizeDescriptor(liveRaw) : null;
+  const { isValidDescriptor, normalizeDescriptor, matchFaces, faceDistance } = require('./face-engine');
+  // One person's per-frame descriptor drifts FAR past the 0.55 static-match cutoff during blinks/head-
+  // turns on mobile tiny-models (this is exactly why the liveness check uses a 0.9 median tolerance). So
+  // the enrol-binding uses the same drift budget — a real, differently-posed frame passes, a stranger
+  // (distance ≫1) is still rejected. Using 0.55 here false-rejected legitimate real-device captures.
+  const LIVENESS_DRIFT_MAX = 0.9;
+  const descs = (Array.isArray(frames) ? frames.map(f => f && f.descriptor).filter(d => d && isValidDescriptor(normalizeDescriptor(d))).map(normalizeDescriptor) : []);
+  // Robust "live face" = per-dimension MEDIAN across the capture (immune to one bad/edge frame), the same
+  // reference the liveness identity check uses. This — never a raw client field — is what we enrol on.
+  let liveDesc = null;
+  if (descs.length) {
+    const dim = descs[0].length, out = new Array(dim), n = descs.length, mid = n >> 1;
+    for (let i = 0; i < dim; i++) { const col = descs.map(d => d[i]).sort((a, b) => a - b); out[i] = n % 2 ? col[mid] : (col[mid - 1] + col[mid]) / 2; }
+    liveDesc = out;
+  }
   const liveOk = !!(live && live.live && liveDesc);
-  // A client-supplied enrol descriptor must BE the proven-live face, else reject (enrolment poisoning).
-  const enrollBound = !clientFace || !!(liveDesc && matchFaces(clientFace, liveDesc).matched);
-  // ID match is done against the PROVEN-LIVE face, never a client selfie descriptor.
+  // A client-supplied enrol descriptor must be the SAME live person (within the drift budget), else it's
+  // an enrolment-poisoning attempt (a junk/stranger descriptor bound to the live capture) → reject.
+  const enrollBound = !clientFace || !!(liveDesc && faceDistance(normalizeDescriptor(clientFace), liveDesc) <= LIVENESS_DRIFT_MAX);
+  // ID match is a CROSS-PHOTO person match (selfie vs ID) → the strict 0.55 cutoff is correct there.
   const matchOk = !idFace || !!(liveDesc && matchFaces(liveDesc, idFace).matched);
   const approved = !!(liveOk && enrollBound && matchOk);
   return {
