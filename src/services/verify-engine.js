@@ -159,6 +159,38 @@ function decideIdBadge({ trust, enrolledFace, idFace, profileName, ocrName }) {
   };
 }
 
+/**
+ * Decide a PROFESSION document badge — fully automated, no third party, document NEVER stored. PURE.
+ * The document is analysed in memory; the decision needs no OCR provider:
+ *   • AUTHENTICITY (server-side, on the raw bytes): the AAV Trust Engine already ran; a 'reject' or
+ *     hard-fail refuses.
+ *   • NAMES THE EMPLOYER: the declared company must appear in the document's text, which the CLIENT
+ *     OCR'd (tesseract.js) and sent. Lenient (full name OR its most distinctive word) so a slightly
+ *     noisy OCR of a genuine letter still passes; fail CLOSED if we can't confirm it.
+ * @param {{ trust:{decision?:string,hardFail?:boolean}, company?:string, ocrText?:string }} a
+ * @returns {{ approved:boolean, checks:Array<{check:string,pass:boolean,detail?:string}>, reason:string }}
+ */
+function decideProfessionDoc({ trust, company, ocrText }) {
+  const checks = [];
+  const authentic = !!(trust && !trust.hardFail && trust.decision !== 'reject');
+  checks.push({ check: 'authenticity', pass: authentic, detail: authentic ? 'Document passed automated authenticity checks' : 'Automated authenticity check failed' });
+
+  const norm = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+  const text = norm(ocrText), comp = norm(company);
+  const words = comp.split(' ').filter((w) => w.length >= 3).sort((a, b) => b.length - a.length);
+  const distinctive = words[0] || '';
+  const namesEmployer = !!(comp && text && (text.includes(comp) || (distinctive.length >= 4 && text.includes(distinctive))));
+  checks.push({ check: 'names_employer', pass: namesEmployer, detail: namesEmployer ? `Document names ${company}` : 'Could not find your employer’s name on the document' });
+
+  const approved = authentic && namesEmployer;
+  return {
+    approved, checks,
+    reason: approved ? `Verified — an authentic document naming ${company}`
+      : (!authentic ? 'This document could not be verified. Please upload a clear photo of an original document.'
+        : 'We couldn’t read your employer’s name on the document — upload a clearer photo of a document that names them.'),
+  };
+}
+
 // Selfie: liveness + face match vs ID photo, instant decision
 async function decideSelfie(selfieBuffer, idPhotoBuffer) {
   const face = await matchFace(selfieBuffer, idPhotoBuffer);
@@ -229,4 +261,4 @@ function bindLiveIdentity(live, frames, clientFace, idFace) {
   };
 }
 
-module.exports = { decideIdDocument, decideIdBadge, decideSelfie, decideClaimDocument, nameSimilarity, bindLiveIdentity };
+module.exports = { decideIdDocument, decideIdBadge, decideProfessionDoc, decideSelfie, decideClaimDocument, nameSimilarity, bindLiveIdentity };
