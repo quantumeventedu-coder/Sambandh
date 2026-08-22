@@ -474,4 +474,80 @@ function muhurta(activity = 'general', date = new Date()) {
   };
 }
 
-module.exports = { computeChart, numerology, panchang, transits, relationshipCompat, muhurta, SIGNS, NAK, placement, ascendant, vimshottari };
+// ---- Daily personalised guidance (Tarabala + Chandrabala + running dasha) ----
+// Tarabala: the day's star counted from your birth star (9-fold cycle). Chandrabala: the Moon's transit
+// sign counted from your natal Moon. Both are classical day-quality measures; combined with the running
+// dasha they give a "today for you" reading. Belief-based — never medical/legal/financial advice.
+const TARA = [
+  { name: 'Janma', tone: 'mixed', do: 'keep it low-key and self-directed', dont: 'don’t start anything you can’t pause' },
+  { name: 'Sampat', tone: 'good', do: 'good for money, purchases and starting new work', dont: '' },
+  { name: 'Vipat', tone: 'bad', do: '', dont: 'avoid risk, big spends and travel' },
+  { name: 'Kshema', tone: 'good', do: 'favourable for important tasks and health matters', dont: '' },
+  { name: 'Pratyak', tone: 'bad', do: '', dont: 'avoid confrontation and launching anything new' },
+  { name: 'Sadhaka', tone: 'good', do: 'push your goals — meetings, proposals and effort pay off', dont: '' },
+  { name: 'Vadha', tone: 'bad', do: '', dont: 'the most cautious day — postpone anything important' },
+  { name: 'Mitra', tone: 'good', do: 'great for relationships and teamwork', dont: '' },
+  { name: 'Parama Mitra', tone: 'good', do: 'strongly supportive — favourable for almost everything', dont: '' },
+];
+const CHANDRA_GOOD = new Set([1, 3, 6, 7, 10, 11]);
+const CHANDRA_BAD = new Set([4, 8, 12]);
+const DAILY_DASHA = {
+  Sun: 'act with authority; good for dealings with elders/officials', Moon: 'tend to home, family and your emotional needs',
+  Mars: 'channel energy into action and exercise — hold your temper', Mercury: 'a good day for study, writing, trade and talks',
+  Jupiter: 'favourable for learning, advice, money and dharma', Venus: 'good for love, art, comfort and relationships',
+  Saturn: 'be patient and disciplined — slow, steady work wins', Rahu: 'ambition runs high — avoid shortcuts and gambles',
+  Ketu: 'turn inward — research and reflection; avoid big worldly moves',
+};
+
+/**
+ * "Today for you": Tarabala (day-star vs birth-star), Chandrabala (Moon transit vs natal Moon) and the
+ * running dasha, distilled to a rating + concrete do’s/don’ts for the requesting user's chart.
+ * @param {any} chart a computed natal chart (from computeChart) @param {Date} [now]
+ * @returns {null | { date:string, vara:string, tithi:string, nakshatra:string, rating:'favourable'|'mixed'|'cautious', rahuKaal:string, factors:Array<{name:string,value:string,tone:string}>, dos:string[], donts:string[], note:string }}
+ */
+function dailyGuidance(chart, now = new Date()) {
+  if (!chart || !chart.planets || !chart.planets.Moon) return null;
+  const pan = panchang(now);
+  const natalNak = chart.planets.Moon.nakshatraIndex;              // 0..26
+  const natalMoonSign = chart.planets.Moon.sign;                   // 0..11
+  const todayNak = NAK.indexOf(pan.nakshatra);                     // 0..26
+  const todayMoonSign = Math.floor(pan.moonLongitude / 30) % 12;
+
+  const factors = [], dos = [], donts = [];
+  let good = 0, bad = 0;
+
+  if (Number.isInteger(natalNak) && todayNak >= 0) {
+    const count = ((todayNak - natalNak + 27) % 27) + 1;
+    const t = TARA[(count - 1) % 9];
+    factors.push({ name: 'Tarabala', value: t.name, tone: t.tone });
+    if (t.tone === 'good') { good++; if (t.do) dos.push(t.do); }
+    else if (t.tone === 'bad') { bad++; if (t.dont) donts.push(t.dont); }
+    else { if (t.do) dos.push(t.do); if (t.dont) donts.push(t.dont); }
+  }
+  if (Number.isInteger(natalMoonSign)) {
+    const pos = ((todayMoonSign - natalMoonSign + 12) % 12) + 1;
+    const tone = CHANDRA_GOOD.has(pos) ? 'good' : CHANDRA_BAD.has(pos) ? 'bad' : 'mixed';
+    factors.push({ name: 'Chandrabala', value: 'Moon ' + pos + 'th from your Moon', tone });
+    if (tone === 'good') { good++; dos.push('trust your judgement — the Moon supports your mind today'); }
+    else if (tone === 'bad') { bad++; donts.push('avoid emotional or impulsive decisions today'); }
+  }
+  const dashaLord = chart.dasha && chart.dasha.current && chart.dasha.current.lord;
+  if (dashaLord && DAILY_DASHA[dashaLord]) {
+    factors.push({ name: 'Dasha', value: dashaLord, tone: 'info' });
+    dos.push(DAILY_DASHA[dashaLord]);
+  }
+  if (!dos.length) dos.push('a steady, routine day — nothing special favoured');
+  if (!donts.length) donts.push('no strong cautions today — use normal judgement');
+
+  const rahuStart = 6 + RAHU_SEG[pan.vara] * 1.5;
+  const uniq = (/** @type {string[]} */ a) => [...new Set(a)];
+  return {
+    date: pan.date, vara: pan.vara, tithi: pan.tithi, nakshatra: pan.nakshatra,
+    rating: bad > good ? 'cautious' : good > bad ? 'favourable' : 'mixed',
+    rahuKaal: hhmm(rahuStart) + '–' + hhmm(rahuStart + 1.5),
+    factors, dos: uniq(dos), donts: uniq(donts),
+    note: 'A classical (belief-based) reading of the day for your chart — not medical, legal or financial advice.',
+  };
+}
+
+module.exports = { computeChart, numerology, panchang, transits, relationshipCompat, muhurta, dailyGuidance, SIGNS, NAK, placement, ascendant, vimshottari };

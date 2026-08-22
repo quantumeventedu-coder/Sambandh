@@ -2296,8 +2296,18 @@ async function renderAstro() {
     }
     const ch = c.chart, P = ch.planets;
     const dign = d => d === 'exalted' ? '<span class="tag forest">exalted</span>' : d === 'debilitated' ? '<span class="tag haldi">debilitated</span>' : d === 'own sign' ? '<span class="tag rose">own</span>' : '';
+    const ratingTag = r => r === 'favourable' ? 'forest' : r === 'cautious' ? 'haldi' : 'rose';
     body.innerHTML = `
       ${pan && pan.panchang ? `<div class="card" style="background:linear-gradient(160deg,var(--rose-soft),#fff)"><b class="ic-row">${ic('star')} Today · Panchang</b><div class="hint" style="margin-top:4px">${esc(pan.panchang.vara)} · ${esc(pan.panchang.paksha)} ${esc(pan.panchang.tithi)} · Nakshatra ${esc(pan.panchang.nakshatra)} · Yoga ${esc(pan.panchang.yoga)} · Karana ${esc(pan.panchang.karana)}</div></div>` : ''}
+      ${c.today ? `<div class="card">
+        <b class="ic-row">${ic('star')} Today for you</b>
+        <div style="margin-top:6px"><span class="tag ${ratingTag(c.today.rating)}" style="text-transform:capitalize">${esc(c.today.rating)} day</span> <span class="hint">${esc(c.today.vara)} · ${esc(c.today.tithi)} · ${esc(c.today.nakshatra)} · Rahu Kaal ${esc(c.today.rahuKaal)}</span></div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:12px">
+          <div><b style="font-size:12px;color:#2e7d32">✓ Do</b><ul style="margin:5px 0 0 16px;padding:0;font-size:13px;line-height:1.65">${c.today.dos.map(d => `<li>${esc(d)}</li>`).join('')}</ul></div>
+          <div><b style="font-size:12px;color:#b23a5b">✕ Avoid</b><ul style="margin:5px 0 0 16px;padding:0;font-size:13px;line-height:1.65">${c.today.donts.map(d => `<li>${esc(d)}</li>`).join('')}</ul></div>
+        </div>
+        <div class="hint" style="margin-top:10px;font-size:11px">${esc(c.today.note)}</div>
+      </div>` : ''}
       <div class="card"><div class="stat-row">
         <div class="stat"><b>${esc(ch.lagna ? ch.lagna.signName : '—')}</b><span>Lagna</span></div>
         <div class="stat"><b>${esc(ch.moonSign)}</b><span>Moon · ${esc(ch.nakshatra)}</span></div>
