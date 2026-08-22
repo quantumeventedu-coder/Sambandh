@@ -901,7 +901,7 @@ async function obSaveProfile() {
 function obId() {
   return `<div class="section-pad">
     <h1>Add a government-ID badge <span class="hint">(optional)</span></h1>
-    <p class="sub">You're already photo-verified. Add a government ID for an extra trust badge on your profile. Fully automated — no waiting, no human review.</p>
+    <p class="sub">You're already photo-verified. Add a government ID for an extra trust badge on your profile. It's checked instantly in your browser and on our server — no waiting, no human review — and the photo is <b>never stored</b>.</p>
     <div class="card mt">
       <div class="field"><label>ID type</label><select aria-label="ID type" id="ob-idtype">
         <option value="passport">Passport (any country)</option>
@@ -915,18 +915,45 @@ function obId() {
       <button class="btn ghost" onclick="S.user._skippedId=true;renderOnboarding()">Skip for now</button>
       <div id="ob-id-area"></div>
     </div>
-    <div class="notice forest ic-row" style="display:flex">${ic('lock')} <span>Your ID image is used only to verify you and is permanently deleted after 30 days. We keep your verified name and date of birth; full ID/document numbers are never stored.</span></div>
+    <div class="notice forest ic-row" style="display:flex">${ic('lock')} <span>Your ID photo is analysed in the moment and <b>never stored</b> — we keep only the verification result (that it's authentic and matches your verified face). Full ID/document numbers are never read or kept.</span></div>
   </div>`;
+}
+
+// Load the @vladmandic/face-api models (idempotent — a no-op once loaded by the selfie step).
+async function ensureFaceModels() {
+  if (typeof faceapi === 'undefined') await loadScript(FACE_CDN);
+  await Promise.all([
+    faceapi.nets.tinyFaceDetector.loadFromUri(FACE_MODELS),
+    faceapi.nets.faceLandmark68TinyNet.loadFromUri(FACE_MODELS),
+    faceapi.nets.faceRecognitionNet.loadFromUri(FACE_MODELS),
+  ]);
+}
+
+// Compute the face descriptor of the person ON the ID, in the browser. The server cross-checks it
+// against the enrolled selfie face; the ID image itself is analysed server-side then discarded.
+async function idPhotoFaceDescriptor(file) {
+  try {
+    await ensureFaceModels();
+    const img = await new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = URL.createObjectURL(file); });
+    const opts = new faceapi.TinyFaceDetectorOptions({ inputSize: 416, scoreThreshold: 0.4 });
+    const det = await faceapi.detectSingleFace(img, opts).withFaceLandmarks(true).withFaceDescriptor();
+    URL.revokeObjectURL(img.src);
+    return det ? Array.from(det.descriptor) : null;
+  } catch { return null; }
 }
 
 async function obUploadId() {
   const f = $('#ob-idfile').files[0];
   if (!f) return toast('Choose a photo of your ID');
   try {
+    toast('Reading your ID…');
+    // The face on the ID must match your verified selfie — read it here so the server can cross-check.
+    const idFaceDescriptor = await idPhotoFaceDescriptor(f);
+    if (!idFaceDescriptor) { toast('Couldn’t find a clear face on the ID — use a sharp, well-lit photo of the photo page and try again.'); return; }
     const base64 = await fileToResizedBase64(f);
-    const r = await api('/verification/id', { method: 'POST', body: { method: 'upload', idType: $('#ob-idtype').value, document: { base64, filename: f.name } } });
-    if (r.status === 'approved') { toast('ID verified — all checks passed ✓'); await refreshUserAndRoute(); }
-    else toast('Not verified: ' + (r.reason || 'checks failed') + '. Please try again with a clearer photo.');
+    const r = await api('/verification/id', { method: 'POST', body: { method: 'upload', idType: $('#ob-idtype').value, document: { base64, filename: f.name }, idFaceDescriptor } });
+    if (r.status === 'approved') { toast('ID verified — authentic and matches your face ✓'); await refreshUserAndRoute(); }
+    else toast('Not verified: ' + (r.reason || 'checks failed'));
   } catch (e) { toast(e.message); }
 }
 

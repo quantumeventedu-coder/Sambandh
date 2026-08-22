@@ -19,7 +19,7 @@ const Notification = require('./models/Notification');
 const { requireAuth, requireAdmin } = require('./routes-auth');
 const crypto = require('crypto');
 const { uploadToR2, uploadPrivate } = require('./services/storage');
-const { decideIdDocument, decideSelfie, decideClaimDocument, bindLiveIdentity } = require('./services/verify-engine');
+const { decideSelfie, decideClaimDocument, bindLiveIdentity, decideIdBadge } = require('./services/verify-engine');
 const liveness = require('./services/liveness-engine');
 const LivenessChallenge = require('./models/LivenessChallenge');
 const { atomicUpdate } = require('./db/atomic');
@@ -50,7 +50,12 @@ const idSchema = z.object({
   method: z.enum(['digilocker', 'upload']),
   digilockerToken: z.string().optional(),
   idType: z.enum(['passport', 'national_id', 'driving_licence', 'residence_permit', 'aadhaar', 'pan', 'voter_id']).optional(),
-  document: z.object({ base64: z.string(), filename: z.string() }).optional()
+  document: z.object({ base64: z.string(), filename: z.string() }).optional(),
+  // The face on the ID, computed IN THE BROWSER (@vladmandic/face-api) — the server cross-checks it
+  // against the enrolled selfie face; the ID image itself is never stored. `ocrName` is an optional
+  // best-effort client OCR read used only as a soft corroborating signal.
+  idFaceDescriptor: z.array(z.number()).max(256).optional(),
+  ocrName: z.string().max(120).optional()
 });
 
 router.post('/id', requireAuth, async (req, res, next) => {
@@ -88,37 +93,35 @@ router.post('/id', requireAuth, async (req, res, next) => {
         detail: { decision: trust.decision, score: trust.score, hardFail: trust.hardFail, fileType: trust.fileType, evidenceHash: trust.evidenceHash, signals: trust.signals }
       }), { op: 'verification:trust-audit', userId: String(req.userId) });   // audit must not break the request, but a failed write is logged
 
-      if (trust.decision === 'reject') {
-        // Dangerous or clearly inauthentic file — refuse. Do NOT leak which check failed.
-        decision = { approved: false, checks: [{ check: 'authenticity', pass: false, detail: 'Automated authenticity check failed' }], reason: 'This document could not be verified. Please upload a clear photo of an original government ID.' };
-      } else {
-        // Random token → an unguessable object key, so the stored ID can't be fetched by
-        // enumerating predictable URLs; and it's auto-deleted after 30 days (doc-retention).
-        const key = `verification/${req.userId}/id/${d.idType}_${Date.now()}_${crypto.randomBytes(8).toString('hex')}.jpg`;
-        await uploadPrivate(key, buffer, 'image/jpeg');   // PRIVATE bucket — no public URL
-        documents.push({ type: d.idType, key, private: true, uploadedAt: new Date() });
-
-        decision = await decideIdDocument(user, buffer, d.idType, d.document.filename);
-        // Fail secure: auto-approve ONLY when the Trust Engine is confident (band
-        // 'auto', which requires real detectors present and clean). Anything less
-        // goes to human review — never auto-verified on a single signal.
-        if (decision.approved && trust.decision !== 'auto') { decision.approved = false; decision.review = true; }
-      }
+      // We NEVER store the ID image — it is analysed in memory (Trust Engine authenticity above +
+      // the face-match below) and then discarded. Only the derived RESULT is persisted (verdict +
+      // the SHA-256 evidence hash), so the document can never inflate storage or leak later.
+      // Decision (fully automated, no human review, no third party):
+      //   authentic bytes (Trust Engine not 'reject'/hard-fail) AND the face on the ID matches the
+      //   user's already-verified live selfie face (user.faceDescriptor, enrolled at the selfie step).
+      const { isValidDescriptor, normalizeDescriptor } = require('./services/face-engine');
+      const idFace = d.idFaceDescriptor && isValidDescriptor(normalizeDescriptor(d.idFaceDescriptor))
+        ? normalizeDescriptor(d.idFaceDescriptor) : null;
+      const enrolledFace = user.faceDescriptor && isValidDescriptor(normalizeDescriptor(user.faceDescriptor))
+        ? normalizeDescriptor(user.faceDescriptor) : null;
+      decision = decideIdBadge({ trust, enrolledFace, idFace, profileName: user.profile && user.profile.firstName, ocrName: d.ocrName });
+      decision.evidenceHash = trust.evidenceHash;   // audit trail without keeping the image
     }
 
     const verification = await Verification.create({
       userId: req.userId,
       type: 'id',
-      claim: { idType: d.idType || 'aadhaar', method: d.method, checks: decision.checks, ...decision.fields },
-      documents,
+      // Derived RESULT only — no image, no document key. evidenceHash is a SHA-256 of the analysed
+      // bytes (proves WHAT was checked for audit, without keeping the ID itself).
+      claim: { idType: d.idType || 'aadhaar', method: d.method, checks: decision.checks, evidenceHash: decision.evidenceHash, ...decision.fields },
+      documents,   // empty for an uploaded ID — the document is analysed in memory and never stored
       status: decision.approved ? 'approved' : (decision.review ? 'in_review' : 'rejected'),
       submittedAt: new Date(),
       reviewedAt: decision.review ? undefined : new Date(),
       reviewedBy: decision.review ? 'aav-trust-engine' : 'auto-verify-engine',
       reviewMethod: d.method === 'digilocker' ? 'digilocker' : 'automated',
       rejectionReason: decision.approved ? undefined : decision.reason,
-      // Original ID images auto-deleted after 30 days (cleanup cron)
-      expiresAt: new Date(Date.now() + 30 * 86400000)
+      expiresAt: new Date(Date.now() + 30 * 86400000)   // record TTL (no image to purge — kept for re-verify timing)
     });
 
     if (decision.approved) {
