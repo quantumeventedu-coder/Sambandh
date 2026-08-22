@@ -969,24 +969,17 @@ function obSelfie() {
         <button class="btn forest" id="face-capture" disabled onclick="captureFace()">Capture &amp; verify</button>
       </div>
     </div>
-    <details style="margin-top:14px"><summary class="hint" style="cursor:pointer">No camera? Upload a selfie instead</summary>
-      <div class="field mt"><input aria-label="Selfie photo" id="ob-selfie" type="file" accept="image/*" capture="user"/></div>
-      <button class="btn secondary" onclick="obSendSelfie()">Verify uploaded selfie</button>
+    <details style="margin-top:14px"><summary class="hint" style="cursor:pointer">Camera not working?</summary>
+      <div class="hint mt" style="line-height:1.6">Verification needs a <b>live camera</b> — a single photo can't prove it's really you in the moment. If the preview is black or blocked:
+        <ul style="margin:6px 0 0 18px;padding:0">
+          <li>Close other apps using the camera (WhatsApp, Zoom, Meet), then reload.</li>
+          <li>Allow camera permission for this site (address-bar camera icon → Allow).</li>
+          <li>Open your laptop's privacy shutter, or try your phone / another browser.</li>
+        </ul>
+      </div>
     </details>
     <div class="notice forest ic-row" style="display:flex;margin-top:12px">${ic('shieldCheck')} <span>The same face can't be enrolled on two accounts — our engine detects duplicate identities to stop catfishing and ban-evasion.</span></div>
   </div>`;
-}
-
-// Fallback: plain selfie upload (no in-browser face descriptor).
-async function obSendSelfie() {
-  const f = $('#ob-selfie').files[0];
-  if (!f) return toast('Choose a selfie first');
-  try {
-    const base64 = await fileToResizedBase64(f, 800);
-    const r = await api('/verification/selfie', { method: 'POST', body: { base64 } });
-    if (r.status === 'approved') { toast('Selfie verified — set as your first profile photo ✓'); await refreshUserAndRoute(); }
-    else toast('Not verified: ' + (r.reason || 'face match failed'));
-  } catch (e) { toast(e.message); }
 }
 
 // ---- Own face verification via @vladmandic/face-api (client-side ML, CDN) ----
@@ -1069,7 +1062,7 @@ async function startFaceVerification() {
     $('#face-capture').disabled = false;
   } catch (e) {
     setStatus('');
-    toast(e.name === 'NotAllowedError' ? 'Camera blocked — allow it in your browser settings, or use “Upload a selfie instead”.' : (e.message || 'Camera unavailable — try “Upload a selfie instead”.'));
+    toast(e.name === 'NotAllowedError' ? 'Camera blocked — tap the camera icon in the address bar and choose Allow, then reload.' : (e.message || 'Camera unavailable — close other apps using it, allow permission, then reload. See “Camera not working?”.'));
   }
 }
 
