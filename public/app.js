@@ -814,6 +814,12 @@ async function retryLocationGate() {
 // profession and astrology are optional boosters at the end (all skippable).
 const OB_STEPS = ['profile', 'pay', 'selfie', 'intent', 'photos', 'id', 'profession', 'astrology'];
 
+// In-session "skipped this optional step" flags. Kept OUTSIDE S.user because refreshUserAndRoute (and
+// other flows) reload S.user from /auth/me — which would wipe flags stored on the user object and bounce
+// someone who skipped ID (then verified a profession) straight back to the ID step. Cleared on reload,
+// where the persisted onboarding.completedAt takes over for a returning user.
+const _obSkips = { id: false, profession: false, astro: false };
+
 function onboardingStep() {
   const u = S.user;
   if (!u) return 'profile';
@@ -823,12 +829,12 @@ function onboardingStep() {
   if (!(u.intent || []).length) return 'intent';
   if (!(u.profile?.photos || []).length) return 'photos';
   // Required steps done. The optional badge steps are offered ONCE during first onboarding, but must
-  // NEVER re-gate a returning user — otherwise someone who skipped them is bounced back into onboarding
-  // on every login (the per-step "skip" only lives in memory). The persisted flag settles it.
+  // NEVER re-gate a returning user — the persisted flag settles it; the in-session _obSkips settle a skip
+  // made mid-run (which survives the /auth/me reloads that replace S.user).
   if (u.onboarding?.completedAt) return 'done';
-  if (!u.verification?.idVerified && !u._skippedId) return 'id';                          // optional
-  if (!u.claims?.profession?.verified && !u._skippedProfession) return 'profession';      // optional
-  if (!u.astrology?.birthDate && !u._skippedAstro) return 'astrology';                    // optional
+  if (!u.verification?.idVerified && !_obSkips.id) return 'id';                          // optional
+  if (!u.claims?.profession?.verified && !_obSkips.profession) return 'profession';      // optional
+  if (!u.astrology?.birthDate && !_obSkips.astro) return 'astrology';                    // optional
   return 'done';
 }
 
@@ -867,7 +873,7 @@ function obProfile() {
   return `<div class="section-pad">
     <h1>Tell us about yourself</h1>
     <p class="sub">No pressure, you can always update this.</p>
-    <div class="field"><label>First name</label><input aria-label="First name" id="ob-name" maxlength="50" placeholder="Your first name"/></div>
+    <div class="field"><label>First name</label><input aria-label="First name" id="ob-name" maxlength="50" placeholder="Your first name" value="${esc(S.user?.profile?.firstName || S.user?.googleGivenName || '')}"/></div>
     <div class="field"><label>Gender</label><select aria-label="Gender" id="ob-gender">
       <option value="">Select…</option><option value="male">Male</option><option value="female">Female</option>
       <option value="non_binary">Non-binary</option><option value="other">Other</option></select></div>
@@ -925,7 +931,7 @@ function obId() {
         <option value="pan">PAN (India)</option></select></div>
       <div class="field"><label>Photo of your ID</label><input aria-label="ID document" id="ob-idfile" type="file" accept="image/*"/></div>
       <button class="btn" onclick="obUploadId()">Add ID badge</button>
-      <button class="btn ghost" onclick="S.user._skippedId=true;renderOnboarding()">Skip for now</button>
+      <button class="btn ghost" onclick="_obSkips.id=true;renderOnboarding()">Skip for now</button>
       <div id="ob-id-area"></div>
     </div>
     <div class="notice forest ic-row" style="display:flex">${ic('lock')} <span>Your ID photo is analysed in the moment and <b>never stored</b> — we keep only the verification result (that it's authentic and matches your verified face). Full ID/document numbers are never read or kept.</span></div>
@@ -1218,7 +1224,7 @@ function obProfession() {
     <div id="ob-reg" style="display:none" class="field"><label>Registration number</label><input aria-label="Registration number" id="ob-regno" placeholder="e.g. NMC/BCI/ICAI number"/><div class="hint">Checked against the public registry.</div></div>
     <div id="ob-docs" class="field"><label>Proof document (offer letter / company ID / college ID)</label><input aria-label="Profession document" id="ob-doc" type="file" accept="image/*"/><div class="hint">Read in your browser to confirm it names your employer, checked for authenticity on our server, then <b>discarded</b> — never stored. Use a clear, well-lit photo.</div></div>
     <button class="btn" onclick="obSendProfession()">Verify instantly</button>
-    <button class="btn ghost" onclick="S.user._skippedProfession=true;renderOnboarding()">Skip for now</button>
+    <button class="btn ghost" onclick="_obSkips.profession=true;renderOnboarding()">Skip for now</button>
     <p class="hint center" style="margin-top:6px">You can add a verified profession later from your profile — it's optional.</p>
   </div>`;
 }
@@ -1501,7 +1507,7 @@ function obAstrology() {
     <div class="field"><label>Birth time (needed for guna milan)</label><input aria-label="Birth time" id="ob-btime" type="time"/><div class="hint">Don't know it? Skip — we'll use sun-sign compatibility only.</div></div>
     <div class="field"><label>Birth place (city)</label><input aria-label="Birth place" id="ob-bplace" placeholder="e.g. Guwahati"/></div>
     <button class="btn" onclick="obSaveAstro()">Save astrology</button>
-    <button class="btn ghost" onclick="S.user._skippedAstro=true;renderOnboarding()">Skip for now</button>
+    <button class="btn ghost" onclick="_obSkips.astro=true;renderOnboarding()">Skip for now</button>
   </div>`;
 }
 
