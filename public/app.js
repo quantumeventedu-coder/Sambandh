@@ -1158,53 +1158,42 @@ function livenessHint(reason) {
   return 'Not verified — retake in bright, even light, holding your phone steady.';
 }
 
-// Active-liveness capture: the server issues a random action challenge, we walk the user through it
-// while continuously sampling per-frame 68-pt landmarks + face descriptors, and submit the sequence.
-// The SERVER re-derives the blink/turn/consistency signals — the client is never trusted to self-assert.
-const LIVENESS_PROMPT = { blink: 'Blink a few times 👀', turn_left: 'Slowly turn your head LEFT ⬅️', turn_right: 'Slowly turn your head RIGHT ➡️' };
+// Simple face-detection capture. We detect a REAL face in the live preview (@vladmandic/face-api → a
+// 128-d descriptor), grab that frame as the selfie, and submit it. The server still validates the
+// descriptor, enrols it, and runs the duplicate-face ban-evasion scan — it just doesn't require the
+// blink/turn liveness challenge for now. (Re-enable with LIVENESS_REQUIRED=true on the server; the
+// challenge endpoint + engine are still in place.)
 async function captureFace() {
   const vid = $('#face-vid'), setStatus = m => { const el = $('#face-status'); if (el) el.textContent = m; };
-  // Guard: never run the liveness challenge against a dead preview (paused/black). Without this, a black
-  // feed makes sample() collect zero frames and the loop spins the full 30s before failing — the exact
-  // dead-end users hit. Bounce back to the readiness watcher, which shows the tap/free-the-camera guidance.
+  // Never run detection against a dead preview (paused/black) — bounce to the readiness watcher, which
+  // shows the tap-to-start / free-the-camera guidance instead of failing silently.
   if (!_faceStream || vid.paused || isVideoBlack(vid)) { watchFaceReady(); return; }
   $('#face-capture').disabled = true;
   try {
-    setStatus('Starting a quick liveness check…');
-    const ch = await api('/verification/selfie/challenge', { method: 'POST' });
-    if (!ch || !ch.challengeId || !Array.isArray(ch.actions)) throw new Error('Could not start the liveness check — try again.');
+    setStatus('Detecting your face…');
     const opts = new faceapi.TinyFaceDetectorOptions({ inputSize: 416, scoreThreshold: 0.5 });
-    const frames = [], startedAt = Date.now();
-    let lastDescriptor = null;
-    const sample = async () => {
-      const det = await faceapi.detectSingleFace(vid, opts).withFaceLandmarks(true).withFaceDescriptor();
-      if (det) {
-        frames.push({ landmarks: det.landmarks.positions.map(p => ({ x: p.x, y: p.y })), descriptor: Array.from(det.descriptor), t: Date.now() - startedAt });
-        lastDescriptor = Array.from(det.descriptor);
-      }
-    };
-    // Walk each prompted action (~2.5s each), sampling ~5 frames/second.
-    for (const action of ch.actions) {
-      setStatus(LIVENESS_PROMPT[action] || 'Follow the prompt on screen');
-      const until = Date.now() + 2500;
-      while (Date.now() < until) { await sample(); await new Promise(r => setTimeout(r, 200)); }
+    // Try for a confident single-face detection over a short window (camera/exposure can take a moment).
+    let det = null;
+    const until = Date.now() + 7000;
+    while (Date.now() < until) {
+      det = await faceapi.detectSingleFace(vid, opts).withFaceLandmarks(true).withFaceDescriptor();
+      if (det && det.descriptor) break;
+      await new Promise(r => setTimeout(r, 150));
     }
-    const minFrames = ch.minFrames || 8;
-    while (frames.length < minFrames && Date.now() - startedAt < 30000) { await sample(); await new Promise(r => setTimeout(r, 150)); }
-    if (frames.length < minFrames) { toast('Could not capture enough frames — retry in good light.'); watchFaceReady(); return; }
+    if (!det || !det.descriptor) { toast('No face detected — center your face, fill the frame, and use good, even light.'); watchFaceReady(); return; }
 
-    // Final frame = the selfie image + enrolled descriptor.
+    // Capture the current frame as the selfie + send the detected descriptor for enrolment/dedup.
+    const descriptor = Array.from(det.descriptor);
     const c = document.createElement('canvas');
     c.width = vid.videoWidth; c.height = vid.videoHeight;
     c.getContext('2d').drawImage(vid, 0, 0);
     const base64 = c.toDataURL('image/jpeg', 0.85).split(',')[1];
 
     setStatus('Verifying…');
-    const r = await api('/verification/selfie', { method: 'POST', body: { base64, challengeId: ch.challengeId, frames, faceDescriptor: lastDescriptor } });
+    const r = await api('/verification/selfie', { method: 'POST', body: { base64, faceDescriptor: descriptor } });
     if (r.status === 'approved') { stopFaceStream(); toast('Face verified — set as your first profile photo ✓'); await refreshUserAndRoute(); }
-    // Rejection: KEEP the stream live so the user can retry in place. Re-arm the watcher instead of blindly
-    // enabling Capture — it re-enables only once the preview is live again (models already loaded).
-    else { toast(livenessHint(r.reason)); watchFaceReady(); }
+    // Not approved: keep the stream live for an in-place retry; re-arm the watcher to re-enable Capture.
+    else { toast(r.reason || 'Not verified — center your face in good, even light and try again.'); watchFaceReady(); }
   } catch (e) { toast(e.message || 'Verification failed — try again.'); if (_faceStream) watchFaceReady(); else { const c = $('#face-capture'); if (c) c.disabled = false; } }
 }
 

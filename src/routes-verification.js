@@ -38,6 +38,13 @@ const REGISTRY_PROFESSIONS = {
 
 const MAX_ATTEMPTS_PER_DAY = 3;
 
+// Liveness gate. When OFF (the default for now), the selfie check is SIMPLE FACE DETECTION: the browser
+// must have actually detected a real face (a well-formed 128-d descriptor) in the live camera, and we
+// still run the duplicate-face ban-evasion scan + any ID cross-match — but we do NOT require the
+// blink/turn active-liveness challenge. Flip LIVENESS_REQUIRED=true to re-enable the full challenge path
+// (the challenge endpoint + engine remain in place, so this is a config change, not a code change).
+const LIVENESS_REQUIRED = process.env.LIVENESS_REQUIRED === 'true';
+
 async function attemptsToday(userId, type) {
   return Verification.countDocuments({
     userId, type, createdAt: { $gt: new Date(Date.now() - 24 * 3600 * 1000) }
@@ -222,10 +229,25 @@ router.post('/selfie', requireAuth, async (req, res, next) => {
       enrolledDesc = decision.enrolledDesc;
       // Dedup on the PROVEN-LIVE face (ban-evasion / duplicate-identity), not a poisonable client field.
       if (decision.approved && enrolledDesc) faceDuplicates = await scanForDuplicateFace(req.userId, enrolledDesc);
+    } else if (!LIVENESS_REQUIRED) {
+      // SIMPLE FACE-DETECTION path (liveness gate currently OFF). Require that the browser actually
+      // detected a real face — a well-formed 128-d descriptor — so we never approve a blank/no-face frame.
+      // We still enrol that face, run the duplicate-face ban-evasion scan, and cross-match an ID photo if
+      // one was supplied. What we skip is only the blink/turn active-liveness challenge.
+      if (!clientFace || !isValidDescriptor(clientFace)) {
+        return res.status(400).json({ error: 'No face detected — center your face in good, even light and try again.' });
+      }
+      decision = { approved: true, checks: [{ check: 'face_detected', pass: true }, { check: 'liveness', pass: true, note: 'simple mode (challenge disabled)' }] };
+      enrolledDesc = clientFace;
+      if (idFace && !matchFaces(clientFace, idFace).matched) {
+        decision.approved = false; decision.reason = 'Selfie does not match your ID photo';
+        decision.checks.push({ check: 'id_face_match', pass: false });
+      }
+      if (decision.approved) faceDuplicates = await scanForDuplicateFace(req.userId, clientFace);
     } else {
-      // No liveness challenge/frames. The live-camera challenge is the ONLY valid selfie path; in dev the
-      // simulator still runs, but in production there is no provider — so return a CLEAR message instead
-      // of letting decideSelfie() throw a 500 (e.g. a stale cached client or a direct API call).
+      // LIVENESS_REQUIRED but no challenge/frames were submitted. The live-camera challenge is then the
+      // ONLY valid selfie path; in dev the simulator still runs, but in production there is no provider —
+      // so return a CLEAR message instead of letting decideSelfie() throw a 500 (e.g. a stale client).
       try {
         decision = await decideSelfie(buffer, null);
       } catch {
