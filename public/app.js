@@ -983,7 +983,10 @@ function obSelfie() {
     <div id="face-stage">
       <button class="btn" onclick="startFaceVerification()">${ic('camera')} Verify with camera</button>
       <div id="face-live" style="display:none;margin-top:12px">
-        <video id="face-vid" autoplay muted playsinline style="width:100%;max-width:320px;border-radius:16px;background:#11151c;aspect-ratio:3/4;object-fit:cover;transform:scaleX(-1);display:block;margin:0 auto"></video>
+        <div id="face-wrap" style="position:relative;width:100%;max-width:320px;margin:0 auto">
+          <video id="face-vid" autoplay muted playsinline webkit-playsinline="true" style="width:100%;border-radius:16px;background:#11151c;aspect-ratio:3/4;object-fit:cover;transform:scaleX(-1);display:block"></video>
+          <button id="face-tap" onclick="startFacePlayback()" style="display:none;position:absolute;inset:0;width:100%;height:100%;border:0;border-radius:16px;background:rgba(17,21,28,.82);color:#fff;font-weight:700;font-size:15px;cursor:pointer">▶ Tap here to start your camera</button>
+        </div>
         <p id="face-status" class="hint center" style="margin-top:10px">Loading face model…</p>
         <button class="btn forest" id="face-capture" disabled onclick="captureFace()">Capture &amp; verify</button>
       </div>
@@ -1063,9 +1066,11 @@ async function startFaceVerification() {
     _faceStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user', width: { ideal: 640 } }, audio: false });
     vid.srcObject = _faceStream;
     await new Promise(res => { if (vid.readyState >= 2) return res(); vid.onloadedmetadata = res; setTimeout(res, 1500); });
-    try { await vid.play(); } catch { /* muted+autoplay usually still starts it */ }
-    // 2) Black-feed guard — a black frame can't be verified; say so plainly instead of a silent failure.
-    setTimeout(() => { if (isVideoBlack(vid)) setStatus('Camera image is black — close other apps using the camera (WhatsApp/Zoom/Meet), open the lens cover, then reload and retry.'); }, 1500);
+    // 2) Try to start playback. On mobile (and iOS Low Power Mode) autoplay OUTSIDE a tap gesture is
+    // blocked — getUserMedia already consumed the original tap — so play() here often leaves the video
+    // PAUSED and black. startFacePlayback() plays it and, if still paused, shows a tap-to-start overlay
+    // (a fresh gesture reliably starts it). This was the real recurring "camera not working" cause.
+    startFacePlayback();
     // 3) Load the models AFTER the camera is already live (so a slow CDN doesn't delay the preview).
     setStatus('Loading face model…');
     await loadScript(FACE_CDN);
@@ -1075,13 +1080,38 @@ async function startFaceVerification() {
       faceapi.nets.faceLandmark68TinyNet.loadFromUri(FACE_MODELS),
       faceapi.nets.faceRecognitionNet.loadFromUri(FACE_MODELS)
     ]);
-    setStatus(isVideoBlack(vid)
-      ? 'Camera image is black — close other apps using the camera, open the lens cover, then reload.'
-      : 'Ready — face a bright light (a window/lamp), fill the frame, then Capture.');
+    // Don't clobber a live "Tap to start" prompt: if autoplay was blocked the overlay is showing and
+    // startFacePlayback() owns the status until the user taps. Only set the ready/black message once playing.
+    if (!vid.paused) {
+      setStatus(isVideoBlack(vid)
+        ? 'Camera image is black — close other apps using the camera, open the lens cover, then reload.'
+        : 'Ready — face a bright light (a window/lamp), fill the frame, then Capture.');
+    }
     $('#face-capture').disabled = false;
   } catch (e) {
     setStatus('');
     toast(e.name === 'NotAllowedError' ? 'Camera blocked — tap the camera icon in the address bar and choose Allow, then reload.' : (e.message || 'Camera unavailable — close other apps using it, allow permission, then reload. See “Camera not working?”.'));
+  }
+}
+
+// Start (or resume) video playback and manage the tap-to-start overlay. Called both from
+// startFaceVerification (where autoplay is often blocked on mobile) and directly from the overlay's
+// onclick — a tap is a fresh user gesture that iOS/Low-Power-Mode always honour for play().
+async function startFacePlayback() {
+  const vid = $('#face-vid'), tap = $('#face-tap');
+  const setStatus = m => { const el = $('#face-status'); if (el) el.textContent = m; };
+  try { await vid.play(); } catch { /* still blocked — the overlay below asks for a tap */ }
+  // Give the first frames a moment to decode before judging paused/black.
+  await new Promise(r => setTimeout(r, 500));
+  if (vid.paused) {
+    if (tap) tap.style.display = 'block';                 // autoplay blocked → ask for a real tap
+    setStatus('Tap the preview above to start your camera.');
+  } else if (isVideoBlack(vid)) {
+    if (tap) tap.style.display = 'none';                  // it's playing, just no image
+    setStatus('Camera is on but the image is black — close other apps using it (WhatsApp/Zoom/Meet), uncover the lens, improve lighting.');
+  } else {
+    if (tap) tap.style.display = 'none';                  // live and bright → good to go
+    setStatus('Ready — face a bright light (a window/lamp), fill the frame, then Capture.');
   }
 }
 
