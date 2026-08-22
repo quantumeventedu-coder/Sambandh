@@ -421,7 +421,13 @@ router.post('/logout', requireAuth, async (req, res, next) => {
 router.post('/complete-signup', requireAuth, async (req, res, next) => {
   try {
     const parsed = signupSchema.safeParse(req.body);
-    if (!parsed.success) return res.status(400).json({ error: 'Fill all fields correctly (name: letters only)' });
+    if (!parsed.success) {
+      // Name the ACTUAL failing field, not a fixed "name" hint — a blank gender/DOB was misreported as a
+      // name error, sending users to re-edit a name that was already correct.
+      const LABELS = { firstName: 'your name (letters only)', gender: 'your gender', dob: 'your date of birth', city: 'your city', languages: 'at least one language' };
+      const field = parsed.error.issues[0].path[0];
+      return res.status(400).json({ error: `Please complete: ${LABELS[field] || 'your details'}` });
+    }
 
     // Accept ANY city the user types. The cities list only supplies lat/lng for distance matching; an
     // unlisted town/village/foreign city is stored by name (distance matching simply skips it — it must
@@ -771,17 +777,10 @@ router.post('/2fa/disable', (req, res, next) => requireAuth(req, res, async () =
 
 // ---- WebAuthn passkeys (fingerprint / Face ID / Windows Hello / security key) ----
 
-// Short-lived challenge store (5 min). reg:<userId> for enrolment, login:<challenge> for sign-in.
-const challengeStore = new Map();
-/** @param {string} key @param {object} data */
-function putChallenge(key, data) { challengeStore.set(key, { ...data, expiresAt: Date.now() + 5 * 60 * 1000 }); }
-/** @param {string} key */
-function takeChallenge(key) {
-  const c = challengeStore.get(key);
-  if (!c || c.expiresAt < Date.now()) { challengeStore.delete(key); return null; }
-  challengeStore.delete(key);
-  return c;
-}
+// Short-lived challenge store (5 min), PERSISTED in the DB so the two-request handshake survives across
+// serverless instances (an in-process Map was lost between options→verify on Vercel). reg:<userId> for
+// enrolment, login:<challenge> for sign-in.
+const { putChallenge, takeChallenge } = require('./services/webauthn-challenge-store');
 
 // Enrol a passkey (signed-in user)
 router.post('/passkey/register-options', (req, res, next) => requireAuth(req, res, async () => {
@@ -790,7 +789,7 @@ router.post('/passkey/register-options', (req, res, next) => requireAuth(req, re
     const user = await User.findById(req.userId);
     const { origin, rpId } = wa.rpFromRequest(req);
     const challenge = wa.newChallenge();
-    putChallenge('reg:' + req.userId, { challenge, origin, rpId });
+    await putChallenge('reg:' + req.userId, { challenge, origin, rpId });
     const options = await wa.registrationOptions({ userId: req.userId, email: user.email, name: user.profile?.firstName, rpId, challenge });
     res.json({ ok: true, options });
   } catch (err) { next(err); }
@@ -799,7 +798,7 @@ router.post('/passkey/register-options', (req, res, next) => requireAuth(req, re
 router.post('/passkey/register-verify', (req, res, next) => requireAuth(req, res, async () => {
   try {
     const wa = require('./services/webauthn');
-    const exp = takeChallenge('reg:' + req.userId);
+    const exp = await takeChallenge('reg:' + req.userId);
     if (!exp) return res.status(400).json({ error: 'Challenge expired — try again' });
     const result = await wa.verifyRegistration(req.userId, req.body, exp);
     res.json({ ok: true, credentialId: result.credentialId });
@@ -812,7 +811,7 @@ router.post('/passkey/login-options', async (req, res, next) => {
     const wa = require('./services/webauthn');
     const { origin, rpId } = wa.rpFromRequest(req);
     const challenge = wa.newChallenge();
-    putChallenge('login:' + challenge, { challenge, origin, rpId });
+    await putChallenge('login:' + challenge, { challenge, origin, rpId });
     const options = await wa.authenticationOptions(null, rpId, challenge); // discoverable: browser picks the passkey
     res.json({ ok: true, options });
   } catch (err) { next(err); }
@@ -822,7 +821,7 @@ router.post('/passkey/login-verify', async (req, res, next) => {
   try {
     const wa = require('./services/webauthn');
     const clientData = JSON.parse(wa.b64urlToBuf(req.body.response.clientDataJSON).toString('utf8'));
-    const exp = takeChallenge('login:' + clientData.challenge);
+    const exp = await takeChallenge('login:' + clientData.challenge);
     if (!exp) return res.status(400).json({ error: 'Challenge expired — try again' });
     const { userId } = await wa.verifyAuthentication(req.body, exp);
     const user = await User.findById(userId);
