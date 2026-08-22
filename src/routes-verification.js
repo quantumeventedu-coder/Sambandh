@@ -176,7 +176,9 @@ router.post('/selfie/challenge', requireAuth, async (req, res, next) => {
 router.post('/selfie', requireAuth, async (req, res, next) => {
   try {
     const { base64 } = req.body;
-    if (!base64) return res.status(400).json({ error: 'Selfie image required' });
+    // Must be a non-empty STRING: a truthy non-string (number/object) passes a bare `!base64` check but
+    // then throws inside Buffer.from(), surfacing as a raw 500 instead of a clean 400. Guard the type.
+    if (!base64 || typeof base64 !== 'string') return res.status(400).json({ error: 'Selfie image required' });
 
     if (await attemptsToday(req.userId, 'selfie') >= MAX_ATTEMPTS_PER_DAY) {
       return res.status(429).json({ error: 'Too many selfie attempts today. Try again tomorrow in good lighting.' });
