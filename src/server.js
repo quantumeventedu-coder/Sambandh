@@ -43,6 +43,14 @@ const { UPLOADS_ROOT } = require('./services/storage');
 const app = express();
 const server = http.createServer(app);
 
+// In production we run behind a proxy/load-balancer (Render/Vercel), so the real client IP is in
+// X-Forwarded-For, not the socket address. Without this, req.ip is the proxy's single IP for EVERY
+// visitor — collapsing all users into ONE rate-limit bucket, so a handful of sign-ups/minute 429s
+// everyone. Trust exactly one hop (the platform proxy). In local dev there's no proxy, so leave it off.
+if (process.env.NODE_ENV === 'production' || process.env.TRUST_PROXY === 'true') {
+  app.set('trust proxy', 1);
+}
+
 // ---- Middleware ----
 
 // Trace every request first (assigns req.reqId + req.log, echoes x-request-id).
