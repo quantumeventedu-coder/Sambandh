@@ -269,6 +269,7 @@ async function route() {
   if (typeof S._vid !== 'undefined' && S._vid && !hash.startsWith('#/video/')) endVideo();   // stop camera when leaving a call
   const parts = hash.slice(2).split('/');
   const page = parts[0] || '';
+  if (_faceStream && page !== 'onboarding') stopFaceStream();   // release the verify camera when leaving onboarding
 
   // Public site config (pre-launch flag) — loaded once, drives the early-access gate.
   if (!S.config) { try { S.config = await api('/auth/config'); } catch { S.config = {}; } }
@@ -1008,6 +1009,8 @@ function obSelfie() {
 const FACE_CDN = 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api@1.7.13/dist/face-api.min.js';
 const FACE_MODELS = 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api@1.7.13/model';
 let _faceStream = null;
+let _faceModelsReady = false;   // face-api nets loaded — Capture needs this AND a live frame
+let _faceReadyTimer = null;     // polls until the preview is genuinely live, then enables Capture
 
 const _loadedScripts = new Set();
 function loadScript(src) {
@@ -1060,16 +1063,20 @@ async function startFaceVerification() {
   const setStatus = m => { const el = $('#face-status'); if (el) el.textContent = m; };
   const stage = $('#face-live'); if (stage) stage.style.display = 'block';
   const vid = $('#face-vid');
+  // Clean slate: release any stream/watch from a prior click so repeat "Verify with camera" taps don't
+  // orphan live camera tracks (each getUserMedia leaks the previous one otherwise). Capture stays locked
+  // until a real, non-black frame arrives — never enabled on a paused/black preview.
+  stopFaceStream();
+  const cap = $('#face-capture'); if (cap) cap.disabled = true;
   try {
     // 1) Camera FIRST, inside the click gesture — the preview appears immediately and play() is allowed.
     setStatus('Starting camera…');
     _faceStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user', width: { ideal: 640 } }, audio: false });
     vid.srcObject = _faceStream;
     await new Promise(res => { if (vid.readyState >= 2) return res(); vid.onloadedmetadata = res; setTimeout(res, 1500); });
-    // 2) Try to start playback. On mobile (and iOS Low Power Mode) autoplay OUTSIDE a tap gesture is
-    // blocked — getUserMedia already consumed the original tap — so play() here often leaves the video
-    // PAUSED and black. startFacePlayback() plays it and, if still paused, shows a tap-to-start overlay
-    // (a fresh gesture reliably starts it). This was the real recurring "camera not working" cause.
+    // 2) Try to start playback and begin watching for a genuinely-live frame. This covers BOTH failure
+    // modes seen in the field: mobile/iOS autoplay blocked outside the tap (video stays PAUSED → the
+    // tap-to-start overlay), and desktop/other camera busy (video PLAYS but stays BLACK → clear guidance).
     startFacePlayback();
     // 3) Load the models AFTER the camera is already live (so a slow CDN doesn't delay the preview).
     setStatus('Loading face model…');
@@ -1080,42 +1087,63 @@ async function startFaceVerification() {
       faceapi.nets.faceLandmark68TinyNet.loadFromUri(FACE_MODELS),
       faceapi.nets.faceRecognitionNet.loadFromUri(FACE_MODELS)
     ]);
-    // Don't clobber a live "Tap to start" prompt: if autoplay was blocked the overlay is showing and
-    // startFacePlayback() owns the status until the user taps. Only set the ready/black message once playing.
-    if (!vid.paused) {
-      setStatus(isVideoBlack(vid)
-        ? 'Camera image is black — close other apps using the camera, open the lens cover, then reload.'
-        : 'Ready — face a bright light (a window/lamp), fill the frame, then Capture.');
-    }
-    $('#face-capture').disabled = false;
+    _faceModelsReady = true;      // the readiness watcher will enable Capture once the frame is also live
+    watchFaceReady();             // re-evaluate now that models are in (in case the frame was live first)
   } catch (e) {
     setStatus('');
     toast(e.name === 'NotAllowedError' ? 'Camera blocked — tap the camera icon in the address bar and choose Allow, then reload.' : (e.message || 'Camera unavailable — close other apps using it, allow permission, then reload. See “Camera not working?”.'));
   }
 }
 
-// Start (or resume) video playback and manage the tap-to-start overlay. Called both from
-// startFaceVerification (where autoplay is often blocked on mobile) and directly from the overlay's
-// onclick — a tap is a fresh user gesture that iOS/Low-Power-Mode always honour for play().
+// Start (or resume) playback, then hand off to watchFaceReady(). Called from startFaceVerification and
+// directly from the #face-tap overlay's onclick — a tap is a fresh user gesture that iOS/Low-Power always
+// honour for play(), which the deferred autoplay after getUserMedia does not get.
 async function startFacePlayback() {
-  const vid = $('#face-vid'), tap = $('#face-tap');
-  const setStatus = m => { const el = $('#face-status'); if (el) el.textContent = m; };
-  try { await vid.play(); } catch { /* still blocked — the overlay below asks for a tap */ }
-  // Give the first frames a moment to decode before judging paused/black.
-  await new Promise(r => setTimeout(r, 500));
-  if (vid.paused) {
-    if (tap) tap.style.display = 'block';                 // autoplay blocked → ask for a real tap
-    setStatus('Tap the preview above to start your camera.');
-  } else if (isVideoBlack(vid)) {
-    if (tap) tap.style.display = 'none';                  // it's playing, just no image
-    setStatus('Camera is on but the image is black — close other apps using it (WhatsApp/Zoom/Meet), uncover the lens, improve lighting.');
-  } else {
-    if (tap) tap.style.display = 'none';                  // live and bright → good to go
-    setStatus('Ready — face a bright light (a window/lamp), fill the frame, then Capture.');
-  }
+  const vid = $('#face-vid');
+  try { await vid.play(); } catch { /* still blocked — watchFaceReady shows the tap overlay */ }
+  watchFaceReady();
 }
 
-function stopFaceStream() { if (_faceStream) { _faceStream.getTracks().forEach(t => t.stop()); _faceStream = null; } }
+// Poll (every 400ms) until the preview is genuinely usable — PLAYING, not black, AND the models are
+// loaded — then enable Capture. Until then Capture stays disabled and the status tells the user exactly
+// what to do: tap to start (autoplay blocked), or free the camera (playing but black / another app).
+// This is the single source of truth for the Capture button, so it can never be clicked on a dead feed.
+function stopFaceReadyWatch() { if (_faceReadyTimer) { clearInterval(_faceReadyTimer); _faceReadyTimer = null; } }
+function watchFaceReady() {
+  const vid = $('#face-vid'), tap = $('#face-tap'), cap = $('#face-capture');
+  const setStatus = m => { const el = $('#face-status'); if (el) el.textContent = m; };
+  stopFaceReadyWatch();
+  const started = Date.now();
+  const tick = () => {
+    if (!_faceStream) { stopFaceReadyWatch(); return; }        // stream released (stopped / navigated away)
+    const paused = vid.paused, black = isVideoBlack(vid);
+    if (!paused && !black) {                                   // preview is LIVE
+      if (tap) tap.style.display = 'none';
+      if (_faceModelsReady) {
+        if (cap) cap.disabled = false;                        // ready to capture
+        setStatus('Ready — face a bright light (a window/lamp), fill the frame, then Capture.');
+        stopFaceReadyWatch();
+      } else {
+        setStatus('Loading face model…');                     // frame live, still fetching the model
+      }
+      return;
+    }
+    if (cap) cap.disabled = true;                             // NEVER allow capture on a paused/black feed
+    if (paused) {                                             // autoplay blocked → a real tap is required
+      if (tap) tap.style.display = 'block';
+      setStatus('Tap the preview above to start your camera.');
+    } else {                                                  // playing but black → camera busy/covered/dark
+      if (tap) tap.style.display = 'none';
+      setStatus(Date.now() - started > 2500
+        ? 'Camera is on but the image is black — another app (WhatsApp / Zoom / Camera) is likely using it. Close that app, then tap “Verify with camera” again.'
+        : 'Warming up the camera…');
+    }
+  };
+  tick();
+  _faceReadyTimer = setInterval(tick, 400);
+}
+
+function stopFaceStream() { stopFaceReadyWatch(); if (_faceStream) { _faceStream.getTracks().forEach(t => t.stop()); _faceStream = null; } }
 
 // Turn a server liveness-reason into a short, ACTIONABLE hint (never a raw check name like
 // "(identity_consistent)"). All the common failures come down to light, framing, or holding steady.
@@ -1130,49 +1158,43 @@ function livenessHint(reason) {
   return 'Not verified — retake in bright, even light, holding your phone steady.';
 }
 
-// Active-liveness capture: the server issues a random action challenge, we walk the user through it
-// while continuously sampling per-frame 68-pt landmarks + face descriptors, and submit the sequence.
-// The SERVER re-derives the blink/turn/consistency signals — the client is never trusted to self-assert.
-const LIVENESS_PROMPT = { blink: 'Blink a few times 👀', turn_left: 'Slowly turn your head LEFT ⬅️', turn_right: 'Slowly turn your head RIGHT ➡️' };
+// Simple face-detection capture. We detect a REAL face in the live preview (@vladmandic/face-api → a
+// 128-d descriptor), grab that frame as the selfie, and submit it. The server still validates the
+// descriptor, enrols it, and runs the duplicate-face ban-evasion scan — it just doesn't require the
+// blink/turn liveness challenge for now. (Re-enable with LIVENESS_REQUIRED=true on the server; the
+// challenge endpoint + engine are still in place.)
 async function captureFace() {
   const vid = $('#face-vid'), setStatus = m => { const el = $('#face-status'); if (el) el.textContent = m; };
+  // Never run detection against a dead preview (paused/black) — bounce to the readiness watcher, which
+  // shows the tap-to-start / free-the-camera guidance instead of failing silently.
+  if (!_faceStream || vid.paused || isVideoBlack(vid)) { watchFaceReady(); return; }
   $('#face-capture').disabled = true;
   try {
-    setStatus('Starting a quick liveness check…');
-    const ch = await api('/verification/selfie/challenge', { method: 'POST' });
-    if (!ch || !ch.challengeId || !Array.isArray(ch.actions)) throw new Error('Could not start the liveness check — try again.');
+    setStatus('Detecting your face…');
     const opts = new faceapi.TinyFaceDetectorOptions({ inputSize: 416, scoreThreshold: 0.5 });
-    const frames = [], startedAt = Date.now();
-    let lastDescriptor = null;
-    const sample = async () => {
-      const det = await faceapi.detectSingleFace(vid, opts).withFaceLandmarks(true).withFaceDescriptor();
-      if (det) {
-        frames.push({ landmarks: det.landmarks.positions.map(p => ({ x: p.x, y: p.y })), descriptor: Array.from(det.descriptor), t: Date.now() - startedAt });
-        lastDescriptor = Array.from(det.descriptor);
-      }
-    };
-    // Walk each prompted action (~2.5s each), sampling ~5 frames/second.
-    for (const action of ch.actions) {
-      setStatus(LIVENESS_PROMPT[action] || 'Follow the prompt on screen');
-      const until = Date.now() + 2500;
-      while (Date.now() < until) { await sample(); await new Promise(r => setTimeout(r, 200)); }
+    // Try for a confident single-face detection over a short window (camera/exposure can take a moment).
+    let det = null;
+    const until = Date.now() + 7000;
+    while (Date.now() < until) {
+      det = await faceapi.detectSingleFace(vid, opts).withFaceLandmarks(true).withFaceDescriptor();
+      if (det && det.descriptor) break;
+      await new Promise(r => setTimeout(r, 150));
     }
-    const minFrames = ch.minFrames || 8;
-    while (frames.length < minFrames && Date.now() - startedAt < 30000) { await sample(); await new Promise(r => setTimeout(r, 150)); }
-    if (frames.length < minFrames) { setStatus(''); toast('Could not capture enough frames — retry in good light.'); $('#face-capture').disabled = false; return; }
+    if (!det || !det.descriptor) { toast('No face detected — center your face, fill the frame, and use good, even light.'); watchFaceReady(); return; }
 
-    // Final frame = the selfie image + enrolled descriptor.
+    // Capture the current frame as the selfie + send the detected descriptor for enrolment/dedup.
+    const descriptor = Array.from(det.descriptor);
     const c = document.createElement('canvas');
     c.width = vid.videoWidth; c.height = vid.videoHeight;
     c.getContext('2d').drawImage(vid, 0, 0);
     const base64 = c.toDataURL('image/jpeg', 0.85).split(',')[1];
 
     setStatus('Verifying…');
-    const r = await api('/verification/selfie', { method: 'POST', body: { base64, challengeId: ch.challengeId, frames, faceDescriptor: lastDescriptor } });
-    stopFaceStream();
-    if (r.status === 'approved') { toast('Face verified — set as your first profile photo ✓'); await refreshUserAndRoute(); }
-    else { setStatus(''); toast(livenessHint(r.reason)); $('#face-capture').disabled = false; }
-  } catch (e) { setStatus(''); toast(e.message || 'Verification failed — try again.'); $('#face-capture').disabled = false; }
+    const r = await api('/verification/selfie', { method: 'POST', body: { base64, faceDescriptor: descriptor } });
+    if (r.status === 'approved') { stopFaceStream(); toast('Face verified — set as your first profile photo ✓'); await refreshUserAndRoute(); }
+    // Not approved: keep the stream live for an in-place retry; re-arm the watcher to re-enable Capture.
+    else { toast(r.reason || 'Not verified — center your face in good, even light and try again.'); watchFaceReady(); }
+  } catch (e) { toast(e.message || 'Verification failed — try again.'); if (_faceStream) watchFaceReady(); else { const c = $('#face-capture'); if (c) c.disabled = false; } }
 }
 
 // ---- Geometric read (opt-in): face geometry → a temperament READING ----
