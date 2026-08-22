@@ -130,19 +130,17 @@ async function connect() {
   }
 }
 
-function show(tab) {
+async function show(tab) {
   if (tab !== 'locations' && LOC.timer) { clearInterval(LOC.timer); LOC.timer = null; }   // stop live polling when leaving the map
   if (tab !== 'shares' && SHARES.timer) { clearInterval(SHARES.timer); SHARES.timer = null; }
   ['overview','users','llm','audit','test','commerce','coupons','locations','shares'].forEach(t => $('#tb-'+t).classList.toggle('on', t===tab));
-  if (tab==='overview') renderOverview();
-  if (tab==='users') renderUsers();
-  if (tab==='llm') renderLLM();
-  if (tab==='audit') renderAudit();
-  if (tab==='test') renderTest();
-  if (tab==='commerce') renderCommerce();
-  if (tab==='coupons') renderCoupons();
-  if (tab==='locations') renderLocations();
-  if (tab==='shares') renderShares();
+  const R = { overview: renderOverview, users: renderUsers, llm: renderLLM, audit: renderAudit, test: renderTest, commerce: renderCommerce, coupons: renderCoupons, locations: renderLocations, shares: renderShares }[tab];
+  if (!R) return;
+  // Immediate feedback + NEVER fail silently: a render that throws (an endpoint erroring) used to leave
+  // the tab blank ("takes nowhere"). Now it shows a loading state, then the content or the real error.
+  $('#view').innerHTML = '<div class="card"><div class="sub">Loading…</div></div>';
+  try { await R(); }
+  catch (e) { $('#view').innerHTML = `<div class="card"><b>Couldn't load “${tab}”.</b><div class="sub" style="margin-top:8px">${esc((e && e.message) || String(e))}</div></div>`; }
 }
 
 // ---- Commerce & Tax editor: prices, per-country taxes, gateway fee, cancellation ----
