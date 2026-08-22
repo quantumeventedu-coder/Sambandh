@@ -54,6 +54,20 @@ describe('verifyLiveness', () => {
     expect(r.checks.find(c => c.check === 'action:blink').pass).toBe(false);
   });
 
+  test('a REAL moving capture whose descriptor DRIFTS with the head-turn still passes identity (not a swap)', () => {
+    // Same person, but the descriptor drifts as they blink + turn (mobile tiny-models are noisy).
+    // frame[0]→most-drifted exceeds the old 0.55 cutoff; the robust median keeps every frame in budget.
+    const drift = (k) => Array(128).fill(0.1 + k);
+    const frames = [
+      face(0.30, 0, 0, drift(0)), face(0.10, 0, 300, drift(0.01)), face(0.30, 0, 600, drift(0.02)),      // blink
+      face(0.30, -0.30, 900, drift(0.05)), face(0.30, 0, 1200, drift(0.06)),                              // turn left (drifted)
+      face(0.30, 0.30, 1500, drift(0.07)), face(0.30, 0, 1800, drift(0.07)), face(0.30, 0, 2100, drift(0.07)), // turn right
+    ];
+    const r = liveness.verifyLiveness({ actions: ['blink', 'turn_left', 'turn_right'], issuedAt: 0 }, frames, 1000);
+    expect(r.checks.find(c => c.check === 'identity_consistent').pass).toBe(true);   // drift ≠ a swap
+    expect(r.live).toBe(true);
+  });
+
   test('an IDENTITY SWAP mid-capture is REJECTED', () => {
     const frames = liveCapture();
     frames[3] = face(0.30, -0.30, 900, OTHER);                     // a different face sneaks in

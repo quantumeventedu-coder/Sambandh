@@ -1011,8 +1011,12 @@ async function startFaceVerification() {
       faceapi.nets.faceRecognitionNet.loadFromUri(FACE_MODELS)
     ]);
     _faceStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user', width: 640 }, audio: false });
-    $('#face-vid').srcObject = _faceStream;
-    setStatus('Ready — look straight at the camera in good light.');
+    const vid = $('#face-vid');
+    vid.srcObject = _faceStream;
+    // A dynamically-inserted <video> doesn't always honour the autoplay attribute on mobile — start it
+    // explicitly so the preview actually shows (a black preview means poor light → a failing capture).
+    try { await vid.play(); } catch { /* autoplay attr is the fallback */ }
+    setStatus('Ready — face a bright light (a window/lamp), fill the frame, then Capture.');
     $('#face-capture').disabled = false;
   } catch (e) {
     setStatus('');
@@ -1021,6 +1025,19 @@ async function startFaceVerification() {
 }
 
 function stopFaceStream() { if (_faceStream) { _faceStream.getTracks().forEach(t => t.stop()); _faceStream = null; } }
+
+// Turn a server liveness-reason into a short, ACTIONABLE hint (never a raw check name like
+// "(identity_consistent)"). All the common failures come down to light, framing, or holding steady.
+function livenessHint(reason) {
+  const r = String(reason || '').toLowerCase();
+  if (r.includes('identity')) return 'Couldn’t confirm it was one steady face — use bright, even light, fill the frame, and move slowly.';
+  if (r.includes('motion') || r.includes('static')) return 'Please move a little — blink and turn your head as prompted.';
+  if (r.includes('blink')) return 'Blink clearly when prompted, in good light.';
+  if (r.includes('left') || r.includes('right') || r.includes('order')) return 'Follow the prompts in order — turn your head slowly left, then right.';
+  if (r.includes('short') || r.includes('frames')) return 'Hold steady a bit longer in good light and try again.';
+  if (r.includes('expired')) return 'That took too long — tap Capture to start a fresh check.';
+  return 'Not verified — retake in bright, even light, holding your phone steady.';
+}
 
 // Active-liveness capture: the server issues a random action challenge, we walk the user through it
 // while continuously sampling per-frame 68-pt landmarks + face descriptors, and submit the sequence.
@@ -1063,7 +1080,7 @@ async function captureFace() {
     const r = await api('/verification/selfie', { method: 'POST', body: { base64, challengeId: ch.challengeId, frames, faceDescriptor: lastDescriptor } });
     stopFaceStream();
     if (r.status === 'approved') { toast('Face verified — set as your first profile photo ✓'); await refreshUserAndRoute(); }
-    else { setStatus(''); toast('Not verified: ' + (r.reason || 'please try again')); $('#face-capture').disabled = false; }
+    else { setStatus(''); toast(livenessHint(r.reason)); $('#face-capture').disabled = false; }
   } catch (e) { setStatus(''); toast(e.message || 'Verification failed — try again.'); $('#face-capture').disabled = false; }
 }
 
