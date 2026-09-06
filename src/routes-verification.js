@@ -193,7 +193,14 @@ router.post('/selfie', requireAuth, async (req, res, next) => {
 
     const buffer = Buffer.from(base64, 'base64');
     const key = `verification/${req.userId}/id/selfie_${Date.now()}_${crypto.randomBytes(8).toString('hex')}.jpg`;
-    await uploadPrivate(key, buffer, 'image/jpeg');   // PRIVATE bucket — no public URL
+    // Store the selfie image for admin review — but BEST-EFFORT. Storing the image is secondary to the
+    // verification decision (face detection + descriptor enrolment + duplicate scan need no stored file),
+    // so a misconfigured/unreachable private bucket must NEVER 500 the whole verification. This ran before
+    // the decision and threw for every user when the private bucket failed — the "server error during
+    // verification, both methods, multiple users" incident.
+    let storedKey = null;
+    try { await uploadPrivate(key, buffer, 'image/jpeg'); storedKey = key; }   // PRIVATE bucket — no public URL
+    catch (e) { console.error('[verify/selfie] private doc upload failed (continuing):', e && e.message); }
 
     // Our own face verification: the browser sends a 128-d face descriptor
     // (@vladmandic/face-api). Validate server-side, then check for the same face
@@ -266,7 +273,7 @@ router.post('/selfie', requireAuth, async (req, res, next) => {
       userId: req.userId,
       type: 'selfie',
       claim: { checks: decision.checks },
-      documents: [{ type: 'selfie', key, private: true, uploadedAt: new Date() }],
+      documents: storedKey ? [{ type: 'selfie', key: storedKey, private: true, uploadedAt: new Date() }] : [],
       status: decision.approved ? 'approved' : 'rejected',
       submittedAt: new Date(),
       reviewedAt: new Date(),
@@ -279,10 +286,13 @@ router.post('/selfie', requireAuth, async (req, res, next) => {
     if (decision.approved) {
       await applyApproval(verification);
 
-      // The verified selfie becomes the FIRST (primary) profile photo.
-      // It stays pinned first even when more photos are added later.
+      // The verified selfie becomes the FIRST (primary) profile photo. BEST-EFFORT for the same reason:
+      // a storage hiccup must not fail an already-approved verification — the user is verified either way
+      // (the feed gates on selfieVerified, not photo count) and the onboarding photos step prompts for one.
       const photoKey = `users/${req.userId}/photos/selfie_${Date.now()}.jpg`;
-      const photoUrl = await uploadToR2(photoKey, buffer, 'image/jpeg');
+      let photoUrl = null;
+      try { photoUrl = await uploadToR2(photoKey, buffer, 'image/jpeg'); }
+      catch (e) { console.error('[verify/selfie] profile photo upload failed (continuing):', e && e.message); }
       const user = await User.findById(req.userId);
       const others = (user.profile?.photos || []).filter(p => !p.fromSelfie).map(p => ({ ...p.toObject?.() || p, isPrimary: false }));
       const { photoBytesHash } = require('./services/risk-engine');
@@ -290,10 +300,9 @@ router.post('/selfie', requireAuth, async (req, res, next) => {
       const faceUpdate = (enrolledDesc && isValidDescriptor(enrolledDesc))
         ? { faceDescriptor: enrolledDesc, faceEnrolledAt: new Date() } : {};   // the PROVEN-LIVE face, never a raw client field
       await User.findByIdAndUpdate(req.userId, {
-        'profile.photos': [
-          { url: photoUrl, isPrimary: true, fromSelfie: true, uploadedAt: new Date() },
-          ...others
-        ].slice(0, 6),
+        'profile.photos': photoUrl
+          ? [{ url: photoUrl, isPrimary: true, fromSelfie: true, uploadedAt: new Date() }, ...others].slice(0, 6)
+          : others.slice(0, 6),                                  // storage down → keep any existing photos, no selfie tile
         photoHashes: [...hashes],
         ...faceUpdate
       });
