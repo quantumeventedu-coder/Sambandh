@@ -946,13 +946,21 @@ function obId() {
 // live stream. Sets _faceModelsReady so the readiness watcher knows Capture can be enabled.
 async function ensureFaceModels() {
   if (_faceModelsReady) return;
-  if (typeof faceapi === 'undefined') await loadScript(FACE_CDN);
+  // 1) Script: self-hosted (same origin) first, CDN fallback.
+  if (typeof faceapi === 'undefined') {
+    try { await loadScript(FACE_SCRIPT_LOCAL); }
+    catch { await loadScript(FACE_CDN); }
+  }
   try { if (faceapi.tf) { try { await faceapi.tf.setBackend('webgl'); } catch { /* fall back to CPU */ } if (faceapi.tf.ready) await faceapi.tf.ready(); } } catch { /* ignore */ }
-  await Promise.all([
-    faceapi.nets.tinyFaceDetector.loadFromUri(FACE_MODELS),
-    faceapi.nets.faceLandmark68TinyNet.loadFromUri(FACE_MODELS),
-    faceapi.nets.faceRecognitionNet.loadFromUri(FACE_MODELS),
+  // 2) Model weights: self-hosted first (the 6.4MB recognition model is the one a blocked CDN strands),
+  //    CDN fallback only if the self-hosted assets are somehow missing.
+  const loadFrom = (base) => Promise.all([
+    faceapi.nets.tinyFaceDetector.loadFromUri(base),
+    faceapi.nets.faceLandmark68TinyNet.loadFromUri(base),
+    faceapi.nets.faceRecognitionNet.loadFromUri(base),
   ]);
+  try { await loadFrom(FACE_MODELS_LOCAL); }
+  catch (e) { console.warn('[face] self-hosted models failed, trying CDN:', e && e.message); await loadFrom(FACE_MODELS); }
   _faceModelsReady = true;
 }
 
@@ -1017,6 +1025,11 @@ function obSelfie() {
 }
 
 // ---- Own face verification via @vladmandic/face-api (client-side ML, CDN) ----
+// SELF-HOSTED first (same origin — always reachable for anyone who can load the app, and NOT subject to
+// the CDN blocking/throttling some Indian ISPs apply to jsdelivr, which was leaving the 6.4MB face model
+// undownloadable → no descriptor → verification failing for every user). CDN kept only as a fallback.
+const FACE_SCRIPT_LOCAL = '/vendor/face-api/face-api.min.js';
+const FACE_MODELS_LOCAL = '/models';
 const FACE_CDN = 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api@1.7.13/dist/face-api.min.js';
 const FACE_MODELS = 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api@1.7.13/model';
 let _faceStream = null;

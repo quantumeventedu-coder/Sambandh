@@ -29,4 +29,8 @@ paths = [
   '''package-lock\.json''',        # integrity hashes trip entropy rules
   '''\.cache/''',
   '''coverage/''',
+  # Vendored, self-hosted @vladmandic/face-api assets (client ML, no secrets): the binary model
+  # weights and the minified library are high-entropy and would false-positive the entropy rules.
+  '''public/models/''',
+  '''public/vendor/''',
 ]
