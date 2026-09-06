@@ -1,0 +1,6 @@
+# Vendored @vladmandic/face-api assets — keep byte-exact. The .bin model weights MUST NOT undergo
+# line-ending conversion (it would corrupt the tensors and break face detection). The library + JSON
+# manifests are marked -text too so they stay identical to the published files.
+public/models/*.bin binary
+public/models/*.json -text
+public/vendor/face-api/*.js -text
