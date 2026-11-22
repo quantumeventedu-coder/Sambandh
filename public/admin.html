@@ -75,6 +75,7 @@ fetch('/health').then(r=>r.json()).then(h => {
     <button id="tab-ver" class="active" onclick="show('ver')">Verification queue</button>
     <button id="tab-rep" onclick="show('rep')">Reports queue</button>
     <button id="tab-dis" onclick="show('dis')">Lakshan disputes</button>
+    <button id="tab-lak" onclick="show('lak');loadLakshanQueue()">Lakshan review</button>
     <button id="tab-act" onclick="show('act')">Activity & audit</button>
   </nav>
   <section id="sec-ver"><h2>Verification — fully automated</h2>
@@ -82,6 +83,9 @@ fetch('/health').then(r=>r.json()).then(h => {
     <div id="ver-list"></div></section>
   <section id="sec-rep" style="display:none"><h2>User reports (24h SLA — IT Rules 2021)</h2><div id="rep-list"></div></section>
   <section id="sec-dis" style="display:none"><h2>Lakshan Book disputes (7-day SLA)</h2><div id="dis-list"></div></section>
+  <section id="sec-lak" style="display:none"><h2>Lakshan review — automated observations awaiting a human</h2>
+    <p style="color:#777;font-size:13px;margin:-4px 0 12px">Nothing here affects how other members see someone until you confirm it. Read both statements, the timing and the member's own response. Confirm only a genuine, unexplained inconsistency; dismiss anything with a plausible explanation.</p>
+    <div id="lak-list"></div></section>
   <section id="sec-act" style="display:none">
     <h2>Platform events — last 7 days</h2><div id="events-list"></div>
     <h2>Audit log — moderator actions</h2><div id="audit-list"></div>
@@ -116,10 +120,32 @@ async function login() {
 }
 
 function show(which) {
-  for (const t of ['ver','rep','dis','act']) {
+  for (const t of ['ver','rep','dis','lak','act']) {
     document.getElementById('sec-'+t).style.display = t===which?'block':'none';
     document.getElementById('tab-'+t).classList.toggle('active', t===which);
   }
+}
+
+// Lakshan human review (src/intelligence/lakshan.js). Only a confirmation here has public effect.
+async function loadLakshanQueue() {
+  const el = document.getElementById('lak-list');
+  el.innerHTML = '<div class="card">Loading…</div>';
+  try {
+    const r = await api('/intelligence/lakshan/review-queue');
+    el.innerHTML = r.queue.length ? r.queue.map(a => `<div class="card">
+      <div><b>${esc(a.claimType || 'statement')}</b> · ${esc(a.classification.replace(/_/g, ' '))} · confidence ${Math.round(a.confidence * 100)}% · status <b>${esc(a.status)}</b></div>
+      ${a.statements.map(s => `<div style="border-left:2px solid #D9B26A;padding:4px 10px;margin:8px 0"><small style="color:#777">${s.role === 'prior' ? 'Earlier' : 'Later'} · ${esc(new Date(s.at).toLocaleString())} · ${esc((s.epistemic || '').replace(/_/g, ' '))}</small><div>${esc(s.text)}</div></div>`).join('')}
+      <p style="font-size:13px;color:#555">${esc(a.explanation)}</p>
+      ${a.userResponse ? `<p style="font-size:13px"><b>Member's response (${esc(a.userResponse.action)}):</b> ${esc(a.userResponse.text || '')}</p>` : ''}
+      <div class="row" style="gap:8px;margin-top:8px"><input id="lk-n-${a.id}" placeholder="Review notes (kept in the audit log)" style="flex:1"/>
+        <button onclick="reviewLakshan('${a.id}','confirm')">Confirm</button><button onclick="reviewLakshan('${a.id}','dismiss')">Dismiss</button></div></div>`).join('')
+      : '<div class="card">No observations awaiting review.</div>';
+  } catch (e) { el.innerHTML = '<div class="card">' + esc(e.message) + '</div>'; }
+}
+async function reviewLakshan(id, decision) {
+  if (decision === 'confirm' && !confirm('Confirm this observation? It will become visible to other members as a reviewed inconsistency.')) return;
+  try { await api('/intelligence/lakshan/assessments/' + id + '/review', { method: 'POST', body: { decision, notes: (document.getElementById('lk-n-' + id) || {}).value || '' } }); loadLakshanQueue(); }
+  catch (e) { alert(e.message); }
 }
 
 async function refresh() {

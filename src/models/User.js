@@ -110,6 +110,30 @@ const UserSchema = new mongoose.Schema({
       system: { type: String, enum: ['push', 'email', 'both', 'none'], default: 'push' }
     }
   },
+  // Setu Guide (assistant) controls — what the intelligence engine may do for this member.
+  intelligence: {
+    memoryEnabled: { type: Boolean, default: true },     // remember across conversations
+    webResearch: { type: Boolean, default: true },       // may search the web when needed
+    chatContext: { type: Boolean, default: false },      // may read a match chat when asked from it
+    sensitiveTopics: { type: Boolean, default: false },  // detailed guidance on sensitive topics
+    profileAccess: {
+      basics: { type: Boolean, default: true },
+      lifestyle: { type: Boolean, default: true },
+      family: { type: Boolean, default: false },
+      preferences: { type: Boolean, default: true }
+    },
+    updatedAt: Date
+  },
+  // LinkedIn-style public profile at /u/<username> — strictly opt-in. Search engines
+  // may index it only when `indexable` is also on. Shows a minimal, chosen subset.
+  publicProfile: {
+    enabled: { type: Boolean, default: false },
+    indexable: { type: Boolean, default: false },
+    showPhoto: { type: Boolean, default: false },
+    showCity: { type: Boolean, default: true },
+    headline: String,
+    updatedAt: Date
+  },
   role: { type: String, enum: ['user', 'moderator', 'admin'], default: 'user' },
   preview: { type: Boolean },   // owner "experience as" account — excluded from counts/feed, wiped on reset
   blockedUsers: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],

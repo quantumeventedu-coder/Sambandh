@@ -56,6 +56,15 @@ if (process.env.NODE_ENV === 'production' || process.env.TRUST_PROXY === 'true')
 // Trace every request first (assigns req.reqId + req.log, echoes x-request-id).
 app.use(requestLogger());
 
+// Versioned API for the native apps: /api/v1/<x> is the SAME backend as /api/<x>
+// (one API for web, Android and iOS). v1-native paths (meta, devices, public)
+// are served by routes-v1; everything else is rewritten before routing.
+const { NATIVE: V1_NATIVE } = require('./routes-v1');
+app.use((req, res, next) => {
+  if (req.url.startsWith('/api/v1/') && !V1_NATIVE.test(req.url)) req.url = '/api/' + req.url.slice('/api/v1/'.length);
+  next();
+});
+
 app.use(helmet({ contentSecurityPolicy: false })); // CSP off so the local web app can load Socket.io + inline styles
 
 // CORS: allow an explicit list of origins (CORS_ORIGINS, comma-separated, or
@@ -112,6 +121,7 @@ app.use('/api/community', require('./routes-community')); // anonymous topic roo
 app.use('/api/astro', require('./routes-astro'));         // full astrology / kundali
 app.use('/api/reading', require('./routes-reading'));     // plain-language readings (no jargon)
 app.use('/api/ai', require('./routes-ai')); // reusable AI API (per-app X-AI-Key)
+app.use('/api/superadmin/intelligence', authRoutes.requireSuperAdmin, require('./routes-intelligence').adminRouter); // models, health, jobs, quality — aggregates only
 app.use('/api/superadmin', require('./routes-superadmin')); // owner-only, SUPER_ADMIN_KEY
 app.use('/api/developer', require('./routes-developer')); // internal STAFF console (own accounts + 2FA + scopes)
 app.use('/api/marketplace', require('./routes-marketplace')); // native partner/listing/order marketplace (in-house escrow + commission)
@@ -124,6 +134,10 @@ app.use('/api/court-marriage', require('./routes-court-marriage')); // court-mar
 app.use('/api/due-diligence', require('./routes-due-diligence')); // consent-gated subject-curated trust dossier
 app.use('/api/commerce', require('./routes-commerce')); // trust-aware, intent-personalised commerce recommendations
 app.use('/api/gift-passes', require('./routes-gift-passes')); // Sambandh Gift Pass system (buy → share code → redeem → grant)
+app.use('/api/intelligence', require('./routes-intelligence')); // Sambandh Setu Intelligence Engine: Setu Guide, memory, graph, web research, Lakshan
+app.use('/api/journey', require('./routes-journey'));           // Setu Journey: 8 mutual stages + Reflect
+app.use('/api/me', require('./routes-public').me);              // username + public profile controls
+app.use('/api/v1', require('./routes-v1'));                     // app bootstrap, push devices, public profile JSON
 
 // Analytics summary for the admin panel (event counts, last 7 days)
 app.get('/api/analytics/admin/summary', authRoutes.requireAdmin, async (req, res, next) => {
@@ -148,6 +162,10 @@ app.use('/api/profile', (req, res, next) => {
 });
 
 // ---- Static: marketing homepage, web app + local uploads ----
+
+// Public profiles (/u/:username), sitemap.xml, robots.txt and the app deep-link
+// association files — before static files and the SPA fallback.
+app.use(require('./routes-public').site);
 
 // Homepage at / explains the product; the app itself lives at /app.
 // Old hash deep-links (/#/chats) are forwarded to /app by home.html itself,
@@ -299,6 +317,9 @@ async function start() {
 
   const { startCrons } = require('./crons');
   startCrons();
+  // Intelligence background worker (memory extraction, research agent). On
+  // Vercel the same queue is drained by the cron at /api/intelligence/jobs/drain.
+  require('./intelligence/jobs').startWorker();
 
   const PORT = process.env.PORT || 3001;
   server.listen(PORT, () => {

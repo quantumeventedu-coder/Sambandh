@@ -1,7 +1,10 @@
 const mongoose = require('../db/odm');
 const KarmaBookSchema = new mongoose.Schema({
   userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, unique: true },
-  score: { type: Number, default: 100, min: 0, max: 100 },
+  score: { type: Number, default: 100, min: 0, max: 100 },   // internal: includes unreviewed automated signals
+  // PUBLIC score: moves only when a human moderator confirms a Lakshan assessment
+  // (src/intelligence/lakshan.js). This is what other members see and filter on.
+  reviewedScore: { type: Number, default: 100, min: 0, max: 100 },
   lies: [{
     claimId: mongoose.Schema.Types.ObjectId,
     severity: { type: String, enum: ['low', 'medium', 'high'] },
