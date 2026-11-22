@@ -80,7 +80,7 @@ function textOf(node, out = []) {
 }
 
 function clean(parts) {
-  return parts.join('').replace(/[ \t ]+/g, ' ').replace(/ *\n */g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+  return parts.join('').replace(/[ \t\u00A0]+/g, ' ').replace(/ *\n */g, '\n').replace(/\n{3,}/g, '\n\n').trim();
 }
 
 function findAll(node, pred, acc = []) {

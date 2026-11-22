@@ -25,7 +25,7 @@ function normalize(s) {
   return String(s == null ? '' : s)
     .normalize('NFKC')
     .toLowerCase()
-    .replace(/[​-‍﻿]/g, '')
+    .replace(/[\u200B-\u200D\uFEFF]/g, '')
     .replace(/[^\p{L}\p{N}\s'-]/gu, ' ')
     .replace(/\s+/g, ' ')
     .trim();
@@ -66,7 +66,7 @@ function keywords(s, k = 12) {
 function sentences(s) {
   return String(s || '')
     .replace(/\s+/g, ' ')
-    .split(/(?<=[.!?।])\s+(?=[\p{Lu}\p{N}"'(])|\n+/u)
+    .split(/(?<=[.!?\u0964])\s+(?=[\p{Lu}\p{N}"'(])|\n+/u)
     .map(x => x.trim())
     .filter(x => x.length > 0);
 }

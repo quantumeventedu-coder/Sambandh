@@ -323,7 +323,7 @@ async function respond({ userId, conversationId = null, message, context = null,
       onToken: (t) => onEvent('token', { t }),
       grounding: { question: text, memories: gathered.memories.map(m => ({ text: m.text, when: new Date(m.createdAt).toISOString().slice(0, 10) })), openItems: gathered.openItems, knowledge: kb, sources: sources.map(s => ({ n: s.n, text: s.text || s.excerpt })), conflicts: [], platform, webUnavailable }
     }, tools, { maxSteps: 3 });
-  } catch (err) {
+  } catch {
     metrics.bump('assistant.generation_failed');
     out = { text: 'I am having trouble answering right now. Please try again in a moment.', model: { id: 'none', provider: 'none', mode: 'error' }, usage: {} };
   }

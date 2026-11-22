@@ -14,6 +14,7 @@
 //              extractive answering + local hashing embeddings. Keeps every
 //              feature working when no model server is reachable.
 
+const { TextDecoder } = require('util');
 const { localEmbed, sentences, stems, truncate } = require('../text');
 
 function joinUrl(base, path) {

@@ -83,7 +83,7 @@ function extractPdfText(buf) {
   }
   const text = texts.join('\n').replace(/[ \t]+/g, ' ').replace(/ *\n */g, '\n').replace(/\n{3,}/g, '\n\n').trim();
   if (!text) return { ok: false, reason: 'no extractable text (possibly scanned)', text: '' };
-  const printable = (text.match(/[\x20-\x7E -ɏऀ-ॿ\n]/g) || []).length / text.length;
+  const printable = (text.match(/[\u0900-\u097F\x20-\x7E\u00A0-\u024F\n]/g) || []).length / text.length;
   if (printable < 0.7) return { ok: false, reason: 'unsupported font encoding', text: '' };
   return { ok: true, text };
 }

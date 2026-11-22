@@ -4,6 +4,7 @@
 // API (optional), or none. Returns normalised, de-duplicated results. Never
 // pretends: with no provider configured it says so ({ configured:false }).
 
+const { URLSearchParams } = require('url');
 const config = require('../config');
 const metrics = require('../metrics');
 

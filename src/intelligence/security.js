@@ -81,8 +81,9 @@ function detectInjection(text) {
 // neutralise instruction-like lines, cap length.
 function sanitizeUntrusted(text, max = 6000) {
   let t = String(text || '')
+    // eslint-disable-next-line no-control-regex -- removing control characters is the purpose
     .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, ' ')
-    .replace(/[​-‏‪-‮⁠-⁤﻿]/g, '')
+    .replace(/[\u200B-\u200F\u202A-\u202E\u2060-\u2064\uFEFF]/g, '')
     .replace(/<\|[^|>]{0,40}\|>/g, ' ')
     .replace(/\[\/?INST\]|<<\/?SYS>>/gi, ' ');
   t = t.split('\n').map(line => (detectInjection(line).length ? '[removed: instruction-like text from an untrusted source]' : line)).join('\n');
