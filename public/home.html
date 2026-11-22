@@ -15,7 +15,7 @@
 <meta name="theme-color" content="#2A0E14"/>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 48 32'><rect width='48' height='32' rx='6' fill='%235A1420'/><path d='M6 25 Q24 3 42 25' fill='none' stroke='%23D9B26A' stroke-width='3'/><path d='M6 25H42' stroke='%23D9B26A' stroke-width='2.4'/><circle cx='18.5' cy='12' r='2.4' fill='%23F5EAD6'/><circle cx='29.5' cy='12' r='2.4' fill='%23F5EAD6'/></svg>"/>
 <link rel="manifest" href="/manifest.webmanifest"/>
-<link rel="apple-touch-icon" href="/icon-192.png"/>
+<link rel="apple-touch-icon" href="/brand/apple-touch-icon.png"/>
 <meta name="apple-mobile-web-app-capable" content="yes"/>
 <link rel="preconnect" href="https://fonts.googleapis.com"/>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
@@ -214,6 +214,17 @@ footer .row{display:flex;flex-wrap:wrap;justify-content:space-between;gap:14px;b
 footer .fbrand{font-family:var(--serif);font-size:20px;color:var(--haldi-soft)}
 @media(min-width:900px){footer{padding-bottom:40px}}
 
+.hero-ctas{display:flex;flex-wrap:wrap;gap:10px;max-width:560px}
+.hero-ctas .btn{flex:1 1 220px}
+.brand small.brand-tag{display:block;font-size:11px;color:rgba(245,234,214,.7);margin-top:3px;font-weight:500}
+.hdr-ctas{display:flex;align-items:center;gap:14px}
+.hdr-login{font-size:14px;font-weight:700;text-decoration:none;color:var(--haldi-soft)}
+.scene-fig{margin:0 0 34px;border-radius:4px;overflow:hidden;border:1px solid var(--line)}
+.scene-fig img{width:100%;height:auto;max-height:420px;object-fit:cover}
+.journey-art{margin:34px auto 0;max-width:640px;border-radius:6px;overflow:hidden;border:1px solid var(--line)}
+.journey-art img{width:100%;height:auto}
+.panel .mascot{width:88px;height:auto;border-radius:12px;margin-bottom:10px;background:#EEF4FD}
+@media(max-width:520px){.brand small.brand-tag{display:none}.hdr-login{display:none}}
 .dock{position:fixed;left:12px;right:12px;bottom:calc(12px + env(safe-area-inset-bottom,0px));z-index:50;transform:translateY(140%);transition:transform .3s}
 .dock.show{transform:none}
 .dock .btn{width:100%}
@@ -229,13 +240,13 @@ footer .fbrand{font-family:var(--serif);font-size:20px;color:var(--haldi-soft)}
 <header id="hdr">
   <div class="bar">
     <a class="brand" href="#top" aria-label="Sambandh Setu home">
-      <svg viewBox="0 0 48 32" aria-hidden="true"><path d="M5 26 Q24 2 43 26" fill="none" stroke="#D9B26A" stroke-width="2.6"/><path d="M5 26H43" stroke="#D9B26A" stroke-width="2"/><path d="M12 26v-6M17.5 26V14M30.5 26V14M36 26v-6" stroke="#D9B26A" stroke-width="1.4" opacity=".7"/><circle cx="20" cy="11.2" r="2.5" fill="#F5EAD6"/><circle cx="28" cy="11.2" r="2.5" fill="#F5EAD6"/></svg>
-      <b>Sambandh <span>Setu</span></b>
+      <img src="/brand/logo-mark-light.svg" alt="" width="40" height="40" style="width:40px;height:40px"/>
+      <span><b>Sambandh <span>Setu</span></b><small class="brand-tag">Find with purpose. Connect with trust.</small></span>
     </a>
     <nav class="top" aria-label="Sections">
       <a href="#how">How it works</a><a href="#discover">Discover</a><a href="#journey">Journey</a><a href="#guide">Setu Guide</a><a href="#pricing">Membership</a>
     </nav>
-    <a class="hdr-cta" href="/app" id="hdrCta">Open the app</a>
+    <span class="hdr-ctas"><a class="hdr-login" href="/app#/login">Log in</a><a class="hdr-cta" href="/app#/login/signup" id="hdrCta">Get started</a></span>
   </div>
 </header>
 
@@ -267,11 +278,8 @@ footer .fbrand{font-family:var(--serif);font-size:20px;color:var(--haldi-soft)}
     <h1>Sambandh <em>Setu</em></h1>
     <p class="tag">A bridge to someone real.</p>
     <p class="sub">Every member is face-verified before they can meet anyone. You match on real intent, chat at your own pace, and move forward together — never pushed, never alone.</p>
-    <form class="hero-form" id="waitHero" onsubmit="return joinWaitlist(event,'hero')">
-      <input type="email" name="email" inputmode="email" autocomplete="email" placeholder="Enter your email" required aria-label="Email address"/>
-      <button type="submit" class="btn gold">Join the waiting list</button>
-    </form>
-    <div class="hero-note" id="waitHeroMsg">Be among the first — we open the doors soon.</div>
+    <div class="hero-ctas"><a class="btn gold" href="/app#/login/signup">Get started</a><a class="btn line" href="/app#/login">Log in</a></div>
+    <div class="hero-note">Free to join and browse. Verified members only.</div>
     <div class="hero-ctl" id="heroCtl"></div>
   </div>
 </section>
@@ -284,6 +292,7 @@ footer .fbrand{font-family:var(--serif);font-size:20px;color:var(--haldi-soft)}
       <h2>Three steps. About two minutes.</h2>
       <p>One account works on the website today, and in the Android and iOS apps as they launch.</p>
     </div>
+    <figure class="scene-fig reveal"><img src="/brand/scene-bridge.jpg" alt="Two people sitting together on a stone bridge by a lake, a city skyline behind them" loading="lazy" width="612" height="458"/></figure>
     <ol class="index reveal">
       <li><div><h3>Join</h3><p>Sign up with email and password, Google or a passkey, then start your membership.</p></div></li>
       <li><div><h3>Verify it's you</h3><p>A quick live selfie in your browser proves you are a real, unique person. Aadhaar numbers are never stored.</p></div></li>
@@ -337,7 +346,7 @@ footer .fbrand{font-family:var(--serif);font-size:20px;color:var(--haldi-soft)}
       <div class="st"><div class="n">07</div><div><h3>Reflect again</h3><p>Look back at how things have grown, privately and honestly.</p></div></div>
       <div class="st"><div class="n">08</div><div><h3>Decision</h3><p>Decide your next step together. No pressure, no timelines.</p></div></div>
     </div>
-    <p class="quote reveal">Different journeys. A shared tomorrow.</p>
+    <figure class="journey-art reveal"><img src="/brand/landing-bridge.jpg" alt="Two figures walking towards each other across a bridge: Different journeys. A shared tomorrow." loading="lazy" width="635" height="430"/></figure>
   </div>
 </section>
 
@@ -345,6 +354,7 @@ footer .fbrand{font-family:var(--serif);font-size:20px;color:var(--haldi-soft)}
 <section class="dark" id="guide">
   <div class="wrap two">
     <div class="panel reveal">
+      <img class="mascot" src="/brand/guide-mascot.png" alt="Setu Guide character reading a book" loading="lazy" width="188" height="220"/>
       <div class="eyebrow">Setu Guide</div>
       <h3>An assistant that remembers what you allow — and nothing else.</h3>
       <p>Ask for conversation ideas, help understanding a profile, or what to do next. Setu Guide works across your conversations so you never have to repeat yourself.</p>
@@ -435,20 +445,16 @@ footer .fbrand{font-family:var(--serif);font-size:20px;color:var(--haldi-soft)}
 <section id="join">
   <div class="wrap reveal">
     <div class="eyebrow" style="color:var(--haldi)">Sambandh Setu</div>
-    <h2>Be first across the bridge.</h2>
-    <p>We're building the most trusted, honesty-first way to meet someone real — and opening the doors soon.</p>
-    <form class="hero-form" id="waitFinal" onsubmit="return joinWaitlist(event,'final')">
-      <input type="email" name="email" inputmode="email" autocomplete="email" placeholder="Enter your email" required aria-label="Email address"/>
-      <button type="submit" class="btn gold">Join the waiting list</button>
-    </form>
-    <div class="hero-note" id="waitFinalMsg"></div>
+    <h2>Your bridge to someone real starts here.</h2>
+    <p>Create your profile, verify it's you, and meet people who want what you want.</p>
+    <div class="hero-ctas"><a class="btn gold" href="/app#/login/signup">Create your profile</a><a class="btn line" href="/app#/login">Log in</a></div>
   </div>
 </section>
 
 <footer>
   <div class="wrap">
     <div class="row">
-      <div><span class="fbrand">Sambandh Setu</span> · verified, honest connections</div>
+      <div style="display:flex;align-items:center;gap:10px"><img src="/brand/logo-mark-light.svg" alt="" width="28" height="28"/><span><span class="fbrand">Sambandh Setu</span> · verified, honest connections</span></div>
       <div>© 2026 Sambandh · a product of AIHuA · <a href="/app">Open the app</a></div>
     </div>
     <div style="margin-top:8px;opacity:.8">Grievances: grievance@sambandh.in</div>
@@ -457,7 +463,7 @@ footer .fbrand{font-family:var(--serif);font-size:20px;color:var(--haldi-soft)}
 
 <!-- Sticky thumb-zone CTA (mobile) -->
 <div class="dock" id="dock">
-  <a class="btn gold" href="#join" onclick="document.getElementById('waitFinal')?.querySelector('input')?.focus()">Join the waiting list</a>
+  <a class="btn gold" href="/app#/login/signup">Get started</a>
 </div>
 
 <script>
@@ -507,6 +513,7 @@ footer .fbrand{font-family:var(--serif);font-size:20px;color:var(--haldi-soft)}
     if(!deck) return;
     var PEOPLE = [
       { name:'Ananya, 27', meta:'Pune · Looking for marriage', img:'/dial-scene-woman.jpg?v=2', pos:'48% 14%' },
+      { name:'Rohan, 27', meta:'Software Engineer · Hyderabad', img:'/brand/member-rohan.jpg', pos:'60% 30%' },
       { name:'Arjun, 29', meta:'Hyderabad · Looking for marriage', img:'/dial-scene-man.jpg?v=2', pos:'50% 8%' },
       { name:'Meera, 26', meta:'Bengaluru · Looking for dating', mono:'M' },
       { name:'Kabir, 31', meta:'Delhi · Looking for marriage', mono:'K' }
@@ -582,24 +589,8 @@ footer .fbrand{font-family:var(--serif);font-size:20px;color:var(--haldi-soft)}
   };
 
   // If already a member, point CTAs into the app.
-  try{ if(localStorage.getItem('sb_token')){ document.getElementById('hdrCta').textContent='Open Sambandh Setu'; } }catch(e){}
+  try{ if(localStorage.getItem('sb_token')){ var c=document.getElementById('hdrCta'); c.textContent='Open Sambandh Setu'; c.setAttribute('href','/app'); } }catch(e){}
 
-  // Waiting list.
-  window.joinWaitlist = async function(ev, source){
-    ev.preventDefault();
-    var form = ev.target;
-    var email = (form.querySelector('input[name=email]')||{}).value || '';
-    var btn = form.querySelector('button');
-    var msg = document.getElementById(source==='final' ? 'waitFinalMsg' : 'waitHeroMsg');
-    btn.disabled = true; var label = btn.textContent; btn.textContent = 'Joining…';
-    try{
-      var r = await fetch('/api/waitlist', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ email:email, source:source }) });
-      var data = await r.json().catch(function(){ return {}; });
-      if(r.ok){ if(msg){ msg.textContent = "You're on the list — we'll invite you the moment we open."; msg.style.color = '#ffd97a'; } form.reset(); }
-      else { if(msg){ msg.textContent = data.error || 'Something went wrong. Please try again.'; msg.style.color = '#ffb4c4'; } }
-    }catch(e){ if(msg){ msg.textContent = 'Network error — please try again.'; msg.style.color = '#ffb4c4'; } }
-    finally{ btn.disabled = false; btn.textContent = label; }
-  };
 </script>
 </body>
 </html>

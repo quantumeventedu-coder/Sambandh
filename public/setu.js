@@ -46,7 +46,7 @@
   // ---------------------------------------------------------------- header brand
   window.headerBar = function () {
     return `<div class="app-header setu-header">
-      <div class="wordmark setu-mark">${si('bridge')}<span>Sambandh <em>Setu</em></span></div>
+      <a class="brand-lockup" onclick="nav('#/home')" aria-label="Sambandh Setu home"><img src="/brand/logo-mark.svg" alt=""/><span><b>Sambandh Setu</b><small>Find with purpose. Connect with trust.</small></span></a>
       <div class="header-actions">
         <button onclick="showWhoLikedMe()" title="Who liked you" aria-label="Who liked you" style="color:var(--sindoor)">${ic('heart', 'ic-lg')}</button>
         <button aria-label="Notifications" onclick="nav('#/notifications')" style="color:var(--ink-mid)">${ic('bell', 'ic-lg')}<span class="notif-dot" id="notif-dot" style="display:none"></span></button>
@@ -54,26 +54,81 @@
     </div>`;
   };
 
+  // ================================================================ WELCOME (design: App Welcome Screen)
+  window.renderWelcome = function () {
+    document.body.classList.remove('auth-split');
+    screen.innerHTML = `<div class="sw-welcome">
+      <div class="top"><span class="brand-lockup lg"><img src="/brand/logo-mark.svg" alt=""/><span><b>Sambandh Setu</b><small>People · Conversations · Possibilities</small></span></span><span class="lang">English</span></div>
+      <div class="photo"><img src="/brand/welcome-couple.jpg" alt="A couple walking hand in hand"/></div>
+      <div>
+        <h1>Meaningful connections, <span>at your own pace.</span></h1>
+        <p class="lead">Discover people, understand each other, and take the next step when you're ready.</p>
+        <div class="sw-feats">
+          <div><i>${ic('users')}</i>People with shared values</div>
+          <div><i>${ic('message')}</i>Thoughtful conversations</div>
+          <div><i>${si('route')}</i>A guided journey forward</div>
+        </div>
+        <button class="sw-cta" onclick="S._authTab='signup';nav('#/login/signup')">Get Started <span aria-hidden="true">→</span></button>
+        <p class="sw-alt">Already have an account? <a onclick="S._authTab='signin';nav('#/login')">Log in</a></p>
+        <p class="sw-safe">${ic('lock')} Your information stays under your control.</p>
+      </div>
+    </div>`;
+  };
+
+  // ================================================================ AUTH (design: Web Login / Sign Up)
+  const _renderLogin = window.renderLogin;
+  if (typeof _renderLogin === 'function') {
+    window.renderLogin = function () {
+      if (/^#\/login\/signup/.test(location.hash) && !S._authTabSet) { S._authTab = 'signup'; S._authTabSet = true; }
+      const out = _renderLogin.apply(this, arguments);
+      const brand = screen.querySelector('.wordmark.center');
+      if (brand) {
+        const sub = brand.nextElementSibling;
+        if (sub && sub.classList.contains('sub')) sub.remove();
+        brand.outerHTML = `<div class="auth-brand"><span class="brand-lockup lg"><img src="/brand/logo-mark.svg" alt=""/><span><b>Sambandh Setu</b><small>Find with purpose · Connect with trust</small></span></span></div>`;
+      }
+      const signup = S._authTab === 'signup';
+      if (!screen.querySelector('.auth-art')) {
+        screen.insertAdjacentHTML('afterbegin', `<aside class="auth-art" aria-hidden="true">
+          <span class="brand-lockup"><img src="/brand/logo-mark.svg" alt=""/><span><b>Sambandh Setu</b><small>Find with purpose. Connect with trust.</small></span></span>
+          <h2>${signup ? 'Meaningful connections begin with <span>understanding.</span>' : 'Continue your <span>meaningful journey.</span>'}</h2>
+          <p>${signup ? 'Sambandh Setu is a relationship platform that helps you understand yourself, explore compatibility, and build meaningful connections with clarity and trust.' : 'Log in to your Sambandh Setu account and pick up where you left off — your reflections, preferences, and conversations are right here.'}</p>
+          <ul>
+            <li><i>${ic('heart')}</i><span><b>Your progress</b><small>Continue your journey anytime.</small></span></li>
+            <li><i>${ic('shieldCheck')}</i><span><b>Your privacy</b><small>Your information stays safe and secure.</small></span></li>
+            <li><i>${ic('users')}</i><span><b>A more thoughtful experience</b><small>Personalised guidance for meaningful connections.</small></span></li>
+          </ul>
+          <div class="scene"><img src="/brand/scene-bridge.jpg" alt=""/></div>
+        </aside>`);
+      }
+      document.body.classList.add('auth-split');
+      return out;
+    };
+    window.addEventListener('hashchange', () => { if (!/^#\/login/.test(location.hash)) document.body.classList.remove('auth-split'); });
+  }
+
   // ================================================================ HOME
   window.renderHome = async function () {
     const first = (S.user && S.user.profile && S.user.profile.firstName) || '';
     const h = new Date().getHours();
     const greet = h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening';
     screen.innerHTML = `${headerBar()}<div class="section-pad setu-home">
-      <div class="setu-greet"><h1>${greet}${first ? `, <span>${esc(first)}</span>` : ''}</h1><p class="sub">Wishing you meaningful conversations and new possibilities today.</p></div>
+      <div class="setu-banner"><h1>${greet}${first ? `, <span>${esc(first)}</span>` : ''}</h1><p>Wishing you meaningful conversations and new possibilities today.</p><img src="/brand/dash-art.png" alt=""/></div>
       <div id="h-conn"><div class="skel" style="height:120px"></div></div>
       <h3 class="setu-h3">Needs your attention</h3><div id="h-attn" class="setu-list"><div class="skel" style="height:56px"></div></div>
       <div id="h-journey"></div>
       <div class="setu-card setu-guide-card" onclick="nav('#/guide')">
-        <div class="eyebrow-s">${si('guide')} Setu Guide</div>
+        <div><div class="eyebrow-s">${si('guide')} Setu Guide</div>
         <h3>Need help with your next step?</h3>
-        <p>Conversation ideas, understanding a profile, family involvement and what to do next — it remembers only what you allow.</p>
-        <span class="setu-link">Ask Setu Guide</span>
+        <p>Get personalised guidance on conversations, family involvement and next steps.</p>
+        <span class="setu-link">Ask Setu Guide</span></div>
+        <img src="/brand/guide-mascot.png" alt=""/>
       </div>
-      <div class="setu-card" onclick="nav('#/discover')">
-        <div class="eyebrow-s">${ic('search')} Discover</div>
-        <h3>Meet people who share your values</h3><p>Swipe through verified members who want what you want.</p>
-        <span class="setu-link">Find meaningful connections</span>
+      <div class="setu-card setu-teaser" onclick="nav('#/discover')">
+        <div><div class="eyebrow-s">${ic('search')} Discover</div>
+        <h3>Meet people who share your values, goals and future hopes.</h3>
+        <span class="setu-link">Find meaningful connections</span></div>
+        <img src="/brand/discover-teaser.png" alt=""/>
       </div>
       <h3 class="setu-h3">Explore</h3>
       <div class="setu-index">
@@ -138,17 +193,24 @@
   function cardHtml(p, depth) {
     const verified = p.verificationLevel && p.verificationLevel !== 'phone_only';
     const nature = typeof plainOnly === 'function' ? plainOnly(p.natureLine) : '';
-    const bg = !p.anonymous && p.photo ? `<img class="sw-img" alt="${esc(p.firstName || 'Member')}" src="${esc(p.photo)}" draggable="false" onerror="this.remove()"/>` : '';
+    const photo = !p.anonymous && p.photo ? `<img alt="${esc(p.firstName || 'Member')}" src="${esc(p.photo)}" draggable="false" onerror="this.remove()"/>` : '';
     const mono = p.anonymous ? ic('ghost', 'ic-xl') : esc((p.firstName || '?')[0].toUpperCase());
-    return `<div class="sw-card${bg ? '' : ' mono'}" data-depth="${depth}">${bg}
-      ${bg ? '' : `<div class="sw-mono">${mono}</div>`}
-      <div class="sw-stamp like">Like</div><div class="sw-stamp pass">Pass</div>
-      ${p.likesMe ? '<div class="sw-likes">Likes you</div>' : ''}
+    const role = [p.profession || (p.claims && p.claims.profession && p.claims.profession.title), p.city].filter(Boolean).map(esc).join(' · ');
+    const bio = p.bio || p.headline || '';
+    return `<div class="sw-card" data-depth="${depth}">
+      <div class="sw-photo">${photo || `<div class="sw-mono">${mono}</div>`}
+        <div class="sw-stamp like">Like</div><div class="sw-stamp pass">Pass</div>
+        ${p.likesMe ? '<div class="sw-likes">Likes you</div>' : ''}</div>
       <div class="sw-info">
-        <div class="sw-name">${esc(p.firstName || 'Member')}${p.age ? ', ' + p.age : ''}</div>
-        <div class="sw-meta">${p.city ? si('pin') + esc(p.city) : ''}${p.distanceKm != null ? ' · ' + p.distanceKm + ' km' : ''}${p.intent && p.intent[0] ? ' · ' + esc(p.intent[0]) : ''}</div>
-        <div class="sw-tags">${verified ? `<span class="v">${si('check')}${p.verificationLevel === 'fully_verified' ? 'Fully verified' : 'Verified'}</span>` : ''}${p.karma ? `<span>Lakshan ${esc(p.karma.grade)}</span>` : ''}</div>
-        ${nature ? `<div class="sw-nature">${esc(nature)} <small>— a reading, not a verified fact</small></div>` : ''}
+        <div class="sw-name">${esc(p.firstName || 'Member')}${p.age ? ', ' + p.age : ''}${verified ? `<span class="vbadge" title="Verified">${si('check')}</span>` : ''}</div>
+        <div class="sw-meta">${role || (p.city ? si('pin') + esc(p.city) : '')}${p.distanceKm != null ? ' · ' + p.distanceKm + ' km' : ''}</div>
+        <div class="sw-tags">${p.intent && p.intent[0] ? `<span>Looking for ${esc(p.intent[0])}</span>` : ''}${p.karma ? `<span>Lakshan ${esc(p.karma.grade)}</span>` : ''}</div>
+        ${bio ? `<div class="sw-quote"><b>“</b><span>${esc(String(bio).slice(0, 140))}</span></div>` : nature ? `<div class="sw-nature">${esc(nature)} <small>— a reading, not a verified fact</small></div>` : ''}
+        <div class="sw-card-actions">
+          <button class="pass" aria-label="Pass" onclick="swFling(-1)">${ic('x')}</button>
+          <button class="view" onclick="nav('#/profile/${p.userId}')">View Profile</button>
+          <button class="like" onclick="swFling(1)">${ic('heart')} Express Interest</button>
+        </div>
       </div></div>`;
   }
 
@@ -173,13 +235,13 @@
         <button class="chat" title="Message" aria-label="Message" onclick="startChat('${p.userId}', false)">${ic('message', 'ic-lg')}</button>
         <button class="like" title="Like" aria-label="Like" onclick="swFling(1)">${ic('heart', 'ic-lg')}</button>
       </div>
-      <p class="sw-hint">Swipe right to like, left to pass. Tap the card to see the full profile.</p></div>`;
+      <p class="sw-hint">Swipe right to express interest, left to pass. Tap the photo for the full profile.</p></div>`;
     const deck = $('#sw-deck');
     deck.addEventListener('keydown', e => { if (e.key === 'ArrowRight') { swFling(1); e.preventDefault(); } if (e.key === 'ArrowLeft') { swFling(-1); e.preventDefault(); } });
     const top = deck.querySelector('.sw-card[data-depth="0"]');
     if (!top) return;
     let sx = 0, sy = 0, dx = 0, moved = false, active = false;
-    top.addEventListener('pointerdown', e => { active = true; moved = false; sx = e.clientX; sy = e.clientY; dx = 0; top.setPointerCapture(e.pointerId); top.classList.add('drag'); });
+    top.addEventListener('pointerdown', e => { if (e.target.closest('button')) return; active = true; moved = false; sx = e.clientX; sy = e.clientY; dx = 0; top.setPointerCapture(e.pointerId); top.classList.add('drag'); });
     top.addEventListener('pointermove', e => {
       if (!active) return;
       dx = e.clientX - sx; const dy = (e.clientY - sy) * 0.25;
@@ -198,6 +260,33 @@
     };
     top.addEventListener('pointerup', end);
     top.addEventListener('pointercancel', end);
+  };
+
+  const _renderDiscover = window.renderDiscover;
+  if (typeof _renderDiscover === 'function') {
+    window.renderDiscover = function () {
+      const p = _renderDiscover.apply(this, arguments);
+      const dd = screen.querySelector('.dd');
+      if (dd && !dd.querySelector('.conn-head')) {
+        dd.insertAdjacentHTML('afterbegin', `<div class="conn-head"><h1>Connections</h1><p>Find meaningful connections that share your values, goals and future hopes.</p></div>
+          <div class="conn-tabs" role="tablist"><button class="on" role="tab" aria-selected="true">Discover</button><button role="tab" onclick="connRequests(this)">Requests</button><button role="tab" onclick="nav('#/chats')">Active</button></div>`);
+      }
+      return p;
+    };
+  }
+  window.connRequests = async function (btn) {
+    document.querySelectorAll('.conn-tabs button').forEach(b => { b.classList.remove('on'); b.setAttribute('aria-selected', 'false'); });
+    btn.classList.add('on'); btn.setAttribute('aria-selected', 'true');
+    const intents = document.getElementById('dd-intents'); if (intents) intents.style.display = 'none';
+    const feed = document.getElementById('feed');
+    feed.innerHTML = '<div class="dd-empty">Loading…</div>';
+    try {
+      const r = await api('/discover/likes');
+      const list = r.likes || r.users || r.profiles || [];
+      if (r.upgradeRequired) { feed.innerHTML = `<div class="dd-empty sw-empty">${ic('heart', 'ic-xl')}<b>${r.count || 0} ${r.count === 1 ? 'person has' : 'people have'} shown interest in you</b><p>See who they are with Sambandh Signature, or keep swiping — a mutual like opens a chat.</p><button class="btn-primary" onclick="buyTier('max_subscription')">See who likes you</button></div>`; return; }
+      feed.innerHTML = list.length ? `<div class="req-list">${list.map(u => `<div class="req-item"><div class="av">${u.photo ? `<img alt="" src="${esc(u.photo)}"/>` : esc((u.firstName || u.displayName || '?')[0])}</div><div><b>${esc(u.firstName || u.displayName || 'Member')}${u.age ? ', ' + u.age : ''}</b><small>Has shown interest in you</small></div><button class="btn-primary go" onclick="likeUser('${u.userId || u._id}')">Accept</button></div>`).join('')}</div>`
+        : `<div class="dd-empty sw-empty">${ic('heart', 'ic-xl')}<b>No new requests yet</b><p>When someone expresses interest in you, it appears here.</p></div>`;
+    } catch (e) { feed.innerHTML = `<div class="dd-empty">${esc(e.message)}</div>`; }
   };
 
   let flinging = false;
