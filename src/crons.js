@@ -16,6 +16,9 @@ function istNow() { return new Date(Date.now() + 5.5 * 3600 * 1000); }
 async function nightlyBatch() {
   console.log('[CRON] Nightly batch starting');
 
+  // 0. Intelligence maintenance: remove expired memories, decay stale inferences.
+  try { await require('./intelligence/learning').maintenance(); } catch (e) { console.error('[CRON] intelligence maintenance:', e.message); }
+
   // 1. Fraud scan across active users (2 AM IST per spec §2.5.6)
   try { await nightlyFraudScan(); } catch (e) { console.error('[CRON] fraud scan:', e.message); }
 

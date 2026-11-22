@@ -68,6 +68,7 @@
       <button id="tb-overview" class="on" onclick="show('overview')">Overview</button>
       <button id="tb-users" onclick="show('users')">Users &amp; Chats</button>
       <button id="tb-llm" onclick="show('llm')">AI Engine</button>
+      <button id="tb-intel" onclick="show('intel')">Intelligence</button>
       <button id="tb-audit" onclick="show('audit')">Audit trail</button>
       <button id="tb-test" onclick="show('test')">System Test</button>
       <button id="tb-commerce" onclick="show('commerce')">Commerce &amp; Tax</button>
@@ -130,11 +131,87 @@ async function connect() {
   }
 }
 
+// ---- Intelligence: self-hosted models, health, GPU, jobs, quality (aggregates only) ----
+const INTEL = { data: null };
+function intelBytes(n) { if (!n && n !== 0) return '—'; const g = n / 1073741824; return g >= 1 ? g.toFixed(1) + ' GB' : (n / 1048576).toFixed(0) + ' MB'; }
+async function intelReq(method, path, body) {
+  const r = await fetch('/api/superadmin/intelligence' + path, { method, headers: { 'X-Super-Key': KEY, 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.error || ('HTTP ' + r.status));
+  return j;
+}
+async function renderIntel(refresh) {
+  const d = INTEL.data = await intelReq('GET', '/overview' + (refresh ? '?refresh=1' : ''));
+  const live = (d.live && d.live.models) || {};
+  const rows = d.models.map(m => {
+    const s = live[m.modelKey] || {};
+    const gpu = m.gpu ? (m.gpu.kvCacheUsage != null ? 'KV cache ' + Math.round(m.gpu.kvCacheUsage * 100) + '%' + (m.gpu.running != null ? ' · ' + m.gpu.running + ' running' : '') : 'VRAM ' + intelBytes(m.gpu.vramBytes)) : '—';
+    const state = m.ok === true ? '<span class="pill g">healthy</span>' : m.ok === null ? '<span class="pill">disabled</span>' : '<span class="pill r">down</span>';
+    return `<tr><td><b>${esc(m.label || m.modelKey)}</b><div class="sub">${esc(m.modelKey)} · ${esc(m.provider)}${m.external ? ' · external (optional)' : ''}${m.model ? ' · ' + esc(m.model) : ''}${m.quantization ? ' · ' + esc(m.quantization) : ''}</div></td>
+      <td>${state}${m.error ? '<div class="sub">' + esc(m.error) + '</div>' : ''}</td><td>${esc((m.tasks || []).join(', '))}<div class="sub">tier ${esc(m.tier || '—')} · priority ${esc(m.priority)}</div></td>
+      <td>${s.calls || 0} calls<div class="sub">${s.errors || 0} errors · p50 ${s.p50 != null ? s.p50 + ' ms' : '—'} · p95 ${s.p95 != null ? s.p95 + ' ms' : '—'}</div></td>
+      <td>${(s.inputTokens || 0).toLocaleString()} in<div class="sub">${(s.outputTokens || 0).toLocaleString()} out</div></td><td>${gpu}</td>
+      <td>${m.provider === 'builtin' ? '<span class="sub">always on</span>' : `<button onclick="intelTest('${esc(m.modelKey)}')">Test</button> <button onclick="intelToggle('${esc(m.modelKey)}', ${m.enabled === false})">${m.enabled === false ? 'Enable' : 'Disable'}</button>`}</td></tr>`;
+  }).join('');
+  const jobs = d.jobs || {}; const q = d.quality || {}; const c = d.config || {};
+  const counters = (d.live && d.live.counters) || {};
+  const cnt = k => counters[k] || 0;
+  $('#view').innerHTML = `
+    <div class="card"><h3 style="font-family:Georgia,serif;margin-bottom:2px">Sambandh Setu Intelligence</h3>
+      <p style="color:#888;font-size:13px">Self-hosted first. Aggregates only — no conversation, memory or search content is ever shown here. <button onclick="show('intel');renderIntel(true)">Re-probe models</button> <button onclick="intelDrain()">Run queued jobs</button></p>
+      <table><thead><tr><th>Model</th><th>Health</th><th>Tasks</th><th>Traffic</th><th>Tokens</th><th>GPU</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>
+    <div class="card"><h3 style="font-family:Georgia,serif">Add or update a self-hosted model</h3>
+      <p style="color:#888;font-size:13px">OpenAI-compatible (vLLM, llama.cpp server, LM Studio, TGI) or Ollama. Keys are never stored here — name the env var that holds one.</p>
+      <div style="display:flex;flex-wrap:wrap;gap:8px">
+        <input id="im-key" placeholder="modelKey e.g. gpu-main" style="width:150px"/>
+        <select id="im-prov"><option value="openai">openai-compatible</option><option value="ollama">ollama</option><option value="anthropic">anthropic (external)</option></select>
+        <input id="im-url" placeholder="http://gpu-host:8000/v1" style="width:230px"/>
+        <input id="im-model" placeholder="model e.g. qwen2.5-14b-instruct-awq" style="width:240px"/>
+        <input id="im-tasks" value="chat,reasoning,extraction,classification,summarization" style="width:300px"/>
+        <select id="im-tier"><option value="large">large</option><option value="small">small</option></select>
+        <input id="im-pri" type="number" value="10" style="width:70px" title="priority (lower = tried first)"/>
+        <input id="im-keyenv" placeholder="API key env var (optional)" style="width:190px"/>
+        <label><input id="im-tools" type="checkbox" checked/> tool calling</label>
+        <button onclick="intelSave()">Save model</button></div></div>
+    <div class="card"><h3 style="font-family:Georgia,serif">Web research</h3>
+      <p>Search provider: <b>${esc(c.searchProvider || 'none')}</b>${c.searchProvider === 'none' ? ' — set a SearXNG URL to enable cited web answers.' : ''}</p>
+      <div style="display:flex;gap:8px;flex-wrap:wrap"><input id="ic-searx" placeholder="https://searxng.your-domain" style="width:300px"/>
+        <label><input id="ic-web" type="checkbox" ${c.webResearchEnabled ? 'checked' : ''}/> web research</label>
+        <label><input id="ic-mem" type="checkbox" ${c.memoryEnabled ? 'checked' : ''}/> memory</label>
+        <label><input id="ic-asst" type="checkbox" ${c.assistantEnabled ? 'checked' : ''}/> Setu Guide</label>
+        <button onclick="intelConfig()">Save</button></div>
+      <p class="sub" style="margin-top:8px">Today: ${cnt('web.search.requests')} searches · ${cnt('web.fetch.ok')} pages read · ${cnt('web.fetch.errors')} fetch errors · ${cnt('web.fetch.robots_blocked')} blocked by robots.txt</p></div>
+    <div class="card" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px">
+      <div><b>Totals</b><div class="sub">${d.totals.conversations} conversations · ${d.totals.memories} active memories · ${d.totals.entities} graph entities · ${d.totals.relations} relations</div></div>
+      <div><b>Quality (30 days)</b><div class="sub">${q.answers || 0} answers · ${q.rated || 0} rated · helpful ${q.helpfulRate != null ? Math.round(q.helpfulRate * 100) + '%' : '—'} · basic-mode share ${q.basicModeShare != null ? Math.round(q.basicModeShare * 100) + '%' : '—'} · ${q.evalExamples || 0} consented eval examples</div></div>
+      <div><b>Jobs</b><div class="sub">${Object.entries(jobs.byStatus || {}).map(([k, v]) => k + ' ' + v).join(' · ') || 'none'}</div></div>
+      <div><b>Lakshan</b><div class="sub">${Object.entries(d.lakshan || {}).map(([k, v]) => k + ' ' + v).join(' · ') || 'no assessments'}</div></div>
+      <div><b>Memory processing</b><div class="sub">${cnt('memory.retrievals')} retrievals (${cnt('memory.retrieval_hits')} with hits) · ${cnt('memory.superseded')} superseded · ${cnt('learning.corrections')} corrections</div></div>
+      <div><b>Safety</b><div class="sub">${cnt('safety.distress')} crisis replies · ${cnt('safety.injection_attempts')} injection attempts</div></div>
+    </div>`;
+}
+async function intelTest(key) { try { const r = await intelReq('POST', '/models/' + encodeURIComponent(key) + '/test'); toast(key + ': ' + (r.chat ? (r.chat.ok ? 'chat OK ' + r.chat.latencyMs + ' ms' : 'chat failed — ' + r.chat.error) : '') + (r.embedding ? ' · embeddings ' + (r.embedding.ok ? r.embedding.dims + ' dims' : 'failed') : '')); } catch (e) { toast(e.message); } }
+async function intelToggle(key, enable) { try { await intelReq('PATCH', '/models/' + encodeURIComponent(key), { enabled: enable }); renderIntel(true); } catch (e) { toast(e.message); } }
+async function intelSave() {
+  try {
+    await intelReq('POST', '/models', { modelKey: $('#im-key').value.trim(), provider: $('#im-prov').value, baseUrl: $('#im-url').value.trim(), model: $('#im-model').value.trim(),
+      tasks: $('#im-tasks').value.split(',').map(s => s.trim()).filter(Boolean), tier: $('#im-tier').value, priority: Number($('#im-pri').value) || 10,
+      apiKeyEnv: $('#im-keyenv').value.trim() || undefined, capabilities: { tools: $('#im-tools').checked, json: true, stream: true } });
+    toast('Model saved'); renderIntel(true);
+  } catch (e) { toast(e.message); }
+}
+async function intelConfig() {
+  const body = { webResearchEnabled: $('#ic-web').checked, memoryEnabled: $('#ic-mem').checked, assistantEnabled: $('#ic-asst').checked };
+  const u = $('#ic-searx').value.trim(); if (u) body.search = { provider: 'searxng', searxngUrl: u };
+  try { await intelReq('PATCH', '/config', body); toast('Saved'); renderIntel(); } catch (e) { toast(e.message); }
+}
+async function intelDrain() { try { const r = await intelReq('POST', '/jobs/drain'); toast('Ran ' + r.ran + ' job(s)'); renderIntel(); } catch (e) { toast(e.message); } }
+
 async function show(tab) {
   if (tab !== 'locations' && LOC.timer) { clearInterval(LOC.timer); LOC.timer = null; }   // stop live polling when leaving the map
   if (tab !== 'shares' && SHARES.timer) { clearInterval(SHARES.timer); SHARES.timer = null; }
-  ['overview','users','llm','audit','test','commerce','coupons','locations','shares'].forEach(t => $('#tb-'+t).classList.toggle('on', t===tab));
-  const R = { overview: renderOverview, users: renderUsers, llm: renderLLM, audit: renderAudit, test: renderTest, commerce: renderCommerce, coupons: renderCoupons, locations: renderLocations, shares: renderShares }[tab];
+  ['overview','users','llm','intel','audit','test','commerce','coupons','locations','shares'].forEach(t => $('#tb-'+t).classList.toggle('on', t===tab));
+  const R = { overview: renderOverview, users: renderUsers, llm: renderLLM, intel: () => renderIntel(), audit: renderAudit, test: renderTest, commerce: renderCommerce, coupons: renderCoupons, locations: renderLocations, shares: renderShares }[tab];
   if (!R) return;
   // Immediate feedback + NEVER fail silently: a render that throws (an endpoint erroring) used to leave
   // the tab blank ("takes nowhere"). Now it shows a loading state, then the content or the real error.

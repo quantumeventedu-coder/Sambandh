@@ -310,6 +310,11 @@ async function checkContradictions(userId, newClaims) {
       });
       await Claim.findByIdAndUpdate(claim._id, { contradicted: true });
       await Claim.findByIdAndUpdate(conflict.priorClaim._id, { contradicted: true });
+      // Lakshan Intelligence: record an evidence-grounded, explainable assessment the
+      // member can see and answer. It has NO public effect until a human confirms it.
+      try {
+        await require('./intelligence/lakshan').assessContradiction({ userId, newClaim: claim, priorClaim: conflict.priorClaim, severity: conflict.severity });
+      } catch (e) { console.warn('[LAKSHAN] assessment not recorded:', e.message); }
     }
   }
 
@@ -709,10 +714,16 @@ async function buildPublicKarmaSummary(targetUserId, _viewingUserId) {
     };
   }
 
-  const grade = scoreToGrade(book.score);
+  // PUBLIC view = human-reviewed only. Automated signals stay private to the member
+  // (and moderators) until a moderator confirms a Lakshan assessment.
+  const { confirmedSummary } = require('./intelligence/lakshan');
+  const reviewed = await confirmedSummary(targetUserId);
+  const publicScore = book.reviewedScore != null ? book.reviewedScore : 100;
+  const grade = scoreToGrade(publicScore);
   const flags = [];
+  const confirmedOf = (t) => (reviewed.byType && reviewed.byType[t]) || 0;
 
-  if (activity.exclusivityClaimedToCount >= 3) {
+  if (activity.exclusivityClaimedToCount >= 3 && confirmedOf('exclusivity') > 0) {
     flags.push({
       type: 'exclusivity_inconsistency',
       severity: 'high',
@@ -721,7 +732,7 @@ async function buildPublicKarmaSummary(targetUserId, _viewingUserId) {
     });
   }
 
-  if (activity.loveRecipientsCount >= 3) {
+  if (activity.loveRecipientsCount >= 3 && confirmedOf('emotional') > 0) {
     flags.push({
       type: 'love_bombing',
       severity: 'medium',
@@ -730,16 +741,16 @@ async function buildPublicKarmaSummary(targetUserId, _viewingUserId) {
     });
   }
 
-  if (book.contradictions.length >= 2) {
+  if (reviewed.confirmed >= 1) {
     flags.push({
       type: 'repeated_contradictions',
       severity: 'medium',
-      message: `${book.contradictions.length} statement contradictions detected over time`,
+      message: `${reviewed.confirmed} statement inconsistenc${reviewed.confirmed === 1 ? 'y' : 'ies'} confirmed by human review`,
       escalationCost: 0.5
     });
   }
 
-  if (book.manipulationFlags.some(m => m.confidence === 'high')) {
+  if (book.manipulationFlags.some(m => m.confidence === 'high') && confirmedOf('manipulation') > 0) {
     flags.push({
       type: 'manipulation_pattern',
       severity: 'high',
@@ -758,7 +769,8 @@ async function buildPublicKarmaSummary(targetUserId, _viewingUserId) {
   }
 
   return {
-    score: book.score,
+    score: publicScore,
+    reviewedOnly: true,
     grade,
     flags,
     activity,

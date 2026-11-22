@@ -58,6 +58,9 @@ const AppConfigSchema = new mongoose.Schema({
   // maps have arbitrary keys (any ISO country code). Shape + defaults are owned by
   // services/commerce-config.js; the stored value overrides the seeded defaults.
   commerce: mongoose.Schema.Types.Mixed,
+  // Sambandh Setu intelligence runtime config (search provider, feature switches,
+  // research limits). Shape + defaults owned by src/intelligence/config.js.
+  intelligence: mongoose.Schema.Types.Mixed,
   updatedAt: Date
 });
 

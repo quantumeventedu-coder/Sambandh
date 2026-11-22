@@ -1,4 +1,4 @@
-# Sambandh — native app (iOS / Android) via Capacitor
+# Sambandh Setu — native app (iOS / Android) via Capacitor
 
 This wraps the **existing** Sambandh web app into a real native app so it can do the one
 thing a browser can't: **background / "Always" location** (update location even when the app
@@ -85,3 +85,64 @@ npx cap open android   # → build/run in Android Studio
   (Alternative: set `webDir` to a bundled build instead of the remote `server.url` for a more
   "native" package; then point the web app's API calls at an absolute `https://sambandh.online/api`
   base when running natively.)
+
+
+---
+
+# Sambandh Setu — store builds, deep links and push (added 22 Nov 2026)
+
+The website, the Android app and the iOS app are **one product on one backend**:
+the native shell loads `https://www.sambandh.online`, and every client talks to the
+same API (`/api/*`, also served as `/api/v1/*` for the apps). Accounts, chats,
+journeys, Setu Guide memory and settings are therefore identical on every device.
+
+## A. App bootstrap endpoint
+`GET /api/v1/meta` returns the API version, the minimum supported app versions
+(`MIN_ANDROID_VERSION`, `MIN_IOS_VERSION` env vars) and feature switches. Use it on
+launch to show "please update" when the installed version is below the minimum.
+
+## B. Push notifications (Android + iOS through Firebase Cloud Messaging)
+1. `npm install @capacitor/push-notifications @capacitor/app && npx cap sync`
+2. Firebase console → create the project → add the Android app (`com.sambandh.app`,
+   download `google-services.json` into `android/app/`) and the iOS app (upload your
+   APNs auth key under Cloud Messaging).
+3. Server: set `FCM_SERVICE_ACCOUNT_JSON` (the service-account JSON as one value) in
+   Vercel. Without it, push is a silent no-op.
+4. Nothing else to code: `public/setu.js` (`setuNativeInit`) asks for permission,
+   registers the token with `POST /api/v1/devices`, and opens the right screen when a
+   notification is tapped. Every in-app notification is also pushed to the phone.
+
+## C. Deep links — Android App Links and iOS Universal Links
+Public profile links (`https://www.sambandh.online/u/<username>`) and app links open
+straight in the app when it is installed.
+
+Server (Vercel env vars):
+- `ANDROID_CERT_SHA256` — the SHA-256 fingerprint(s) of your release signing key
+  (Play Console → App integrity), comma-separated. Serves `/.well-known/assetlinks.json`.
+- `ANDROID_PACKAGE` — defaults to `com.sambandh.app`.
+- `APPLE_TEAM_ID` (and `IOS_BUNDLE_ID`, default `com.sambandh.app`). Serves
+  `/.well-known/apple-app-site-association`.
+
+Android — `android/app/src/main/AndroidManifest.xml`, inside the main activity:
+```xml
+<intent-filter android:autoVerify="true">
+  <action android:name="android.intent.action.VIEW" />
+  <category android:name="android.intent.category.DEFAULT" />
+  <category android:name="android.intent.category.BROWSABLE" />
+  <data android:scheme="https" android:host="www.sambandh.online" android:pathPrefix="/u/" />
+  <data android:scheme="https" android:host="www.sambandh.online" android:pathPrefix="/app" />
+</intent-filter>
+```
+iOS — Xcode → Signing & Capabilities → **Associated Domains** → `applinks:www.sambandh.online`.
+
+## D. Building for the stores
+- **Google Play:** `npx cap open android` → Build → Generate Signed Bundle (AAB) →
+  upload to Play Console (internal testing first). Declare background location and
+  the data-safety form honestly (location, photos, messages, identity verification).
+- **iOS App Store:** `npx cap open ios` → Product → Archive → upload with Xcode →
+  TestFlight → review. Fill in the privacy nutrition labels to match the data-safety form.
+- **Other Android stores** (Samsung Galaxy Store, Amazon, etc.) accept the same signed
+  APK/AAB; App Links need each store build to be signed with a key listed in
+  `ANDROID_CERT_SHA256`.
+- Keep `appId` as `com.sambandh.app` unless no build has ever been published —
+  changing it later creates a separate app in both stores.

@@ -1,6 +1,6 @@
 // sw.js — Sambandh service worker: PWA installability + offline shell + web push.
-const CACHE = 'sambandh-v1';
-const SHELL = ['/app', '/styles.css?v=2', '/app.js', '/manifest.webmanifest', '/icon-192.png', '/icon-512.png'];
+const CACHE = 'sambandh-setu-v2';
+const SHELL = ['/app', '/styles.css?v=4', '/setu.css?v=3', '/app.js?v=4', '/setu.js?v=3', '/manifest.webmanifest', '/icon-192.png', '/icon-512.png'];
 
 self.addEventListener('install', (event) => {
   self.skipWaiting();
@@ -33,8 +33,8 @@ self.addEventListener('fetch', (event) => {
 
 self.addEventListener('push', (event) => {
   let data = {};
-  try { data = event.data ? event.data.json() : {}; } catch { data = { title: 'Sambandh', body: event.data && event.data.text() }; }
-  const title = data.title || 'Sambandh';
+  try { data = event.data ? event.data.json() : {}; } catch { data = { title: 'Sambandh Setu', body: event.data && event.data.text() }; }
+  const title = data.title || 'Sambandh Setu';
   event.waitUntil(self.registration.showNotification(title, {
     body: data.body || '',
     icon: '/icon-192.png',

@@ -72,6 +72,8 @@ async function deliverNotification(userId, { type, title, body, severity = 'info
         await User.findByIdAndUpdate(userId, { pushSubscriptions: kept });
       }
     }
+    // Native apps (Android / iOS) via FCM — a no-op until FCM is configured.
+    await bestEffort(require('./services/push-mobile').sendToUser(userId, { title, body, data: { type, url: '/app#/notifications' } }), { op: 'notifications:mobile-push' });
     // Email for the things people actually want off-app: matches, moderation, safety.
     if (user?.email && ['new_match', 'account_suspended', 'account_under_review', 'moderation_warning'].includes(type)) {
       await bestEffort(sendEventEmail(user.email, title, body), { op: 'notifications:event-email' });

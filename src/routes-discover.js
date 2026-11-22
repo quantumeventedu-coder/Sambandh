@@ -158,7 +158,7 @@ router.get('/', requireAuth, requireLaunched, async (req, res, next) => {
       // Suspended users are hidden while suspension is in force
       if (u.status?.suspended && (!u.suspension?.endsAt || u.suspension.endsAt > new Date())) continue;
 
-      const karmaScore = bookBy[uid]?.score ?? 100;
+      const karmaScore = bookBy[uid]?.reviewedScore ?? 100;   // public = human-reviewed only (Lakshan)
       if (karmaScore < 40) continue;           // F grade — hidden entirely
       if (wantGrade !== null && karmaScore < wantGrade) continue;
 
@@ -359,7 +359,7 @@ router.get('/profile/:userId', requireAuth, requireLaunched, async (req, res, ne
       Like.findOne({ from: req.userId, to: req.params.userId })
     ]);
 
-    const karmaScore = book?.score ?? 100;
+    const karmaScore = book?.reviewedScore ?? 100;   // public = human-reviewed only (Lakshan)
     const anonymous = !!u.preferences?.anonymousModeEnabled;
     const km = userDistanceKm(me, u);
 

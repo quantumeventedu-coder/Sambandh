@@ -1,15 +1,25 @@
 {
   "appId": "com.sambandh.app",
-  "appName": "Sambandh",
+  "appName": "Sambandh Setu",
   "webDir": "public",
   "server": {
-    "url": "https://sambandh.online",
+    "url": "https://www.sambandh.online",
     "cleartext": false
   },
   "plugins": {
-    "BackgroundGeolocation": {}
+    "BackgroundGeolocation": {},
+    "PushNotifications": {
+      "presentationOptions": [
+        "badge",
+        "sound",
+        "alert"
+      ]
+    }
   },
   "ios": {
     "contentInset": "always"
+  },
+  "android": {
+    "allowMixedContent": false
   }
 }

@@ -248,7 +248,7 @@ function connectSocket() {
 }
 
 // ---------------- Router ----------------
-const TAB_ROUTES = ['discover', 'services', 'community', 'astro', 'chats', 'karma', 'settings', 'notifications'];
+const TAB_ROUTES = ['home', 'discover', 'guide', 'services', 'community', 'astro', 'chats', 'karma', 'settings', 'notifications', 'memory', 'lakshan'];
 
 window.addEventListener('hashchange', route);
 // Offline state (§24): reflect connectivity so the fixed banner shows/hides.
@@ -259,7 +259,7 @@ updateNet();
 
 // Pages locked during pre-launch (the dating surface). Settings/notifications stay
 // open so a waitlisted member can still manage their account.
-const GATED_PAGES = new Set(['discover', 'profile', 'chats', 'chat', 'karma', 'community', 'room', 'astro', 'compat']);
+const GATED_PAGES = new Set(['home', 'discover', 'profile', 'chats', 'chat', 'karma', 'community', 'room', 'astro', 'compat', 'journey', 'reflect']);
 function isGated() {
   return !!(S.config && S.config.prelaunch && S.user && !['admin', 'moderator'].includes(S.user.role));
 }
@@ -339,7 +339,17 @@ async function route() {
     case 'compat': return renderCompat(parts[1]);
     case 'settings': return renderSettings();
     case 'notifications': return renderNotifications();
-    default: return nav(S.token ? '#/discover' : '#/welcome');
+    // Sambandh Setu screens (public/setu.js)
+    case 'home': return renderHome();
+    case 'guide': return renderGuide(parts[1], parts[2], parts[3]);
+    case 'memory': return renderMemory();
+    case 'guide-settings': return renderGuideSettings();
+    case 'public-profile': return renderPublicProfile();
+    case 'journey': return renderJourney(parts[1]);
+    case 'reflect': return renderReflect(parts[1]);
+    case 'lakshan': return renderLakshanAssessments();
+    case 'u': return openPublicProfile(parts[1]);
+    default: return nav(S.token ? '#/home' : '#/welcome');
   }
 }
 
@@ -858,13 +868,13 @@ function obProgress(step) {
 async function refreshUserAndRoute() {
   S.user = (await api('/auth/me')).user;
   loadPricing();   // refresh live localized prices (gender/country now known)
-  if (onboardingStep() === 'done') { markOnboarded(); toast('Profile complete — welcome to Sambandh'); nav('#/discover'); }
+  if (onboardingStep() === 'done') { markOnboarded(); toast('Profile complete — welcome to Sambandh Setu'); nav('#/home'); }
   else renderOnboarding();
 }
 
 function renderOnboarding() {
   const step = onboardingStep();
-  if (step === 'done') { markOnboarded(); return nav('#/discover'); }
+  if (step === 'done') { markOnboarded(); return nav('#/home'); }
   const html = {
     profile: obProfile, id: obId, selfie: obSelfie, profession: obProfession,
     pay: obPay, intent: obIntent, astrology: obAstrology, photos: obPhotos
